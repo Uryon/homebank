@@ -1,4 +1,4 @@
-package com.homebank.model;
+package com.homebank.utils;
 
 public enum AccountType {
     CHECKING,      // Compte courant

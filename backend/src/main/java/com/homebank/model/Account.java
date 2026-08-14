@@ -1,6 +1,7 @@
 package com.homebank.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.homebank.utils.AccountType;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Getter;

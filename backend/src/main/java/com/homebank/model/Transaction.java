@@ -1,5 +1,7 @@
 package com.homebank.model;
 
+import com.homebank.utils.PaymentMode;
+import com.homebank.utils.TransactionStatus;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;

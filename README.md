@@ -1,4 +1,4 @@
-# HomeBank Clone
+# HomeBank
 
 Application de gestion de finances personnelles inspirée de [HomeBank](http://www.homebank.free.fr/),
 avec un backend **Java / Spring Boot** et un frontend **Vue.js 3**.
@@ -19,7 +19,7 @@ virements inter-comptes automatiques, multi-utilisateurs.
 ## Architecture
 
 ```
-homebank-clone/
+homebank/
 ├── backend/     Spring Boot 3 (Java 21), API REST, PostgreSQL via JPA/Hibernate
 └── frontend/    Vue 3 + Vite, Chart.js pour les graphiques
 ```
@@ -103,7 +103,7 @@ Champs reconnus : `D` (date), `T`/`U` (montant), `P` (tiers), `M` (mémo), `L` (
 ```bash
 # Backend : génère un jar exécutable
 cd backend && mvn clean package
-java -jar target/homebank-clone-1.0.0.jar
+java -jar target/homebank-1.0.0.jar
 
 # Frontend : génère les fichiers statiques dans frontend/dist
 cd frontend && npm run build

@@ -1,7 +1,7 @@
 <template>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">◆</span> HomeBank Clone</div>
+      <div class="brand"><span class="brand-mark">◆</span> HomeBank</div>
       <nav>
         <RouterLink to="/" class="nav-item" :class="{ active: $route.name === 'dashboard' }">
           <span class="dot"></span> Tableau de bord

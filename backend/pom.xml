@@ -12,10 +12,10 @@
     </parent>
 
     <groupId>com.homebank</groupId>
-    <artifactId>homebank-clone</artifactId>
+    <artifactId>homebank</artifactId>
     <version>1.0.0</version>
-    <name>homebank-clone</name>
-    <description>Clone de HomeBank - API backend</description>
+    <name>homebank</name>
+    <description>HomeBank - API backend</description>
 
     <properties>
         <java.version>21</java.version>
