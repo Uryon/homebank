@@ -31,7 +31,7 @@
     </div>
 
     <div class="card" style="margin-bottom: 28px;">
-      <div class="stat-label" style="margin-bottom: 16px;">Évolution du solde (30 derniers jours)</div>
+      <div class="stat-label" style="margin-bottom: 16px;">Évolution du solde (12 derniers mois)</div>
       <canvas ref="balanceChart" height="90"></canvas>
     </div>
 
@@ -93,6 +93,31 @@ function daysAgoIso(n) {
   return d.toISOString().slice(0, 10)
 }
 
+// Les 12 derniers mois calendaires déjà terminés
+function last12MonthsRange() {
+  const now = new Date()
+  const from = new Date(now.getFullYear(), now.getMonth() - 12, 1)
+  const to = new Date(now.getFullYear(), now.getMonth(), 0)
+  return {
+    from: from.toISOString().slice(0, 10),
+    to: to.toISOString().slice(0, 10)
+  }
+}
+
+// Regroupe des points journaliers en un point par mois (solde du dernier jour de chaque mois)
+function toMonthlySeries(dailyEvolution) {
+  const byMonth = new Map()
+  for (const point of dailyEvolution) {
+    const key = point.date.slice(0, 7) // "AAAA-MM"
+    byMonth.set(key, point.balance)
+  }
+  return Array.from(byMonth.entries()).map(([key, balance]) => {
+    const [year, month] = key.split('-').map(Number)
+    const label = new Date(year, month - 1, 1).toLocaleDateString('fr-FR', { month: 'short' })
+    return { label: label.charAt(0).toUpperCase() + label.slice(1), balance }
+  })
+}
+
 async function loadDashboard() {
   accounts.value = await AccountsAPI.list()
   balances.value = await AccountsAPI.balances()
@@ -101,9 +126,11 @@ async function loadDashboard() {
   const to = todayIso()
   summary.value = await ReportsAPI.summary({ from, to })
 
-  const evolution = await ReportsAPI.balanceEvolution({ from, to })
+  const chartRange = last12MonthsRange()
+  const dailyEvolution = await ReportsAPI.balanceEvolution(chartRange)
+  const monthlyEvolution = toMonthlySeries(dailyEvolution)
   await nextTick()
-  renderChart(evolution)
+  renderChart(monthlyEvolution)
 }
 
 function renderChart(evolution) {
@@ -111,7 +138,7 @@ function renderChart(evolution) {
   chartInstance = new Chart(balanceChart.value, {
     type: 'line',
     data: {
-      labels: evolution.map(p => p.date.slice(5)),
+      labels: evolution.map(p => p.label),
       datasets: [{
         label: 'Solde',
         data: evolution.map(p => p.balance),
