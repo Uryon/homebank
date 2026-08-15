@@ -30,9 +30,18 @@
           </option>
         </select>
       </div>
+
+      <div class="form-field">
+        <label>Recherche (tiers, dépense, revenu)</label>
+        <input
+          v-model="searchQuery"
+          placeholder="Ex : Carrefour ou 42,50"
+          style="min-width: 240px;"
+        />
+      </div>
     </div>
 
-    <table v-if="transactions.length">
+    <table v-if="filteredTransactions.length">
       <thead>
         <tr>
           <th>Date</th>
@@ -48,7 +57,7 @@
 
       <tbody>
         <tr
-          v-for="t in transactions"
+          v-for="t in filteredTransactions"
           :key="t.id"
         >
           <td>{{ t.date }}</td>
@@ -104,9 +113,11 @@
       class="empty-state"
     >
       {{
-        accounts.length
-          ? 'Aucune transaction pour ce filtre.'
-          : "Créez d'abord un compte pour ajouter des transactions."
+        !accounts.length
+          ? "Créez d'abord un compte pour ajouter des transactions."
+          : searchQuery.trim()
+            ? "Aucune transaction ne correspond à cette recherche."
+            : 'Aucune transaction pour ce filtre.'
       }}
     </div>
 
@@ -287,6 +298,7 @@ const payees = ref([])
 const transactions = ref([])
 
 const filterAccount = ref(null)
+const searchQuery = ref('')
 
 const showModal = ref(false)
 const editing = ref(null)
@@ -307,6 +319,33 @@ function emptyForm() {
     transferTransactionId: null
   }
 }
+
+/**
+ * Filtre les transactions par le texte de recherche : cherche à la fois
+ * dans le tiers (payee) et dans le montant (dépense ou revenu), peu importe
+ * le format saisi (avec virgule, point, signe, ou juste des chiffres).
+ */
+const filteredTransactions = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return transactions.value
+
+  const normalizedQuery = q.replace(',', '.')
+
+  return transactions.value.filter(t => {
+    const payeeMatch = (t.payee || '').toLowerCase().includes(q)
+
+    const rawAmount = String(t.amount ?? '').toLowerCase()
+    const absAmount = String(Math.abs(t.amount ?? 0))
+    const formatted = formatAmount(t.amount).toLowerCase()
+
+    const amountMatch =
+      rawAmount.includes(normalizedQuery) ||
+      absAmount.includes(normalizedQuery) ||
+      formatted.includes(q)
+
+    return payeeMatch || amountMatch
+  })
+})
 
 /**
  * Transforme les catégories en liste plate

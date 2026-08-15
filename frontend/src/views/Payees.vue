@@ -13,7 +13,14 @@
       </div>
     </div>
 
-    <table v-if="payees.length">
+    <div class="toolbar">
+      <div class="form-field">
+        <label>Recherche</label>
+        <input v-model="searchQuery" placeholder="Ex : Carrefour ou Alimentation" style="min-width: 240px;" />
+      </div>
+    </div>
+
+    <table v-if="filteredPayees.length">
       <thead>
         <tr>
           <th>Nom</th>
@@ -24,7 +31,7 @@
         </tr>
       </thead>
       <tbody>
-        <tr v-for="p in payees" :key="p.id">
+        <tr v-for="p in filteredPayees" :key="p.id">
           <td>{{ p.name }}</td>
           <td><code>{{ p.pattern }}</code></td>
           <td class="num">{{ p.amount != null ? formatAmount(p.amount) : 'Tous montants' }}</td>
@@ -37,8 +44,11 @@
       </tbody>
     </table>
     <div v-else class="empty-state">
-      Aucun tiers enregistré. Créez-en un pour catégoriser automatiquement vos imports
-      (ex : nom "Carrefour", regexp <code>(?i)carrefour</code>, catégorie "Alimentation").
+      {{
+        searchQuery.trim()
+          ? 'Aucun tiers ne correspond à cette recherche.'
+          : 'Aucun tiers enregistré. Créez-en un pour catégoriser automatiquement vos imports (ex : nom "Carrefour", regexp (?i)carrefour, catégorie "Alimentation").'
+      }}
     </div>
 
     <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
@@ -83,11 +93,25 @@ const categories = ref([])
 const showModal = ref(false)
 const editing = ref(null)
 const initializing = ref(false)
+const searchQuery = ref('')
 const form = ref(emptyForm())
 
 function emptyForm() {
   return { name: '', pattern: '', amount: null, categoryId: null }
 }
+
+/**
+ * Filtre les tiers par nom, regexp, ou libellé de catégorie associée.
+ */
+const filteredPayees = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return payees.value
+  return payees.value.filter(p =>
+    p.name.toLowerCase().includes(q) ||
+    p.pattern.toLowerCase().includes(q) ||
+    categoryLabel(p.categoryId).toLowerCase().includes(q)
+  )
+})
 
 const flatCategories = computed(() => {
   const roots = categories.value.filter(c => !c.parentId)
