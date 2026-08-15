@@ -1,7 +1,7 @@
 package com.homebank.service;
 
 import com.homebank.model.Account;
-import com.homebank.model.Category;
+import com.homebank.model.Payee;
 import com.homebank.model.Transaction;
 import com.homebank.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
@@ -25,6 +25,7 @@ public class ImportService {
     private final AccountService accountService;
     private final CategoryService categoryService;
     private final TransactionRepository transactionRepository;
+    private final PayeeService payeeService;
 
     private static final List<DateTimeFormatter> DATE_FORMATS = List.of(
             DateTimeFormatter.ofPattern("dd-MM-yy"),
@@ -37,10 +38,31 @@ public class ImportService {
     );
 
     public ImportService(AccountService accountService, CategoryService categoryService,
-                          TransactionRepository transactionRepository) {
+                          TransactionRepository transactionRepository, PayeeService payeeService) {
         this.accountService = accountService;
         this.categoryService = categoryService;
         this.transactionRepository = transactionRepository;
+        this.payeeService = payeeService;
+    }
+
+    /**
+     * Applique a la transaction le tiers (nom canonique, cree automatiquement
+     * si inconnu) et la categorie a partir du texte brut importe :
+     * - le nom stocke sur la transaction est celui du tiers reconnu (donc un
+     *   renommage manuel fait depuis l'onglet "Tiers" est repris automatiquement
+     *   des le prochain import portant sur le meme texte brut) ;
+     * - si le fichier fournit deja une categorie, elle est respectee ;
+     *   sinon, la categorie par defaut du tiers (si definie) est appliquee.
+     */
+    private void applyPayeeAndCategory(Transaction t, String payeeText, String categoryNameFromFile) {
+        Payee payee = payeeService.resolveOrCreate(payeeText);
+        t.setPayee(payee != null ? payee.getName() : payeeText);
+
+        if (categoryNameFromFile != null && !categoryNameFromFile.isBlank()) {
+            t.setCategory(categoryService.findOrCreateByName(categoryNameFromFile));
+        } else if (payee != null) {
+            t.setCategory(payee.getCategory());
+        }
     }
 
     public static class ImportResult {
@@ -88,13 +110,9 @@ public class ImportService {
                     t.setAccount(account);
                     t.setDate(date);
                     t.setAmount(amount);
-                    t.setPayee(payee);
                     t.setMemo(memo);
                     t.setTags(tags);
-                    if (!categoryName.isBlank()) {
-                        Category category = categoryService.findOrCreateByName(categoryName);
-                        t.setCategory(category);
-                    }
+                    applyPayeeAndCategory(t, payee, categoryName);
                     transactionRepository.save(t);
                     result.imported++;
                 } catch (Exception e) {
@@ -178,14 +196,8 @@ public class ImportService {
                             t.setAccount(account);
                             t.setDate(date);
                             t.setAmount(amount);
-                            t.setPayee(payee);
                             t.setMemo(memo);
-
-                            if (categoryName != null && !categoryName.isBlank()) {
-                                t.setCategory(
-                                        categoryService.findOrCreateByName(categoryName)
-                                );
-                            }
+                            applyPayeeAndCategory(t, payee, categoryName);
 
                             transactionRepository.save(t);
                             result.imported++;

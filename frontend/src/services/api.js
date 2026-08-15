@@ -37,6 +37,14 @@ export const ReportsAPI = {
     summary: (params) => api.get('/reports/summary', { params }).then(r => r.data)
 }
 
+export const PayeesAPI = {
+    list: () => api.get('/payees').then(r => r.data),
+    create: (payload) => api.post('/payees', payload).then(r => r.data),
+    update: (id, payload) => api.put(`/payees/${id}`, payload).then(r => r.data),
+    remove: (id) => api.delete(`/payees/${id}`),
+    initializeFromTransactions: () => api.post('/payees/initialize').then(r => r.data)
+}
+
 export const ImportAPI = {
     csv: (file, accountId) => {
         const form = new FormData()

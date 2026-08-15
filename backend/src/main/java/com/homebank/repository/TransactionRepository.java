@@ -24,4 +24,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
 
     @Query("select coalesce(sum(t.amount), 0) from Transaction t where t.account.id = :accountId and t.date <= :asOf")
     BigDecimal sumAmountByAccountIdAsOf(@Param("accountId") Long accountId, @Param("asOf") LocalDate asOf);
+
+    @Query("select distinct t.payee from Transaction t where t.payee is not null and t.payee <> ''")
+    List<String> findDistinctPayees();
 }
