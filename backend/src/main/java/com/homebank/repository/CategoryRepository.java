@@ -8,6 +8,7 @@ import java.util.Optional;
 
 public interface CategoryRepository extends JpaRepository<Category, Long> {
     List<Category> findByParentIsNull();
+    List<Category> findByParent(Category parent);
     Optional<Category> findByNameIgnoreCaseAndParent(String name, Category parent);
     Optional<Category> findByNameIgnoreCaseAndParentIsNull(String name);
 }

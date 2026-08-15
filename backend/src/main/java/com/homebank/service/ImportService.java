@@ -1,6 +1,7 @@
 package com.homebank.service;
 
 import com.homebank.model.Account;
+import com.homebank.model.Category;
 import com.homebank.model.Payee;
 import com.homebank.model.Transaction;
 import com.homebank.repository.TransactionRepository;
@@ -45,35 +46,59 @@ public class ImportService {
         this.payeeService = payeeService;
     }
 
-    /**
-     * Applique a la transaction le tiers (nom canonique, cree automatiquement
-     * si inconnu) et la categorie a partir du texte brut importe :
-     * - le tiers est distingue par son texte brut ET son montant (deux tiers
-     *   de meme texte mais de montants differents sont consideres comme deux
-     *   tiers distincts, cf. PayeeService#resolveOrCreate) ;
-     * - le nom stocke sur la transaction est celui du tiers reconnu (donc un
-     *   renommage manuel fait depuis l'onglet "Tiers" est repris automatiquement
-     *   des le prochain import portant sur le meme texte brut et le meme montant) ;
-     * - si le fichier fournit deja une categorie, elle est respectee ;
-     *   sinon, la categorie par defaut du tiers (si definie) est appliquee.
-     *
-     * IMPORTANT : t.setAmount(...) doit avoir ete appele avant cette methode.
-     */
-    private void applyPayeeAndCategory(Transaction t, String payeeText, String categoryNameFromFile) {
-        Payee payee = payeeService.resolveOrCreate(payeeText, t.getAmount());
-        t.setPayee(payee != null ? payee.getName() : payeeText);
-
-        if (categoryNameFromFile != null && !categoryNameFromFile.isBlank()) {
-            t.setCategory(categoryService.findOrCreateByName(categoryNameFromFile));
-        } else if (payee != null) {
-            t.setCategory(payee.getCategory());
-        }
-    }
-
     public static class ImportResult {
         public int imported;
+        public int duplicates;
         public int skipped;
         public List<String> errors = new ArrayList<>();
+    }
+
+    /**
+     * Determine le tiers canonique (cree automatiquement si inconnu) et la
+     * categorie a appliquer, sans encore creer/sauvegarder la transaction.
+     * Renvoie le tiers resolu (peut etre null si le texte brut est vide).
+     */
+    private Payee resolvePayee(String payeeText, BigDecimal amount) {
+        return payeeService.resolveOrCreate(payeeText, amount);
+    }
+
+    private Category resolveCategory(Payee payee, String categoryNameFromFile) {
+        if (categoryNameFromFile != null && !categoryNameFromFile.isBlank()) {
+            return categoryService.findOrCreateByName(categoryNameFromFile);
+        }
+        return payee != null ? payee.getCategory() : null;
+    }
+
+    /**
+     * Remplace un memo litteralement "(NULL)"/"NULL" ou vide par null, pour
+     * eviter d'afficher cette valeur telle quelle dans l'interface.
+     */
+    private String sanitizeMemo(String memo) {
+        return TransactionService.sanitizeMemo(memo);
+    }
+
+    /**
+     * Detection de doublons, commune aux imports CSV/QIF (et reutilisable
+     * pour une future synchronisation bancaire automatique) :
+     * - si un identifiant externe (fourni par la banque/le fichier) est
+     *   disponible et qu'une transaction du meme compte le porte deja,
+     *   c'est un doublon certain ;
+     * - sinon, on considere qu'il y a doublon si une transaction du meme
+     *   compte, a la meme date, pour le meme montant et le meme tiers
+     *   (canonique, insensible a la casse) existe deja. Cette combinaison
+     *   large (date+montant+tiers) evite de rejeter deux operations
+     *   distinctes qui se ressembleraient partiellement.
+     */
+    private boolean isDuplicate(Long accountId, LocalDate date, BigDecimal amount,
+                                 String canonicalPayee, String externalId) {
+        if (externalId != null && !externalId.isBlank()) {
+            if (transactionRepository.findByAccountIdAndExternalId(accountId, externalId).isPresent()) {
+                return true;
+            }
+        }
+        return !transactionRepository
+                .findPossibleDuplicates(accountId, date, amount, canonicalPayee)
+                .isEmpty();
     }
 
     /**
@@ -105,19 +130,29 @@ public class ImportService {
 
                 try {
                     LocalDate date = parseDate(fields[0].trim());
-                    String payee = fields.length > 3 ? fields[3].trim() : "";
+                    String payeeText = fields.length > 3 ? fields[3].trim() : "";
                     String memo = fields.length > 4 ? fields[4].trim() : "";
                     BigDecimal amount = parseAmount(fields[5].trim());
                     String categoryName = fields.length > 6 ? fields[6].trim() : "";
                     String tags = fields.length > 7 ? fields[7].trim() : "";
 
+                    Payee payee = resolvePayee(payeeText, amount);
+                    String canonicalPayee = payee != null ? payee.getName() : payeeText;
+
+                    if (isDuplicate(accountId, date, amount, canonicalPayee, null)) {
+                        result.duplicates++;
+                        continue;
+                    }
+
                     Transaction t = new Transaction();
                     t.setAccount(account);
                     t.setDate(date);
                     t.setAmount(amount);
-                    t.setMemo(memo);
+                    t.setMemo(sanitizeMemo(memo));
                     t.setTags(tags);
-                    applyPayeeAndCategory(t, payee, categoryName);
+                    t.setPayee(canonicalPayee);
+                    t.setCategory(resolveCategory(payee, categoryName));
+                    t.setValidated(false); // toute transaction importee demarre "en attente"
                     transactionRepository.save(t);
                     result.imported++;
                 } catch (Exception e) {
@@ -146,7 +181,7 @@ public class ImportService {
             String line;
             LocalDate date = null;
             BigDecimal amount = null;
-            String payee = null;
+            String payeeText = null;
             String memo = null;
             String categoryName = null;
             int lineNumber = 0;
@@ -182,7 +217,7 @@ public class ImportService {
 
                     case 'T', 'U' -> amount = parseAmount(value);
 
-                    case 'P' -> payee = value;
+                    case 'P' -> payeeText = value;
 
                     case 'M' -> memo = value;
 
@@ -197,15 +232,24 @@ public class ImportService {
                                 );
                             }
 
-                            Transaction t = new Transaction();
-                            t.setAccount(account);
-                            t.setDate(date);
-                            t.setAmount(amount);
-                            t.setMemo(memo);
-                            applyPayeeAndCategory(t, payee, categoryName);
+                            Payee payee = resolvePayee(payeeText, amount);
+                            String canonicalPayee = payee != null ? payee.getName() : payeeText;
 
-                            transactionRepository.save(t);
-                            result.imported++;
+                            if (isDuplicate(accountId, date, amount, canonicalPayee, null)) {
+                                result.duplicates++;
+                            } else {
+                                Transaction t = new Transaction();
+                                t.setAccount(account);
+                                t.setDate(date);
+                                t.setAmount(amount);
+                                t.setMemo(sanitizeMemo(memo));
+                                t.setPayee(canonicalPayee);
+                                t.setCategory(resolveCategory(payee, categoryName));
+                                t.setValidated(false);
+
+                                transactionRepository.save(t);
+                                result.imported++;
+                            }
 
                         } catch (Exception e) {
                             result.skipped++;
@@ -219,7 +263,7 @@ public class ImportService {
                             // Réinitialisation pour la prochaine transaction
                             date = null;
                             amount = null;
-                            payee = null;
+                            payeeText = null;
                             memo = null;
                             categoryName = null;
                         }

@@ -59,4 +59,29 @@ public class Transaction {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "transfer_transaction_id")
     private Transaction transferTransaction;
+
+    /**
+     * Statut de rapprochement : false = "en attente" (import, ajout manuel ou
+     * future synchronisation bancaire), true = "validee" par l'utilisateur
+     * apres verification. Sert de base a la fonctionnalite de rapprochement
+     * bancaire (section "Transactions en attente de validation").
+     */
+    @Column(nullable = false)
+    private boolean validated = false;
+
+    /**
+     * Coche par l'utilisateur pour indiquer une depense mensuelle recurrente
+     * (loyer, abonnements, assurances...), utilisee pour l'encart
+     * "Depenses mensuelles" du tableau de bord.
+     */
+    @Column(nullable = false)
+    private boolean monthlyExpense = false;
+
+    /**
+     * Identifiant unique fourni par la banque ou le fichier importe (si
+     * disponible), utilise en priorite pour la detection de doublons lors
+     * des imports CSV/QIF ou d'une future synchronisation bancaire.
+     */
+    @Column(name = "external_id")
+    private String externalId;
 }

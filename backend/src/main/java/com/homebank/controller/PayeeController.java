@@ -1,5 +1,6 @@
 package com.homebank.controller;
 
+import com.homebank.dto.MergeRequestDTO;
 import com.homebank.dto.PayeeDTO;
 import com.homebank.service.PayeeService;
 import org.springframework.http.ResponseEntity;
@@ -51,5 +52,15 @@ public class PayeeController {
     @PostMapping("/initialize")
     public Map<String, Integer> initializeFromExistingTransactions() {
         return payeeService.initializeFromExistingTransactions();
+    }
+
+    /**
+     * Fusionne plusieurs tiers dans un tiers cible : toutes les transactions
+     * des tiers source sont renommees vers la cible, puis les tiers source
+     * sont supprimes. Operation atomique.
+     */
+    @PostMapping("/merge")
+    public PayeeDTO merge(@RequestBody MergeRequestDTO request) {
+        return payeeService.merge(request.getSourceIds(), request.getTargetId());
     }
 }

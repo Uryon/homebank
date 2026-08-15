@@ -142,8 +142,8 @@ function renderChart(evolution) {
       datasets: [{
         label: 'Solde',
         data: evolution.map(p => p.balance),
-        borderColor: '#4FD1A5',
-        backgroundColor: 'rgba(79, 209, 165, 0.12)',
+        borderColor: '#1F9D6C',
+        backgroundColor: 'rgba(31, 157, 108, 0.10)',
         fill: true,
         tension: 0.25,
         pointRadius: 0,
@@ -154,8 +154,8 @@ function renderChart(evolution) {
       responsive: true,
       plugins: { legend: { display: false } },
       scales: {
-        x: { grid: { color: '#2A3644' }, ticks: { color: '#8B98A8' } },
-        y: { grid: { color: '#2A3644' }, ticks: { color: '#8B98A8' } }
+        x: { grid: { color: '#E2E6EE' }, ticks: { color: '#67707C' } },
+        y: { grid: { color: '#E2E6EE' }, ticks: { color: '#67707C' } }
       }
     }
   })

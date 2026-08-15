@@ -1,6 +1,7 @@
 package com.homebank.controller;
 
 import com.homebank.dto.TransactionDTO;
+import com.homebank.dto.TransferRequestDTO;
 import com.homebank.service.TransactionService;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -8,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/transactions")
@@ -42,6 +44,39 @@ public class TransactionController {
             System.out.println(e.toString());
             return null;
         }
+    }
+
+    /** Transactions en attente de validation (rapprochement bancaire). */
+    @GetMapping("/pending")
+    public List<TransactionDTO> findPending() {
+        return transactionService.findPending();
+    }
+
+    @GetMapping("/pending-count")
+    public Map<String, Long> countPending() {
+        return Map.of("count", transactionService.countPending());
+    }
+
+    /** Passe toutes les transactions en attente au statut "validee". */
+    @PostMapping("/validate-all")
+    public Map<String, Integer> validateAll() {
+        return Map.of("validated", transactionService.validateAllPending());
+    }
+
+    @PostMapping("/{id}/toggle-validated")
+    public TransactionDTO toggleValidated(@PathVariable Long id) {
+        return transactionService.toggleValidated(id);
+    }
+
+    @PostMapping("/{id}/toggle-monthly-expense")
+    public TransactionDTO toggleMonthlyExpense(@PathVariable Long id) {
+        return transactionService.toggleMonthlyExpense(id);
+    }
+
+    /** Cree un virement entre deux comptes (deux transactions liees). */
+    @PostMapping("/transfer")
+    public List<TransactionDTO> createTransfer(@RequestBody TransferRequestDTO request) {
+        return transactionService.createTransfer(request);
     }
 
     @GetMapping("/{id}")

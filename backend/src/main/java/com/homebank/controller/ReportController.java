@@ -49,4 +49,24 @@ public class ReportController {
             @RequestParam(required = false) Long accountId) {
         return reportService.summary(from, to, accountId);
     }
+
+    /** Epargne mensuelle (revenus - depenses) sur les N derniers mois termines. */
+    @GetMapping("/monthly-savings")
+    public List<Map<String, Object>> monthlySavings(
+            @RequestParam(required = false, defaultValue = "12") int months,
+            @RequestParam(required = false) Long accountId) {
+        return reportService.monthlySavings(months, accountId);
+    }
+
+    /** Solde : 12 mois historiques + present + 12 mois prevus. */
+    @GetMapping("/balance-forecast")
+    public List<Map<String, Object>> balanceForecast(@RequestParam(required = false) Long accountId) {
+        return reportService.balanceForecast(accountId);
+    }
+
+    /** Total des transactions marquees "depense mensuelle". */
+    @GetMapping("/monthly-expenses")
+    public Map<String, Object> monthlyExpenses() {
+        return reportService.monthlyExpensesSummary();
+    }
 }

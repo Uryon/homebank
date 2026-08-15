@@ -181,4 +181,39 @@ public class PayeeService {
         summary.put("alreadyKnown", alreadyKnown);
         return summary;
     }
+
+    /**
+     * Fusionne plusieurs tiers (sourceIds) dans un tiers cible (targetId) :
+     * - toutes les transactions dont le tiers correspondait a une source
+     *   (texte exact, insensible a la casse) sont renommees vers le nom
+     *   du tiers cible ;
+     * - les regexp des tiers source sont combinees a celle de la cible
+     *   (alternation) pour que les futurs imports reconnaissant l'un ou
+     *   l'autre texte continuent d'aboutir au tiers fusionne ;
+     * - la categorie de la cible est completee avec celle d'une source si
+     *   la cible n'en avait pas encore ;
+     * - les tiers source sont supprimes.
+     * Operation atomique : tout est annule en cas d'erreur.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public PayeeDTO merge(List<Long> sourceIds, Long targetId) {
+        Payee target = findEntityById(targetId);
+
+        for (Long sourceId : sourceIds) {
+            if (sourceId == null || sourceId.equals(targetId)) continue;
+            Payee source = findEntityById(sourceId);
+
+            transactionRepository.renamePayeeText(source.getName(), target.getName());
+
+            target.setPattern(target.getPattern() + "|" + source.getPattern());
+
+            if (target.getCategory() == null && source.getCategory() != null) {
+                target.setCategory(source.getCategory());
+            }
+
+            payeeRepository.delete(source);
+        }
+
+        return payeeMapper.toDTO(payeeRepository.save(target));
+    }
 }

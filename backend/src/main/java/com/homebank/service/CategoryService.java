@@ -2,7 +2,10 @@ package com.homebank.service;
 
 import com.homebank.model.Category;
 import com.homebank.repository.CategoryRepository;
+import com.homebank.repository.PayeeRepository;
+import com.homebank.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -12,9 +15,15 @@ import java.util.Optional;
 public class CategoryService {
 
     private final CategoryRepository categoryRepository;
+    private final TransactionRepository transactionRepository;
+    private final PayeeRepository payeeRepository;
 
-    public CategoryService(CategoryRepository categoryRepository) {
+    public CategoryService(CategoryRepository categoryRepository,
+                            TransactionRepository transactionRepository,
+                            PayeeRepository payeeRepository) {
         this.categoryRepository = categoryRepository;
+        this.transactionRepository = transactionRepository;
+        this.payeeRepository = payeeRepository;
     }
 
     public List<Category> findAll() {
@@ -57,6 +66,36 @@ public class CategoryService {
 
     public void delete(Long id) {
         categoryRepository.deleteById(id);
+    }
+
+    /**
+     * Fusionne plusieurs categories (sourceIds) dans une categorie cible (targetId) :
+     * - toutes les transactions des categories source sont reaffectees a la cible ;
+     * - tous les tiers dont la categorie par defaut etait une source sont reaffectes a la cible ;
+     * - les sous-categories des categories source sont reparentees sous la cible ;
+     * - les categories source sont supprimees.
+     */
+    @Transactional
+    public Category merge(List<Long> sourceIds, Long targetId) {
+        Category target = findById(targetId);
+
+        for (Long sourceId : sourceIds) {
+            if (sourceId == null || sourceId.equals(targetId)) continue;
+            Category source = findById(sourceId);
+
+            transactionRepository.reassignCategory(source, target);
+            payeeRepository.reassignCategory(source, target);
+
+            List<Category> children = categoryRepository.findByParent(source);
+            for (Category child : children) {
+                child.setParent(target);
+            }
+            categoryRepository.saveAll(children);
+
+            categoryRepository.delete(source);
+        }
+
+        return target;
     }
 
     /** Recherche (ou creation) d'une categorie par son nom, utilisee lors de l'import */

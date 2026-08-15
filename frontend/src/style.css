@@ -1,27 +1,51 @@
 @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
+/*
+  Palette inspirée YNAB : sidebar sombre (identité conservée) + zone de
+  contenu claire et aérée. Les noms de variables historiques (--ink-*) sont
+  conservés pour ne pas casser les composants existants qui les référencent,
+  mais leurs VALEURS ont été basculées vers un thème clair : --ink-950 est
+  désormais le fond de page (très clair), --ink-900 la couleur des cartes
+  (blanc), etc. Considérez-les comme des "niveaux de surface", pas comme des
+  teintes sombres au sens littéral.
+*/
 :root {
-    /* Palette "grand livre" - encre profonde + accents ledger */
-    --ink-950: #0D1117;
-    --ink-900: #131A22;
-    --ink-800: #1B242F;
-    --ink-700: #263140;
-    --ink-600: #384556;
-    --line: #2A3644;
+    /* Niveaux de surface (clair) */
+    --ink-950: #F5F6FA;   /* fond de page */
+    --ink-900: #FFFFFF;   /* cartes, modales, tableaux */
+    --ink-800: #F1F3F8;   /* survol, fond des champs de formulaire */
+    --ink-700: #E8EBF2;   /* fond des badges/pastilles */
+    --ink-600: #CBD2DE;   /* bordures plus marquées */
+    --line: #E2E6EE;      /* bordures standard */
 
-    --text-primary: #E9EEF3;
-    --text-muted: #8B98A8;
-    --text-faint: #5C6B7D;
+    --text-primary: #1B2430;
+    --text-muted: #67707C;
+    --text-faint: #98A2AE;
 
-    --mint: #4FD1A5;      /* revenus / positif */
-    --mint-dim: #285142;
-    --coral: #E8735C;     /* depenses / negatif */
-    --coral-dim: #4A2C26;
-    --amber: #E8B34F;     /* alertes / budget */
-    --azure: #5B8DEF;     /* actions / liens */
+    --mint: #1F9D6C;       /* revenus / positif */
+    --mint-dim: #E1F5EA;
+    --coral: #D64545;      /* depenses / negatif */
+    --coral-dim: #FBEAEA;
+    --amber: #C98A1B;      /* alertes / budget */
+    --amber-dim: #FBF0DE;
+    --azure: #3B6FE0;      /* actions / liens / focus */
+    --azure-dim: #E8EEFC;
 
-    --radius-sm: 6px;
-    --radius-md: 10px;
+    --shadow-sm: 0 1px 2px rgba(23, 32, 46, 0.06);
+    --shadow-md: 0 4px 16px rgba(23, 32, 46, 0.08);
+    --shadow-lg: 0 12px 32px rgba(23, 32, 46, 0.14);
+
+    /* Sidebar : reste sombre, c'est l'identité visuelle de l'app */
+    --sidebar-bg: #101827;
+    --sidebar-border: rgba(255, 255, 255, 0.07);
+    --sidebar-text: #93A0B4;
+    --sidebar-text-active: #FFFFFF;
+    --sidebar-hover-bg: rgba(255, 255, 255, 0.06);
+    --sidebar-active-bg: rgba(52, 211, 153, 0.14);
+    --sidebar-accent: #34D399;
+
+    --radius-sm: 8px;
+    --radius-md: 12px;
     --radius-lg: 16px;
 
     --font-ui: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -54,6 +78,19 @@ input, select, textarea {
     font-family: var(--font-ui);
 }
 
+:focus-visible {
+    outline: 2px solid var(--azure);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+input[type="checkbox"] {
+    accent-color: var(--azure);
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
 .amount {
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
@@ -69,12 +106,17 @@ input, select, textarea {
     min-height: 100vh;
 }
 
+/* --- Sidebar : identité sombre conservée --- */
 .sidebar {
-    background: var(--ink-900);
-    border-right: 1px solid var(--line);
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
     padding: 28px 18px;
     display: flex;
     flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
 }
 
 .brand {
@@ -82,14 +124,14 @@ input, select, textarea {
     font-size: 14px;
     letter-spacing: 0.14em;
     text-transform: uppercase;
-    color: var(--text-faint);
+    color: var(--sidebar-text);
     padding: 0 10px 26px;
     display: flex;
     align-items: baseline;
     gap: 8px;
 }
 .brand .brand-mark {
-    color: var(--mint);
+    color: var(--sidebar-accent);
     font-size: 18px;
 }
 
@@ -99,22 +141,23 @@ input, select, textarea {
     gap: 10px;
     padding: 10px 12px;
     border-radius: var(--radius-sm);
-    color: var(--text-muted);
+    color: var(--sidebar-text);
     font-size: 14px;
     font-weight: 600;
     margin-bottom: 2px;
     transition: background 0.15s, color 0.15s;
 }
-.nav-item:hover { background: var(--ink-800); color: var(--text-primary); }
-.nav-item.active { background: var(--ink-800); color: var(--mint); }
+.nav-item:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-active); }
+.nav-item.active { background: var(--sidebar-active-bg); color: var(--sidebar-accent); }
 .nav-item .dot {
     width: 6px; height: 6px; border-radius: 50%;
-    background: currentColor; opacity: 0.6;
+    background: currentColor; opacity: 0.7;
 }
 
+/* --- Contenu principal : clair et aéré --- */
 .main-content {
     padding: 32px 40px 60px;
-    max-width: 1200px;
+    max-width: 1600px;
 }
 
 .page-header {
@@ -130,6 +173,7 @@ input, select, textarea {
     font-weight: 800;
     margin: 0 0 4px;
     letter-spacing: -0.01em;
+    color: var(--text-primary);
 }
 .page-header .subtitle {
     color: var(--text-muted);
@@ -141,6 +185,7 @@ input, select, textarea {
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
     padding: 22px;
+    box-shadow: var(--shadow-sm);
 }
 
 .card-grid {
@@ -163,12 +208,14 @@ input, select, textarea {
     font-size: 26px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
 }
 
 table {
     width: 100%;
     border-collapse: collapse;
     font-size: 14px;
+    background: var(--ink-900);
 }
 thead th {
     text-align: left;
@@ -177,42 +224,61 @@ thead th {
     letter-spacing: 0.06em;
     color: var(--text-faint);
     font-weight: 700;
-    padding: 0 12px 10px;
+    padding: 12px;
     border-bottom: 1px solid var(--line);
+    background: var(--ink-800);
 }
 tbody td {
     padding: 12px;
     border-bottom: 1px solid var(--line);
     color: var(--text-primary);
 }
+tbody tr {
+    transition: background 0.1s;
+}
 tbody tr:hover { background: var(--ink-800); }
 tbody tr:last-child td { border-bottom: none; }
 td.num, th.num { text-align: right; }
+
+/* Table "nue" (hors .table-scroll) : bordure + arrondi + ombre cohérents */
+table:not(.transactions-table):not(.payees-table) {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+}
 
 .btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     background: var(--mint);
-    color: var(--ink-950);
+    color: #FFFFFF;
     border: none;
     padding: 10px 16px;
     border-radius: var(--radius-sm);
     font-weight: 700;
     font-size: 14px;
-    transition: opacity 0.15s;
+    transition: opacity 0.15s, box-shadow 0.15s, transform 0.05s;
+    box-shadow: var(--shadow-sm);
 }
-.btn:hover { opacity: 0.88; }
+.btn:hover { opacity: 0.92; box-shadow: var(--shadow-md); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 .btn.secondary {
-    background: transparent;
+    background: var(--ink-900);
     color: var(--text-primary);
     border: 1px solid var(--line);
+    box-shadow: none;
 }
+.btn.secondary:hover { background: var(--ink-800); box-shadow: none; }
 .btn.danger {
-    background: transparent;
+    background: var(--ink-900);
     color: var(--coral);
     border: 1px solid var(--coral-dim);
+    box-shadow: none;
 }
+.btn.danger:hover { background: var(--coral-dim); box-shadow: none; }
 
 .badge {
     display: inline-block;
@@ -223,9 +289,9 @@ td.num, th.num { text-align: right; }
     text-transform: uppercase;
     letter-spacing: 0.04em;
 }
-.badge.checking { background: var(--ink-700); color: var(--azure); }
+.badge.checking { background: var(--azure-dim); color: var(--azure); }
 .badge.savings { background: var(--mint-dim); color: var(--mint); }
-.badge.cash { background: var(--ink-700); color: var(--amber); }
+.badge.cash { background: var(--amber-dim); color: var(--amber); }
 .badge.credit_card { background: var(--coral-dim); color: var(--coral); }
 .badge.investment { background: var(--ink-700); color: var(--text-primary); }
 
@@ -247,15 +313,32 @@ td.num, th.num { text-align: right; }
     padding: 9px 11px;
     color: var(--text-primary);
     font-size: 14px;
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
 .form-field input:focus, .form-field select:focus, .form-field textarea:focus {
-    outline: 2px solid var(--azure);
-    outline-offset: 1px;
+    outline: none;
+    border-color: var(--azure);
+    box-shadow: 0 0 0 3px var(--azure-dim);
+}
+
+/* Champs "nus" en édition inline dans les tableaux (pas dans .form-field) */
+table input:not([type="checkbox"]), table select {
+    background: var(--ink-800);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    padding: 7px 9px;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+table input:not([type="checkbox"]):focus, table select:focus {
+    outline: none;
+    border-color: var(--azure);
+    box-shadow: 0 0 0 3px var(--azure-dim);
 }
 
 .modal-overlay {
     position: fixed; inset: 0;
-    background: rgba(6, 9, 13, 0.7);
+    background: rgba(16, 24, 39, 0.45);
     display: flex; align-items: center; justify-content: center;
     z-index: 50;
 }
@@ -268,13 +351,17 @@ td.num, th.num { text-align: right; }
     max-width: 92vw;
     max-height: 88vh;
     overflow-y: auto;
+    box-shadow: var(--shadow-lg);
 }
-.modal h2 { margin-top: 0; font-size: 18px; }
+.modal h2 { margin-top: 0; font-size: 18px; color: var(--text-primary); }
 
 .empty-state {
     text-align: center;
     padding: 60px 20px;
     color: var(--text-muted);
+    background: var(--ink-900);
+    border: 1px dashed var(--line);
+    border-radius: var(--radius-lg);
 }
 
 .toolbar {
@@ -285,6 +372,15 @@ td.num, th.num { text-align: right; }
     flex-wrap: wrap;
 }
 
+code {
+    background: var(--ink-800);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--text-muted);
+}
+
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--ink-950); }
-::-webkit-scrollbar-thumb { background: var(--ink-700); border-radius: 6px; }
+::-webkit-scrollbar-thumb { background: var(--ink-600); border-radius: 6px; }

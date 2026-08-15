@@ -78,7 +78,7 @@ const expenseCanvas = ref(null)
 const incomeCanvas = ref(null)
 let balanceChart, expenseChart, incomeChart
 
-const PALETTE = ['#4FD1A5', '#E8735C', '#5B8DEF', '#E8B34F', '#9B8CF2', '#4FBEE8', '#E86FA8', '#8CE84F']
+const PALETTE = ['#1F9D6C', '#D64545', '#3B6FE0', '#C98A1B', '#8B6FE0', '#2CA8C9', '#D6559A', '#6FAF2C']
 
 function firstOfMonthIso() {
   const d = new Date()
@@ -112,8 +112,8 @@ function renderBalanceChart(evolution) {
       labels: evolution.map(p => p.date.slice(5)),
       datasets: [{
         data: evolution.map(p => p.balance),
-        borderColor: '#5B8DEF',
-        backgroundColor: 'rgba(91, 141, 239, 0.12)',
+        borderColor: '#3B6FE0',
+        backgroundColor: 'rgba(59, 111, 224, 0.10)',
         fill: true, tension: 0.25, pointRadius: 0, borderWidth: 2
       }]
     },
@@ -121,8 +121,8 @@ function renderBalanceChart(evolution) {
       responsive: true,
       plugins: { legend: { display: false } },
       scales: {
-        x: { grid: { color: '#2A3644' }, ticks: { color: '#8B98A8' } },
-        y: { grid: { color: '#2A3644' }, ticks: { color: '#8B98A8' } }
+        x: { grid: { color: '#E2E6EE' }, ticks: { color: '#67707C' } },
+        y: { grid: { color: '#E2E6EE' }, ticks: { color: '#67707C' } }
       }
     }
   })
@@ -138,14 +138,14 @@ function renderPieChart(canvasRef, existing, data, setter) {
       datasets: [{
         data: data.map(d => d.total),
         backgroundColor: data.map((_, i) => PALETTE[i % PALETTE.length]),
-        borderColor: '#131A22',
+        borderColor: '#FFFFFF',
         borderWidth: 2
       }]
     },
     options: {
       responsive: true,
       plugins: {
-        legend: { position: 'right', labels: { color: '#E9EEF3', boxWidth: 12, font: { size: 11 } } }
+        legend: { position: 'right', labels: { color: '#1B2430', boxWidth: 12, font: { size: 11 } } }
       }
     }
   })

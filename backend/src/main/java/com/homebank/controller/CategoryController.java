@@ -1,5 +1,6 @@
 package com.homebank.controller;
 
+import com.homebank.dto.MergeRequestDTO;
 import com.homebank.model.Category;
 import com.homebank.service.CategoryService;
 import org.springframework.http.ResponseEntity;
@@ -46,5 +47,15 @@ public class CategoryController {
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         categoryService.delete(id);
         return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * Fusionne plusieurs categories dans une categorie cible : toutes les
+     * transactions et sous-categories des categories source sont reaffectees
+     * a la cible, puis les categories source sont supprimees. Operation atomique.
+     */
+    @PostMapping("/merge")
+    public Category merge(@RequestBody MergeRequestDTO request) {
+        return categoryService.merge(request.getSourceIds(), request.getTargetId());
     }
 }

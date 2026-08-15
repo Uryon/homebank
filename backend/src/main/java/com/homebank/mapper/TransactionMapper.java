@@ -26,6 +26,9 @@ public class TransactionMapper {
                 .transferTransactionId(transaction.getTransferTransaction() != null
                         ? transaction.getTransferTransaction().getId()
                         : null)
+                .validated(transaction.isValidated())
+                .monthlyExpense(transaction.isMonthlyExpense())
+                .externalId(transaction.getExternalId())
                 .build();
     }
 }
