@@ -12,6 +12,7 @@ public class PayeeMapper {
                 .id(payee.getId())
                 .name(payee.getName())
                 .pattern(payee.getPattern())
+                .amount(payee.getAmount())
                 .categoryId(payee.getCategory() != null
                         ? payee.getCategory().getId()
                         : null)

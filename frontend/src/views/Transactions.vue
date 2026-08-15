@@ -66,7 +66,7 @@
           </td>
 
           <td>
-            {{ t.memo }}
+            {{ t.memo || '' }}
           </td>
 
           <!-- Dépense -->
@@ -158,8 +158,17 @@
 
             <input
               v-model="form.payee"
+              list="payee-options"
+              autocomplete="off"
               placeholder="Ex : Supermarché"
             />
+            <datalist id="payee-options">
+              <option
+                v-for="p in payees"
+                :key="p.id"
+                :value="p.name"
+              />
+            </datalist>
           </div>
 
           <!-- Montant -->
@@ -177,19 +186,19 @@
           <div class="form-field">
             <label>Catégorie</label>
 
-            <select v-model.number="form.categoryId">
-              <option :value="null">
-                Non catégorisé
-              </option>
-
+            <input
+              v-model="form.categoryName"
+              list="category-options"
+              autocomplete="off"
+              placeholder="Tapez pour rechercher, ou laissez vide"
+            />
+            <datalist id="category-options">
               <option
                 v-for="c in flatCategories"
                 :key="c.id"
-                :value="c.id"
-              >
-                {{ c.label }}
-              </option>
-            </select>
+                :value="c.label"
+              />
+            </datalist>
           </div>
 
           <!-- Mode de paiement -->
@@ -268,11 +277,13 @@ import { ref, onMounted, computed } from 'vue'
 import {
   AccountsAPI,
   CategoriesAPI,
+  PayeesAPI,
   TransactionsAPI
 } from '../services/api'
 
 const accounts = ref([])
 const categories = ref([])
+const payees = ref([])
 const transactions = ref([])
 
 const filterAccount = ref(null)
@@ -288,7 +299,7 @@ function emptyForm() {
     date: new Date().toISOString().slice(0, 10),
     payee: '',
     amount: 0,
-    categoryId: null,
+    categoryName: '',
     paymentMode: 'NONE',
     status: 'NONE',
     memo: '',
@@ -396,6 +407,20 @@ async function load() {
 async function loadRefs() {
   accounts.value = await AccountsAPI.list()
   categories.value = await CategoriesAPI.list()
+  payees.value = await PayeesAPI.list()
+}
+
+/**
+ * Résout un libellé de catégorie tapé/sélectionné (ex : "Alimentation : Supermarché")
+ * vers l'ID de la catégorie existante correspondante. Renvoie null si vide
+ * ou si aucune catégorie existante ne correspond exactement (on ne crée pas
+ * de nouvelle catégorie depuis ce champ).
+ */
+function resolveCategoryId(typedLabel) {
+  if (!typedLabel || !typedLabel.trim()) return null
+  const trimmed = typedLabel.trim().toLowerCase()
+  const match = flatCategories.value.find(c => c.label.toLowerCase() === trimmed)
+  return match ? match.id : null
 }
 
 /**
@@ -418,12 +443,14 @@ function openCreate() {
 function openEdit(transaction) {
   editing.value = transaction
 
+  const label = categoryLabel(transaction.categoryId)
+
   form.value = {
     accountId: transaction.accountId,
     date: transaction.date,
     payee: transaction.payee || '',
     amount: transaction.amount,
-    categoryId: transaction.categoryId ?? null,
+    categoryName: label === '—' ? '' : label,
     paymentMode: transaction.paymentMode || 'NONE',
     status: transaction.status || 'NONE',
     memo: transaction.memo || '',
@@ -449,7 +476,7 @@ async function save() {
     date: form.value.date,
     payee: form.value.payee,
     amount: form.value.amount,
-    categoryId: form.value.categoryId,
+    categoryId: resolveCategoryId(form.value.categoryName),
     paymentMode: form.value.paymentMode,
     status: form.value.status,
     memo: form.value.memo,

@@ -18,6 +18,7 @@
         <tr>
           <th>Nom</th>
           <th>Regexp de reconnaissance</th>
+          <th class="num">Montant</th>
           <th>Catégorie associée</th>
           <th></th>
         </tr>
@@ -26,6 +27,7 @@
         <tr v-for="p in payees" :key="p.id">
           <td>{{ p.name }}</td>
           <td><code>{{ p.pattern }}</code></td>
+          <td class="num">{{ p.amount != null ? formatAmount(p.amount) : 'Tous montants' }}</td>
           <td>{{ categoryLabel(p.categoryId) }}</td>
           <td>
             <button class="btn secondary" style="margin-right: 6px;" @click="openEdit(p)">Modifier</button>
@@ -50,6 +52,10 @@
           <div class="form-field" style="grid-column: span 2;">
             <label>Regexp de reconnaissance (testée sur le champ "tiers" importé)</label>
             <input v-model="form.pattern" placeholder="Ex : (?i)carrefour|market" />
+          </div>
+          <div class="form-field" style="grid-column: span 2;">
+            <label>Montant associé (laisser vide = s'applique à tous les montants)</label>
+            <input v-model.number="form.amount" type="number" step="0.01" min="0" placeholder="Ex : 10 (pour distinguer de 20€, etc.)" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label>Catégorie à appliquer automatiquement</label>
@@ -80,15 +86,15 @@ const initializing = ref(false)
 const form = ref(emptyForm())
 
 function emptyForm() {
-  return { name: '', pattern: '', categoryId: null }
+  return { name: '', pattern: '', amount: null, categoryId: null }
 }
 
 const flatCategories = computed(() => {
-  const roots = categories.value.filter(c => !c.parent)
+  const roots = categories.value.filter(c => !c.parentId)
   const result = []
   for (const root of roots) {
     result.push({ id: root.id, label: root.name })
-    const children = categories.value.filter(c => c.parent?.id === root.id)
+    const children = categories.value.filter(c => c.parentId === root.id)
     for (const child of children) {
       result.push({ id: child.id, label: `${root.name} : ${child.name}` })
     }
@@ -99,6 +105,10 @@ const flatCategories = computed(() => {
 function categoryLabel(categoryId) {
   if (!categoryId) return '—'
   return flatCategories.value.find(c => c.id === categoryId)?.label || '—'
+}
+
+function formatAmount(v) {
+  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v || 0)
 }
 
 async function load() {
@@ -117,7 +127,7 @@ function openCreate() {
 
 function openEdit(payee) {
   editing.value = payee
-  form.value = { name: payee.name, pattern: payee.pattern, categoryId: payee.categoryId }
+  form.value = { name: payee.name, pattern: payee.pattern, amount: payee.amount, categoryId: payee.categoryId }
   showModal.value = true
 }
 

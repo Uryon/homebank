@@ -48,14 +48,19 @@ public class ImportService {
     /**
      * Applique a la transaction le tiers (nom canonique, cree automatiquement
      * si inconnu) et la categorie a partir du texte brut importe :
+     * - le tiers est distingue par son texte brut ET son montant (deux tiers
+     *   de meme texte mais de montants differents sont consideres comme deux
+     *   tiers distincts, cf. PayeeService#resolveOrCreate) ;
      * - le nom stocke sur la transaction est celui du tiers reconnu (donc un
      *   renommage manuel fait depuis l'onglet "Tiers" est repris automatiquement
-     *   des le prochain import portant sur le meme texte brut) ;
+     *   des le prochain import portant sur le meme texte brut et le meme montant) ;
      * - si le fichier fournit deja une categorie, elle est respectee ;
      *   sinon, la categorie par defaut du tiers (si definie) est appliquee.
+     *
+     * IMPORTANT : t.setAmount(...) doit avoir ete appele avant cette methode.
      */
     private void applyPayeeAndCategory(Transaction t, String payeeText, String categoryNameFromFile) {
-        Payee payee = payeeService.resolveOrCreate(payeeText);
+        Payee payee = payeeService.resolveOrCreate(payeeText, t.getAmount());
         t.setPayee(payee != null ? payee.getName() : payeeText);
 
         if (categoryNameFromFile != null && !categoryNameFromFile.isBlank()) {

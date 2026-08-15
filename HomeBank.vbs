@@ -16,16 +16,16 @@ jarPath = "G:\git\homebank\backend\target\homebank-1.0.0.jar"
 ' POSTGRESQL
 ' =========================================================
 
-shell.Run "cmd /c net start postgresql-x64-18 >nul 2>&1", 0, False
+shell.Run "cmd /k net start postgresql-x64-18", 1, False
 
 
 ' =========================================================
 ' BACKEND SPRING BOOT
 ' =========================================================
 
-backendPid = StartHiddenProcess( _
-    "java.exe", _
-    "-jar """ & jarPath & """" _
+backendPid = StartVisibleProcess( _
+    "cmd.exe", _
+    "/k java -jar """ & jarPath & """" _
 )
 
 ' Attendre que Spring Boot soit disponible
@@ -36,9 +36,9 @@ WaitForPort "localhost", 8080
 ' FRONTEND VUE / VITE
 ' =========================================================
 
-frontendPid = StartHiddenProcess( _
+frontendPid = StartVisibleProcess( _
     "cmd.exe", _
-    "/c cd /d G:\git\homebank\frontend && npm run dev" _
+    "/k cd /d G:\git\homebank\frontend && npm run dev" _
 )
 
 ' Attendre que Vite soit disponible
@@ -65,61 +65,34 @@ Loop
 
 
 ' =========================================================
-' FERMER FRONTEND
+' FIN
 ' =========================================================
 
-If frontendPid <> "" Then
-    shell.Run _
-        "cmd /c taskkill /PID " & frontendPid & " /T /F >nul 2>&1", _
-        0, _
-        True
-End If
-
-
-' =========================================================
-' FERMER BACKEND
-' =========================================================
-
-If backendPid <> "" Then
-    shell.Run _
-        "cmd /c taskkill /PID " & backendPid & " /T /F >nul 2>&1", _
-        0, _
-        True
-End If
-
-
-' =========================================================
-' FERMER POSTGRESQL
-' =========================================================
-
-shell.Run _
-    "cmd /c net stop postgresql-x64-18 >nul 2>&1", _
-    0, _
-    True
-
+' Les terminaux restent ouverts.
+' Aucun processus n'est arrêté automatiquement.
 
 Set shell = Nothing
 
 
 ' =========================================================
-' LANCER UN PROCESSUS CACHE
+' LANCER UN PROCESSUS VISIBLE
 ' =========================================================
 
-Function StartHiddenProcess(program, arguments)
+Function StartVisibleProcess(program, arguments)
 
     Dim ps
     Dim exec
 
-    ps = "powershell.exe -NoProfile -WindowStyle Hidden -Command " & _
+    ps = "powershell.exe -NoProfile -Command " & _
          Chr(34) & _
          "$p=Start-Process '" & program & "' -ArgumentList '" & _
          Replace(arguments, "'", "''") & _
-         "' -WindowStyle Hidden -PassThru; $p.Id" & _
+         "' -PassThru; $p.Id" & _
          Chr(34)
 
     Set exec = shell.Exec(ps)
 
-    StartHiddenProcess = Trim(exec.StdOut.ReadAll)
+    StartVisibleProcess = Trim(exec.StdOut.ReadAll)
 
     Set exec = Nothing
 

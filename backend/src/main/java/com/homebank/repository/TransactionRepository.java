@@ -25,6 +25,11 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     @Query("select coalesce(sum(t.amount), 0) from Transaction t where t.account.id = :accountId and t.date <= :asOf")
     BigDecimal sumAmountByAccountIdAsOf(@Param("accountId") Long accountId, @Param("asOf") LocalDate asOf);
 
-    @Query("select distinct t.payee from Transaction t where t.payee is not null and t.payee <> ''")
-    List<String> findDistinctPayees();
+    /**
+     * Renvoie chaque paire (texte du tiers, montant) presente dans les
+     * transactions existantes. Utilise pour l'initialisation des tiers,
+     * qui distingue desormais les tiers par nom ET par montant.
+     */
+    @Query("select t.payee, t.amount from Transaction t where t.payee is not null and t.payee <> ''")
+    List<Object[]> findAllPayeeAmountPairs();
 }
