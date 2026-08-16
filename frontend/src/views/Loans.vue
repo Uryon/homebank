@@ -28,6 +28,11 @@
           </div>
         </div>
 
+        <div class="loan-owned">
+          <span class="amount positive">{{ formatAmount(ownedAmount(l)) }}</span>
+          <span class="text-muted"> vous appartiennent déjà ({{ ownedPercent(l) }}% du capital)</span>
+        </div>
+
         <div class="loan-progress">
           <div class="loan-progress-bar" :style="{ width: progressPercent(l) + '%' }"></div>
         </div>
@@ -47,8 +52,14 @@
 
     <!-- Detail du pret selectionne : graphique + echeancier -->
     <div v-if="selectedLoan" class="card" style="margin-top: 20px;">
-      <div class="stat-label" style="margin-bottom: 16px;">
-        Évolution du capital restant dû — {{ selectedLoan.name }}
+      <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 8px;">
+        <div class="stat-label" style="margin-bottom: 0;">
+          Évolution du capital restant dû — {{ selectedLoan.name }}
+        </div>
+        <div style="font-size: 13px;">
+          <span class="amount positive">{{ formatAmount(ownedAmount(selectedLoan)) }}</span>
+          <span class="text-muted"> vous appartiennent aujourd'hui</span>
+        </div>
       </div>
       <canvas ref="balanceChart" height="90"></canvas>
     </div>
@@ -182,6 +193,16 @@ const scheduleRows = computed(() => {
 
 function totalMonthly(loan) {
   return (loan.monthlyPayment || 0) + (loan.monthlyInsurance || 0)
+}
+
+/** Capital déjà remboursé = ce qui vous appartient réellement dans le bien financé. */
+function ownedAmount(loan) {
+  return (loan.principal || 0) - (loan.currentRemainingBalance || 0)
+}
+
+function ownedPercent(loan) {
+  if (!loan.principal) return 0
+  return Math.round((ownedAmount(loan) / loan.principal) * 100)
 }
 
 function progressPercent(loan) {
@@ -362,6 +383,10 @@ onMounted(loadLoans)
 }
 .loan-card.active {
   border-color: var(--azure);
+}
+.loan-owned {
+  font-size: 13px;
+  margin: 6px 0 10px;
 }
 .loan-progress {
   height: 6px;

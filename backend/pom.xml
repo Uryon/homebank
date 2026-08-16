@@ -40,6 +40,18 @@
             <scope>runtime</scope>
         </dependency>
         <dependency>
+            <!--
+              Base H2 en memoire, utilisee uniquement par le profil Spring "test"
+              (voir application-test.properties). Scope "runtime" (et non "test")
+              pour qu'elle soit disponible aussi bien via `mvn spring-boot:run
+              -Dspring-boot.run.profiles=test` que via une configuration de
+              lancement IntelliJ classique.
+            -->
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
