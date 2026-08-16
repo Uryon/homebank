@@ -26,27 +26,18 @@ public class TransactionController {
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
-        try{
         if (accountId != null) {
-            List<TransactionDTO> transactions = transactionService.findByAccount(accountId);
-            System.out.println("Transactions trouvées : " + transactions.size());
-            return transactions;
+            return transactionService.findByAccount(accountId);
         }
         if (from != null && to != null) {
-            List<TransactionDTO> transactions =  transactionService.findByPeriod(from, to);
-            System.out.println("Transactions trouvées : " + transactions.size());
-            return transactions;
+            return transactionService.findByPeriod(from, to);
         }
-        List<TransactionDTO> transactions =  transactionService.findAll();
-        System.out.println("Transactions trouvées : " + transactions.size());
-        return transactions;
-        }catch(Exception e){
-            System.out.println(e.toString());
-            return null;
-        }
+        return transactionService.findAll();
     }
 
-    /** Transactions en attente de validation (rapprochement bancaire). */
+    /**
+     * Transactions en attente de validation (rapprochement bancaire).
+     */
     @GetMapping("/pending")
     public List<TransactionDTO> findPending() {
         return transactionService.findPending();
@@ -57,7 +48,9 @@ public class TransactionController {
         return Map.of("count", transactionService.countPending());
     }
 
-    /** Passe toutes les transactions en attente au statut "validee". */
+    /**
+     * Passe toutes les transactions en attente au statut "validee".
+     */
     @PostMapping("/validate-all")
     public Map<String, Integer> validateAll() {
         return Map.of("validated", transactionService.validateAllPending());
@@ -73,7 +66,9 @@ public class TransactionController {
         return transactionService.toggleMonthlyExpense(id);
     }
 
-    /** Cree un virement entre deux comptes (deux transactions liees). */
+    /**
+     * Cree un virement entre deux comptes (deux transactions liees).
+     */
     @PostMapping("/transfer")
     public List<TransactionDTO> createTransfer(@RequestBody TransferRequestDTO request) {
         return transactionService.createTransfer(request);
