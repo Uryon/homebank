@@ -33,4 +33,13 @@
 </template>
 
 <script setup>
+import { onMounted } from 'vue'
+import { dataStore } from './services/dataStore'
+
+// Precharge comptes, categories, tiers et transactions des le demarrage de
+// l'app, en arriere-plan, pour que la page Transactions (et les autres)
+// s'affichent instantanement des que l'utilisateur y navigue.
+onMounted(() => {
+  dataStore.prefetch()
+})
 </script>

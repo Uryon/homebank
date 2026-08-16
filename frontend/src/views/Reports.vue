@@ -45,7 +45,7 @@
       <canvas ref="balanceCanvas" height="90"></canvas>
     </div>
 
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px;">
       <div class="card">
         <div class="stat-label" style="margin-bottom: 16px;">Dépenses par catégorie</div>
         <canvas ref="expenseCanvas"></canvas>
@@ -57,11 +57,45 @@
         <div v-if="!incomeData.length" class="empty-state">Aucun revenu sur cette période.</div>
       </div>
     </div>
+
+    <div class="card">
+      <div class="stat-label" style="margin-bottom: 4px;">Où va mon argent ?</div>
+      <div style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
+        Répartition des dépenses sur les 12 derniers mois (les virements entre comptes ne sont pas comptés).
+      </div>
+      <div v-if="whereMoneyData.length" style="display:grid; grid-template-columns: 280px 1fr; gap: 28px; align-items: center;">
+        <canvas ref="whereMoneyCanvas"></canvas>
+        <table class="plain-table">
+          <thead>
+            <tr>
+              <th style="text-align:left; padding-bottom:8px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color: var(--text-faint);">Catégorie</th>
+              <th class="num" style="padding-bottom:8px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color: var(--text-faint);">Montant</th>
+              <th class="num" style="padding-bottom:8px; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color: var(--text-faint);">%</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, i) in whereMoneyData" :key="row.category">
+              <td>
+                <span class="legend-dot" :style="{ background: PALETTE[i % PALETTE.length] }"></span>
+                {{ row.category }}
+              </td>
+              <td class="num amount negative">{{ formatAmount(row.total) }}</td>
+              <td class="num">{{ row.percentage }}%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else class="empty-state">Aucune dépense sur les 12 derniers mois.</div>
+      <div v-if="whereMoneyData.length" class="monthly-total">
+        <span>Total des dépenses (12 derniers mois)</span>
+        <span class="amount negative">{{ formatAmount(whereMoneyTotal) }}</span>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { AccountsAPI, ReportsAPI } from '../services/api'
 import Chart from 'chart.js/auto'
 
@@ -72,11 +106,13 @@ const to = ref(new Date().toISOString().slice(0, 10))
 const summary = ref({ income: 0, expenses: 0, net: 0 })
 const expenseData = ref([])
 const incomeData = ref([])
+const whereMoneyData = ref([])
 
 const balanceCanvas = ref(null)
 const expenseCanvas = ref(null)
 const incomeCanvas = ref(null)
-let balanceChart, expenseChart, incomeChart
+const whereMoneyCanvas = ref(null)
+let balanceChart, expenseChart, incomeChart, whereMoneyChart
 
 const PALETTE = ['#1F9D6C', '#D64545', '#3B6FE0', '#C98A1B', '#8B6FE0', '#2CA8C9', '#D6559A', '#6FAF2C']
 
@@ -85,9 +121,21 @@ function firstOfMonthIso() {
   return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10)
 }
 
+/** Plage fixe des 12 derniers mois glissants, indépendante des filtres "Du"/"Au" du haut de page. */
+function last12MonthsIso() {
+  const to = new Date()
+  const from = new Date()
+  from.setMonth(from.getMonth() - 12)
+  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
+}
+
 function formatAmount(v) {
   return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v || 0)
 }
+
+const whereMoneyTotal = computed(() =>
+  whereMoneyData.value.reduce((sum, row) => sum + Number(row.total || 0), 0)
+)
 
 async function loadAll() {
   const params = { from: from.value, to: to.value }
@@ -98,10 +146,15 @@ async function loadAll() {
   incomeData.value = await ReportsAPI.incomeByCategory(params)
   const evolution = await ReportsAPI.balanceEvolution(params)
 
+  const whereMoneyParams = { ...last12MonthsIso() }
+  if (accountId.value) whereMoneyParams.accountId = accountId.value
+  whereMoneyData.value = await ReportsAPI.expensesByCategory(whereMoneyParams)
+
   await nextTick()
   renderBalanceChart(evolution)
   renderPieChart(expenseCanvas, expenseChart, expenseData.value, c => { expenseChart = c })
   renderPieChart(incomeCanvas, incomeChart, incomeData.value, c => { incomeChart = c })
+  renderPieChart(whereMoneyCanvas, whereMoneyChart, whereMoneyData.value, c => { whereMoneyChart = c })
 }
 
 function renderBalanceChart(evolution) {
@@ -157,3 +210,34 @@ onMounted(async () => {
   await loadAll()
 })
 </script>
+
+<style scoped>
+.legend-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+.plain-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.plain-table td {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.plain-table tr:last-child td {
+  border-bottom: none;
+}
+.monthly-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 2px solid var(--line);
+  font-weight: 700;
+}
+</style>

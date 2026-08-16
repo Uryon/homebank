@@ -80,7 +80,7 @@
             <template v-else>
               <td>{{ p.name }}</td>
               <td><code>{{ p.pattern }}</code></td>
-              <td class="num">{{ p.amount != null ? formatAmount(p.amount) : 'Tous montants' }}</td>
+              <td class="num">{{ p.amount != null ? formatAmount(p.amount) : '' }}</td>
               <td>{{ categoryLabel(p.categoryId) }}</td>
               <td class="row-actions" @click.stop>
                 <button class="btn danger" @click="remove(p)">Suppr.</button>

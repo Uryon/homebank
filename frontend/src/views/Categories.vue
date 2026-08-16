@@ -14,6 +14,15 @@
         <input v-model="searchQuery" placeholder="Ex : Alimentation" style="min-width: 240px;" />
       </div>
 
+      <div class="form-field">
+        <label>Afficher</label>
+        <select v-model="typeFilter">
+          <option value="BOTH">Les deux</option>
+          <option value="EXPENSE">Dépenses</option>
+          <option value="INCOME">Gains</option>
+        </select>
+      </div>
+
       <div v-if="selectedIds.length >= 2" class="form-field" style="align-self: flex-end;">
         <button class="btn" @click="openMergeModal">
           Fusionner ({{ selectedIds.length }} sélectionnées)
@@ -89,7 +98,7 @@
           <template v-else>
             <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);">
               <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
-              <span>↳ {{ child.name }}</span>
+              <span>{{ child.name }}</span>
             </div>
             <div @click.stop>
               <button class="btn danger" @click="remove(child)">Supprimer</button>
@@ -171,6 +180,7 @@ const categories = ref([])
 const roots = ref([])
 const showModal = ref(false)
 const searchQuery = ref('')
+const typeFilter = ref('BOTH')
 const form = ref(emptyForm())
 
 const editingId = ref(null)
@@ -187,21 +197,30 @@ function emptyForm() {
 }
 
 function children(rootId) {
-  return categories.value.filter(c => c.parent?.id === rootId)
+  return categories.value.filter(c => c.parentId === rootId)
+}
+
+/** Une catégorie correspond au filtre de type si son type matche exactement, ou si elle est marquée "Les deux". */
+function matchesTypeFilter(category) {
+  if (typeFilter.value === 'BOTH') return true
+  return category.type === typeFilter.value || category.type === 'BOTH'
 }
 
 const filteredRoots = computed(() => {
   const q = normalizeSearch(searchQuery.value)
-  if (!q) return roots.value
-  return roots.value.filter(root =>
-    normalizeSearch(root.name).includes(q) ||
-    children(root.id).some(child => normalizeSearch(child.name).includes(q))
-  )
+  return roots.value.filter(root => {
+    if (!matchesTypeFilter(root)) return false
+    if (!q) return true
+    return (
+      normalizeSearch(root.name).includes(q) ||
+      children(root.id).some(child => normalizeSearch(child.name).includes(q))
+    )
+  })
 })
 
 function filteredChildren(rootId) {
   const q = normalizeSearch(searchQuery.value)
-  const kids = children(rootId)
+  const kids = children(rootId).filter(matchesTypeFilter)
   if (!q) return kids
   const root = roots.value.find(r => r.id === rootId)
   if (root && normalizeSearch(root.name).includes(q)) return kids
@@ -218,12 +237,14 @@ function typeBadgeStyle(type) {
 }
 
 function categoryFullLabel(category) {
-  return category.parent ? `${category.parent.name} : ${category.name}` : category.name
+  if (!category.parentId) return category.name
+  const parent = categories.value.find(c => c.id === category.parentId)
+  return parent ? `${parent.name} : ${category.name}` : category.name
 }
 
 async function load() {
   categories.value = await CategoriesAPI.list()
-  roots.value = categories.value.filter(c => !c.parent)
+  roots.value = categories.value.filter(c => !c.parentId)
   const existingIds = new Set(categories.value.map(c => c.id))
   selectedIds.value = selectedIds.value.filter(id => existingIds.has(id))
 }
@@ -261,7 +282,7 @@ function startEdit(category) {
   editingId.value = category.id
   editForm.value = {
     name: category.name,
-    parentId: category.parent?.id ?? null,
+    parentId: category.parentId ?? null,
     type: category.type
   }
   nextTick(() => firstEditField.value?.[0]?.focus?.())

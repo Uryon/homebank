@@ -38,7 +38,7 @@ public class TransactionService {
     }
 
     public List<TransactionDTO> findAll() {
-        return transactionRepository.findAllByOrderByDateDesc()
+        return transactionRepository.findAllByOrderByDateDescIdDesc()
                 .stream()
                 .map(transactionMapper::toDTO)
                 .toList();
@@ -46,7 +46,7 @@ public class TransactionService {
 
     public List<TransactionDTO> findByAccount(Long accountId) {
         return transactionRepository
-                .findByAccount_IdOrderByDateDesc(accountId)
+                .findByAccount_IdOrderByDateDescIdDesc(accountId)
                 .stream()
                 .map(transactionMapper::toDTO)
                 .toList();
@@ -61,7 +61,7 @@ public class TransactionService {
     }
 
     public List<TransactionDTO> findPending() {
-        return transactionRepository.findByValidatedFalseOrderByDateDesc()
+        return transactionRepository.findByValidatedFalseOrderByDateDescIdDesc()
                 .stream()
                 .map(transactionMapper::toDTO)
                 .toList();

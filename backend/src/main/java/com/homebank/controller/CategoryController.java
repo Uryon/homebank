@@ -1,6 +1,8 @@
 package com.homebank.controller;
 
+import com.homebank.dto.CategoryDTO;
 import com.homebank.dto.MergeRequestDTO;
+import com.homebank.mapper.CategoryMapper;
 import com.homebank.model.Category;
 import com.homebank.service.CategoryService;
 import org.springframework.http.ResponseEntity;
@@ -13,34 +15,40 @@ import java.util.List;
 public class CategoryController {
 
     private final CategoryService categoryService;
+    private final CategoryMapper categoryMapper;
 
-    public CategoryController(CategoryService categoryService) {
+    public CategoryController(CategoryService categoryService, CategoryMapper categoryMapper) {
         this.categoryService = categoryService;
+        this.categoryMapper = categoryMapper;
     }
 
     @GetMapping
-    public List<Category> findAll() {
-        return categoryService.findAll();
+    public List<CategoryDTO> findAll() {
+        return categoryService.findAll().stream()
+                .map(categoryMapper::toDTO)
+                .toList();
     }
 
     @GetMapping("/roots")
-    public List<Category> findRoots() {
-        return categoryService.findRoots();
+    public List<CategoryDTO> findRoots() {
+        return categoryService.findRoots().stream()
+                .map(categoryMapper::toDTO)
+                .toList();
     }
 
     @GetMapping("/{id}")
-    public Category findById(@PathVariable Long id) {
-        return categoryService.findById(id);
+    public CategoryDTO findById(@PathVariable Long id) {
+        return categoryMapper.toDTO(categoryService.findById(id));
     }
 
     @PostMapping
-    public ResponseEntity<Category> create(@RequestBody Category category) {
-        return ResponseEntity.ok(categoryService.create(category));
+    public ResponseEntity<CategoryDTO> create(@RequestBody Category category) {
+        return ResponseEntity.ok(categoryMapper.toDTO(categoryService.create(category)));
     }
 
     @PutMapping("/{id}")
-    public Category update(@PathVariable Long id, @RequestBody Category category) {
-        return categoryService.update(id, category);
+    public CategoryDTO update(@PathVariable Long id, @RequestBody Category category) {
+        return categoryMapper.toDTO(categoryService.update(id, category));
     }
 
     @DeleteMapping("/{id}")
@@ -55,7 +63,7 @@ public class CategoryController {
      * a la cible, puis les categories source sont supprimees. Operation atomique.
      */
     @PostMapping("/merge")
-    public Category merge(@RequestBody MergeRequestDTO request) {
-        return categoryService.merge(request.getSourceIds(), request.getTargetId());
+    public CategoryDTO merge(@RequestBody MergeRequestDTO request) {
+        return categoryMapper.toDTO(categoryService.merge(request.getSourceIds(), request.getTargetId()));
     }
 }

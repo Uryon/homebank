@@ -36,6 +36,7 @@
           <col class="col-memo" />
           <col class="col-amount" />
           <col class="col-amount" />
+          <col class="col-monthly" />
           <col class="col-actions" />
         </colgroup>
         <thead>
@@ -47,6 +48,7 @@
             <th>Mémo</th>
             <th class="num">Dépense</th>
             <th class="num">Revenu</th>
+            <th class="num" title="Dépense mensuelle récurrente">Mensuelle</th>
             <th></th>
           </tr>
         </thead>
@@ -82,6 +84,9 @@
               <td class="num" colspan="2" @click.stop>
                 <input v-model.number="editForm.amount" type="number" step="0.01" style="text-align: right;" />
               </td>
+              <td class="num" @click.stop>
+                <input type="checkbox" v-model="editForm.monthlyExpense" title="Dépense mensuelle récurrente" />
+              </td>
               <td @click.stop class="row-actions">
                 <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
                 <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
@@ -97,6 +102,14 @@
               <td class="text-muted">{{ displayMemo(t.memo) }}</td>
               <td class="num amount negative">{{ t.amount < 0 ? formatAmount(t.amount) : '' }}</td>
               <td class="num amount positive">{{ t.amount > 0 ? formatAmount(t.amount) : '' }}</td>
+              <td class="num" @click.stop>
+                <input
+                  type="checkbox"
+                  :checked="t.monthlyExpense"
+                  title="Dépense mensuelle récurrente"
+                  @change="toggleMonthly(t)"
+                />
+              </td>
               <td class="row-actions" @click.stop>
                 <button class="btn danger" @click="remove(t)">Suppr.</button>
               </td>
@@ -179,6 +192,11 @@
             <label>Tags (séparés par des espaces)</label>
             <input v-model="form.tags" />
           </div>
+
+          <div class="form-field" style="grid-column: span 2; flex-direction: row; align-items: center; gap: 8px;">
+            <input type="checkbox" v-model="form.monthlyExpense" id="new-monthly-expense" style="width: auto;" />
+            <label for="new-monthly-expense" style="margin: 0;">Dépense mensuelle récurrente (loyer, abonnement...)</label>
+          </div>
         </div>
 
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
@@ -193,20 +211,28 @@
 <script setup>
 import { ref, onMounted, computed, nextTick } from 'vue'
 import {
-  AccountsAPI,
-  CategoriesAPI,
-  PayeesAPI,
   TransactionsAPI
 } from '../services/api'
+import { dataStore } from '../services/dataStore'
 import { normalizeSearch } from '../services/search'
-
-const accounts = ref([])
-const categories = ref([])
-const payees = ref([])
-const transactions = ref([])
 
 const filterAccount = ref(null)
 const searchQuery = ref('')
+
+// Donnees issues du cache partage (deja precharge au demarrage de l'app,
+// voir App.vue / dataStore.js) : s'affichent instantanement sans attendre
+// de nouvel appel reseau.
+const accounts = computed(() => dataStore.state.accounts)
+const categories = computed(() => dataStore.state.categories)
+const payees = computed(() => dataStore.state.payees)
+
+// Liste "par defaut" (tous comptes confondus) issue du cache. Quand un
+// filtre par compte est actif, on utilise une liste chargee a la demande
+// (non mise en cache, car specifique au filtre).
+const filteredByAccount = ref(null)
+const transactions = computed(() =>
+  filterAccount.value !== null ? (filteredByAccount.value ?? []) : dataStore.state.transactions
+)
 
 const showModal = ref(false)
 const form = ref(emptyForm())
@@ -227,7 +253,8 @@ function emptyForm() {
     status: 'NONE',
     memo: '',
     tags: '',
-    transferTransactionId: null
+    transferTransactionId: null,
+    monthlyExpense: false
   }
 }
 
@@ -308,15 +335,13 @@ function formatDate(iso) {
 }
 
 async function load() {
-  const params = {}
-  if (filterAccount.value) params.accountId = filterAccount.value
-  transactions.value = await TransactionsAPI.list(params)
-}
-
-async function loadRefs() {
-  accounts.value = await AccountsAPI.list()
-  categories.value = await CategoriesAPI.list()
-  payees.value = await PayeesAPI.list()
+  if (filterAccount.value !== null) {
+    filteredByAccount.value = await TransactionsAPI.list({ accountId: filterAccount.value })
+  } else {
+    // Revalide le cache partage en arriere-plan (l'affichage courant du
+    // cache reste visible pendant ce temps, aucun blocage / clignotement).
+    await dataStore.refreshTransactions()
+  }
 }
 
 function resolveCategoryId(typedLabel) {
@@ -348,7 +373,8 @@ async function save() {
     status: form.value.status,
     memo: form.value.memo,
     tags: form.value.tags,
-    transferTransactionId: form.value.transferTransactionId
+    transferTransactionId: form.value.transferTransactionId,
+    monthlyExpense: form.value.monthlyExpense
   }
 
   await TransactionsAPI.create(payload)
@@ -371,7 +397,8 @@ function startEdit(t) {
     status: t.status || 'NONE',
     memo: displayMemo(t.memo),
     tags: t.tags || '',
-    transferTransactionId: t.transferTransactionId ?? null
+    transferTransactionId: t.transferTransactionId ?? null,
+    monthlyExpense: !!t.monthlyExpense
   }
   nextTick(() => {
     firstEditField.value?.[0]?.focus?.()
@@ -400,7 +427,8 @@ async function confirmEdit() {
     status: editForm.value.status,
     memo: editForm.value.memo,
     tags: editForm.value.tags,
-    transferTransactionId: editForm.value.transferTransactionId
+    transferTransactionId: editForm.value.transferTransactionId,
+    monthlyExpense: editForm.value.monthlyExpense
   }
 
   const id = editingId.value
@@ -417,9 +445,23 @@ async function remove(transaction) {
   await load()
 }
 
-onMounted(async () => {
-  await loadRefs()
+/** Bascule directement le statut "dépense mensuelle" sans passer par l'édition complète. */
+async function toggleMonthly(transaction) {
+  await TransactionsAPI.toggleMonthlyExpense(transaction.id)
   await load()
+}
+
+onMounted(async () => {
+  // Si le prechargement lance au demarrage de l'app est deja termine (cas
+  // courant), ceci est instantane et n'attend rien. Sinon (premier
+  // chargement de l'app directement sur /transactions), on attend juste
+  // cette premiere fois.
+  await dataStore.ensureLoaded()
+  // Revalidation silencieuse en arriere-plan a chaque visite de la page,
+  // au cas ou des comptes/categories/tiers/transactions ont change depuis
+  // le prechargement (cree ailleurs, autre onglet...).
+  dataStore.refreshAll()
+  if (filterAccount.value !== null) await load()
 })
 </script>
 
@@ -440,6 +482,7 @@ onMounted(async () => {
 .col-category { width: 190px; }
 .col-memo { width: 170px; }
 .col-amount { width: 120px; }
+.col-monthly { width: 90px; }
 .col-actions { width: 110px; }
 
 .transactions-table td, .transactions-table th {

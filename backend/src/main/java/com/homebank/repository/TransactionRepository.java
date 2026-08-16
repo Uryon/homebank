@@ -14,17 +14,17 @@ import java.util.Optional;
 
 public interface TransactionRepository extends JpaRepository<Transaction, Long> {
 
-    List<Transaction> findByAccount_IdOrderByDateDesc(Long accountId);
+    List<Transaction> findByAccount_IdOrderByDateDescIdDesc(Long accountId);
 
-    List<Transaction> findAllByOrderByDateDesc();
+    List<Transaction> findAllByOrderByDateDescIdDesc();
 
     List<Transaction> findByDateBetween(LocalDate from, LocalDate to);
 
     List<Transaction> findByAccountIdAndDateBetween(Long accountId, LocalDate from, LocalDate to);
 
-    List<Transaction> findByValidatedFalseOrderByDateDesc();
+    List<Transaction> findByValidatedFalseOrderByDateDescIdDesc();
 
-    List<Transaction> findByMonthlyExpenseTrueOrderByDateDesc();
+    List<Transaction> findByMonthlyExpenseTrueOrderByDateDescIdDesc();
 
     long countByValidatedFalse();
 

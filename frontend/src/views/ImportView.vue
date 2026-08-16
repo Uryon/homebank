@@ -38,7 +38,8 @@
       <div class="stat-label">Résultat de l'import</div>
       <p style="margin: 10px 0;">
         <span class="amount positive">{{ result.imported }}</span> transaction(s) importée(s),
-        <span class="amount negative">{{ result.skipped }}</span> ignorée(s).
+        <span class="amount negative">{{ result.duplicates ?? 0 }}</span> déjà existante(s) (ignorée(s)),
+        <span class="amount negative">{{ result.skipped }}</span> en erreur.
       </p>
       <div v-if="result.errors?.length">
         <div class="stat-label" style="margin-top: 14px;">Détails</div>

@@ -1,5 +1,7 @@
 package com.homebank.controller;
 
+import com.homebank.dto.AccountDTO;
+import com.homebank.mapper.AccountMapper;
 import com.homebank.model.Account;
 import com.homebank.service.AccountService;
 import org.springframework.http.ResponseEntity;
@@ -14,19 +16,23 @@ import java.util.Map;
 public class AccountController {
 
     private final AccountService accountService;
+    private final AccountMapper accountMapper;
 
-    public AccountController(AccountService accountService) {
+    public AccountController(AccountService accountService, AccountMapper accountMapper) {
         this.accountService = accountService;
+        this.accountMapper = accountMapper;
     }
 
     @GetMapping
-    public List<Account> findAll() {
-        return accountService.findAll();
+    public List<AccountDTO> findAll() {
+        return accountService.findAll().stream()
+                .map(accountMapper::toDTO)
+                .toList();
     }
 
     @GetMapping("/{id}")
-    public Account findById(@PathVariable Long id) {
-        return accountService.findById(id);
+    public AccountDTO findById(@PathVariable Long id) {
+        return accountMapper.toDTO(accountService.findById(id));
     }
 
     @GetMapping("/{id}/balance")
@@ -40,13 +46,13 @@ public class AccountController {
     }
 
     @PostMapping
-    public ResponseEntity<Account> create(@RequestBody Account account) {
-        return ResponseEntity.ok(accountService.create(account));
+    public ResponseEntity<AccountDTO> create(@RequestBody Account account) {
+        return ResponseEntity.ok(accountMapper.toDTO(accountService.create(account)));
     }
 
     @PutMapping("/{id}")
-    public Account update(@PathVariable Long id, @RequestBody Account account) {
-        return accountService.update(id, account);
+    public AccountDTO update(@PathVariable Long id, @RequestBody Account account) {
+        return accountMapper.toDTO(accountService.update(id, account));
     }
 
     @DeleteMapping("/{id}")

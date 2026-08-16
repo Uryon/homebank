@@ -217,7 +217,7 @@ public class ReportService {
 
     /** Somme des transactions marquees "depense mensuelle" (une ligne par tiers, la plus recente). */
     public Map<String, Object> monthlyExpensesSummary() {
-        List<Transaction> flagged = transactionRepository.findByMonthlyExpenseTrueOrderByDateDesc();
+        List<Transaction> flagged = transactionRepository.findByMonthlyExpenseTrueOrderByDateDescIdDesc();
 
         Map<String, Transaction> latestByPayee = new LinkedHashMap<>();
         for (Transaction t : flagged) {
