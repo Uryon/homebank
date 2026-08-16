@@ -12,3 +12,5 @@ frontend/dist/
 *.iml
 .DS_Store
 /.homebank-edge/*
+claude.txt
+*.zip

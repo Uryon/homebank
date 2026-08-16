@@ -21,6 +21,9 @@
         <RouterLink to="/reports" class="nav-item" :class="{ active: $route.name === 'reports' }">
           <span class="dot"></span> Rapports
         </RouterLink>
+        <RouterLink to="/loans" class="nav-item" :class="{ active: $route.name === 'loans' }">
+          <span class="dot"></span> Prêts
+        </RouterLink>
         <RouterLink to="/import" class="nav-item" :class="{ active: $route.name === 'import' }">
           <span class="dot"></span> Import CSV/QIF
         </RouterLink>

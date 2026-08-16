@@ -56,6 +56,15 @@ export const PayeesAPI = {
     merge: (sourceIds, targetId) => api.post('/payees/merge', { sourceIds, targetId }).then(r => r.data)
 }
 
+export const LoansAPI = {
+    list: () => api.get('/loans').then(r => r.data),
+    get: (id) => api.get(`/loans/${id}`).then(r => r.data),
+    schedule: (id) => api.get(`/loans/${id}/schedule`).then(r => r.data),
+    create: (payload) => api.post('/loans', payload).then(r => r.data),
+    update: (id, payload) => api.put(`/loans/${id}`, payload).then(r => r.data),
+    remove: (id) => api.delete(`/loans/${id}`)
+}
+
 export const ImportAPI = {
     csv: (file, accountId) => {
         const form = new FormData()
