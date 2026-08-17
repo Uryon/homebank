@@ -86,11 +86,9 @@
               <select v-model.number="editForm.parentId">
                 <option v-for="r in roots" :key="r.id" :value="r.id">{{ r.name }}</option>
               </select>
-              <select v-model="editForm.type">
-                <option value="EXPENSE">Dépense</option>
-                <option value="INCOME">Revenu</option>
-                <option value="BOTH">Les deux</option>
-              </select>
+              <span class="text-muted" style="font-size: 12px;">
+                {{ typeLabel(roots.find(r => r.id === editForm.parentId)?.type) }} (hérité du parent)
+              </span>
               <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
               <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
             </div>
@@ -127,13 +125,19 @@
               <option v-for="r in roots" :key="r.id" :value="r.id">{{ r.name }}</option>
             </select>
           </div>
-          <div class="form-field">
+          <div class="form-field" v-if="!form.parentId">
             <label>Type</label>
             <select v-model="form.type">
               <option value="EXPENSE">Dépense</option>
               <option value="INCOME">Revenu</option>
               <option value="BOTH">Les deux</option>
             </select>
+          </div>
+          <div class="form-field" v-else>
+            <label>Type</label>
+            <div class="text-muted" style="padding-top: 8px; font-size: 13px;">
+              {{ typeLabel(roots.find(r => r.id === form.parentId)?.type) }} (hérité de la catégorie parente)
+            </div>
           </div>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
@@ -365,5 +369,8 @@ onMounted(load)
 .cat-row:has(input[type="checkbox"]:checked) {
   background: var(--azure-dim);
   border-radius: var(--radius-sm);
+}
+.text-muted {
+  color: var(--text-muted);
 }
 </style>

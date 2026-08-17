@@ -16,6 +16,7 @@ public class AccountMapper {
                 .currency(account.getCurrency())
                 .notes(account.getNotes())
                 .archived(account.isArchived())
+                .externalRef(account.getExternalRef())
                 .build();
     }
 }

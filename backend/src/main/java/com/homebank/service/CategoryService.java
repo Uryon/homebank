@@ -42,7 +42,11 @@ public class CategoryService {
     public Category create(Category category) {
         category.setId(null);
         if (category.getParent() != null && category.getParent().getId() != null) {
-            category.setParent(findById(category.getParent().getId()));
+            Category parent = findById(category.getParent().getId());
+            category.setParent(parent);
+            // Une sous-categorie appartient toujours au meme groupe (revenu/depense/les deux)
+            // que sa categorie parente : son propre type n'est pas selectionnable independamment.
+            category.setType(parent.getType());
         } else {
             category.setParent(null);
         }
@@ -52,15 +56,27 @@ public class CategoryService {
     public Category update(Long id, Category payload) {
         Category existing = findById(id);
         existing.setName(payload.getName());
-        existing.setType(payload.getType());
+
         if (payload.getParent() != null && payload.getParent().getId() != null) {
             if (payload.getParent().getId().equals(id)) {
                 throw new IllegalArgumentException("Une categorie ne peut pas etre son propre parent");
             }
-            existing.setParent(findById(payload.getParent().getId()));
+            Category parent = findById(payload.getParent().getId());
+            existing.setParent(parent);
+            // Sous-categorie : le type suit toujours celui du parent, non modifiable independamment.
+            existing.setType(parent.getType());
         } else {
             existing.setParent(null);
+            existing.setType(payload.getType());
+            // Categorie racine : si son type change, on le repercute sur toutes ses
+            // sous-categories pour qu'elles restent dans le meme groupe (revenu/depense).
+            List<Category> children = categoryRepository.findByParent(existing);
+            for (Category child : children) {
+                child.setType(existing.getType());
+            }
+            categoryRepository.saveAll(children);
         }
+
         return categoryRepository.save(existing);
     }
 
@@ -89,6 +105,7 @@ public class CategoryService {
             List<Category> children = categoryRepository.findByParent(source);
             for (Category child : children) {
                 child.setParent(target);
+                child.setType(target.getType());
             }
             categoryRepository.saveAll(children);
 
@@ -111,6 +128,7 @@ public class CategoryService {
             Category child = new Category();
             child.setName(parts[1].trim());
             child.setParent(parent);
+            child.setType(parent.getType());
             return categoryRepository.save(child);
         }
         Optional<Category> existing = categoryRepository.findByNameIgnoreCaseAndParentIsNull(trimmed);

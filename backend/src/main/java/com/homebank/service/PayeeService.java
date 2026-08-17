@@ -183,6 +183,59 @@ public class PayeeService {
     }
 
     /**
+     * A appeler apres la modification (ou suppression) d'une transaction :
+     * si le tiers ou le montant a change, verifie si l'ANCIEN tiers devient
+     * orphelin (plus aucune transaction ne le matche) et le supprime le cas
+     * echeant. Evite d'accumuler des tiers "fantomes" a chaque fois qu'on
+     * modifie le tiers d'une transaction a la main.
+     *
+     * Par securite, ne supprime que les tiers encore dans leur etat
+     * "auto-cree" (regexp = citation exacte du nom, jamais personnalisee
+     * depuis) : un tiers renomme ou dont la regexp a ete modifiee a la main
+     * par l'utilisateur (page Tiers, fusion...) n'est jamais supprime
+     * automatiquement.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public void cleanupIfPayeeChanged(String previousPayeeText, BigDecimal previousAmount,
+                                       String newPayeeText, BigDecimal newAmount) {
+        if (previousPayeeText == null || previousPayeeText.isBlank()) return;
+
+        BigDecimal prevAbs = previousAmount != null ? previousAmount.abs() : null;
+        BigDecimal newAbs = newAmount != null ? newAmount.abs() : null;
+        boolean unchanged = previousPayeeText.equalsIgnoreCase(newPayeeText)
+                && ((prevAbs == null && newAbs == null) || (prevAbs != null && newAbs != null && prevAbs.compareTo(newAbs) == 0));
+        if (unchanged) return;
+
+        matchPayee(previousPayeeText, prevAbs).ifPresent(this::pruneIfOrphan);
+    }
+
+    private void pruneIfOrphan(Payee payee) {
+        if (payee == null || payee.getId() == null) return;
+        // Tiers personnalise (renomme, regexp modifiee, fusion...) : on ne
+        // touche jamais a un tiers dans lequel l'utilisateur a investi du travail.
+        if (!payee.getPattern().equals(Pattern.quote(payee.getName()))) return;
+
+        boolean stillUsed = transactionRepository.findAllPayeeAmountPairs().stream()
+                .anyMatch(row -> matches(payee, (String) row[0], (BigDecimal) row[1]));
+
+        if (!stillUsed) {
+            payeeRepository.delete(payee);
+        }
+    }
+
+    private boolean matches(Payee payee, String text, BigDecimal amount) {
+        if (text == null || text.isBlank()) return false;
+        try {
+            Pattern pattern = Pattern.compile(payee.getPattern(), Pattern.CASE_INSENSITIVE);
+            if (!pattern.matcher(text.trim()).find()) return false;
+        } catch (PatternSyntaxException e) {
+            return false;
+        }
+        if (payee.getAmount() == null) return true;
+        return amount != null && payee.getAmount().compareTo(amount.abs()) == 0;
+    }
+
+    /**
      * Fusionne plusieurs tiers (sourceIds) dans un tiers cible (targetId) :
      * - toutes les transactions dont le tiers correspondait a une source
      *   (texte exact, insensible a la casse) sont renommees vers le nom

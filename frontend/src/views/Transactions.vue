@@ -24,11 +24,23 @@
         <label>Recherche (tiers, dépense, revenu)</label>
         <input v-model="searchQuery" placeholder="Ex : Carrefour ou 42,50" style="min-width: 240px;" />
       </div>
+
+      <div class="form-field" style="align-self: flex-end;">
+        <button
+          class="btn"
+          :class="{ secondary: pendingCount === 0 }"
+          :disabled="pendingCount === 0 || validating"
+          @click="validateAll"
+        >
+          {{ validating ? 'Validation…' : `Tout valider (${pendingCount} en attente)` }}
+        </button>
+      </div>
     </div>
 
     <div class="table-scroll" v-if="filteredTransactions.length">
       <table class="transactions-table">
         <colgroup>
+          <col class="col-status" />
           <col class="col-date" />
           <col class="col-account" />
           <col class="col-payee" />
@@ -41,6 +53,7 @@
         </colgroup>
         <thead>
           <tr>
+            <th title="Statut de validation (rapprochement bancaire)">Statut</th>
             <th>Date</th>
             <th>Compte</th>
             <th>Tiers</th>
@@ -57,13 +70,16 @@
           <tr
             v-for="t in filteredTransactions"
             :key="t.id"
-            :class="{ 'row-editing': editingId === t.id }"
+            :class="{ 'row-editing': editingId === t.id, 'row-pending': editingId !== t.id && !t.validated }"
             @click="editingId !== t.id && startEdit(t)"
             @keydown.esc="cancelEdit"
             @keydown.enter.prevent="editingId === t.id && confirmEdit()"
           >
             <!-- Mode édition -->
             <template v-if="editingId === t.id">
+              <td class="num" @click.stop>
+                <input type="checkbox" v-model="editForm.validated" title="Transaction validée (rapprochement bancaire)" />
+              </td>
               <td @click.stop>
                 <input v-model="editForm.date" type="date" ref="firstEditField" />
               </td>
@@ -95,6 +111,16 @@
 
             <!-- Mode lecture -->
             <template v-else>
+              <td class="num" @click.stop>
+                <span
+                  class="status-dot"
+                  :class="t.validated ? 'validated' : 'pending'"
+                  :title="t.validated ? 'Validée' : 'En attente de validation — cliquer pour valider'"
+                  @click="toggleValidated(t)"
+                >
+                  {{ t.validated ? '✓' : '' }}
+                </span>
+              </td>
               <td class="col-date">{{ formatDate(t.date) }}</td>
               <td>{{ accountName(t.accountId) }}</td>
               <td class="col-payee" :title="t.payee">{{ t.payee }}</td>
@@ -254,7 +280,8 @@ function emptyForm() {
     memo: '',
     tags: '',
     transferTransactionId: null,
-    monthlyExpense: false
+    monthlyExpense: false,
+    validated: true
   }
 }
 
@@ -374,7 +401,8 @@ async function save() {
     memo: form.value.memo,
     tags: form.value.tags,
     transferTransactionId: form.value.transferTransactionId,
-    monthlyExpense: form.value.monthlyExpense
+    monthlyExpense: form.value.monthlyExpense,
+    validated: form.value.validated
   }
 
   await TransactionsAPI.create(payload)
@@ -398,7 +426,8 @@ function startEdit(t) {
     memo: displayMemo(t.memo),
     tags: t.tags || '',
     transferTransactionId: t.transferTransactionId ?? null,
-    monthlyExpense: !!t.monthlyExpense
+    monthlyExpense: !!t.monthlyExpense,
+    validated: !!t.validated
   }
   nextTick(() => {
     firstEditField.value?.[0]?.focus?.()
@@ -428,7 +457,8 @@ async function confirmEdit() {
     memo: editForm.value.memo,
     tags: editForm.value.tags,
     transferTransactionId: editForm.value.transferTransactionId,
-    monthlyExpense: editForm.value.monthlyExpense
+    monthlyExpense: editForm.value.monthlyExpense,
+    validated: editForm.value.validated
   }
 
   const id = editingId.value
@@ -449,6 +479,37 @@ async function remove(transaction) {
 async function toggleMonthly(transaction) {
   await TransactionsAPI.toggleMonthlyExpense(transaction.id)
   await load()
+}
+
+/* --- Validation / rapprochement (façon "reconcile" YNAB) --- */
+
+const validating = ref(false)
+
+/** Nombre de transactions en attente de validation, calculé depuis les données déjà en mémoire. */
+const pendingCount = computed(() => transactions.value.filter(t => !t.validated).length)
+
+/** Bascule le statut validée/en attente d'une seule transaction. */
+async function toggleValidated(transaction) {
+  await TransactionsAPI.toggleValidated(transaction.id)
+  await load()
+}
+
+/**
+ * Valide en une fois toutes les transactions en attente : à utiliser une fois
+ * que le solde du compte dans l'app correspond au solde réel de la banque,
+ * comme le "reconcile" de YNAB. Permet ensuite de repérer d'un coup d'œil
+ * les transactions ajoutées depuis la dernière validation (pastille orange).
+ */
+async function validateAll() {
+  if (pendingCount.value === 0) return
+  if (!confirm(`Valider les ${pendingCount.value} transaction(s) en attente ?`)) return
+  validating.value = true
+  try {
+    await TransactionsAPI.validateAll()
+    await load()
+  } finally {
+    validating.value = false
+  }
 }
 
 onMounted(async () => {
@@ -477,6 +538,7 @@ onMounted(async () => {
   table-layout: fixed;
 }
 .col-date { width: 145px; }
+.col-status { width: 60px; }
 .col-account { width: 130px; }
 .col-payee { width: auto; }
 .col-category { width: 190px; }
@@ -508,8 +570,32 @@ onMounted(async () => {
   background: var(--ink-800);
   box-shadow: inset 3px 0 0 var(--azure);
 }
+.transactions-table tbody tr.row-pending {
+  box-shadow: inset 3px 0 0 var(--amber);
+}
 .transactions-table tbody tr.row-editing td {
   overflow: visible;
+}
+
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.status-dot.validated {
+  background: var(--mint-dim);
+  color: var(--mint);
+}
+.status-dot.pending {
+  background: var(--amber-dim);
+  border: 2px solid var(--amber);
 }
 .transactions-table tbody tr.row-editing input,
 .transactions-table tbody tr.row-editing select {

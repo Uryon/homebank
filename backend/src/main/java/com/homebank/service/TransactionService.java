@@ -5,10 +5,13 @@ import com.homebank.dto.TransferRequestDTO;
 import com.homebank.mapper.TransactionMapper;
 import com.homebank.model.Account;
 import com.homebank.model.Category;
+import com.homebank.model.Payee;
 import com.homebank.model.Transaction;
 import com.homebank.repository.TransactionRepository;
 import com.homebank.utils.PaymentMode;
 import com.homebank.utils.TransactionStatus;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,20 +23,25 @@ import java.util.NoSuchElementException;
 @Service
 public class TransactionService {
 
+    private static final Logger log = LoggerFactory.getLogger(TransactionService.class);
+
     private final TransactionRepository transactionRepository;
     private final AccountService accountService;
     private final CategoryService categoryService;
+    private final PayeeService payeeService;
     private final TransactionMapper transactionMapper;
 
     public TransactionService(
             TransactionRepository transactionRepository,
             AccountService accountService,
             CategoryService categoryService,
+            PayeeService payeeService,
             TransactionMapper transactionMapper) {
 
         this.transactionRepository = transactionRepository;
         this.accountService = accountService;
         this.categoryService = categoryService;
+        this.payeeService = payeeService;
         this.transactionMapper = transactionMapper;
     }
 
@@ -93,13 +101,36 @@ public class TransactionService {
 
     public TransactionDTO update(Long id, TransactionDTO payload) {
         Transaction existing = findEntityById(id);
+        String previousPayeeText = existing.getPayee();
+        BigDecimal previousAmount = existing.getAmount();
+
         applyPayload(existing, payload);
         Transaction saved = transactionRepository.save(existing);
+
+        // Nettoyage de l'ancien tiers "best effort" : ne doit jamais faire
+        // echouer la sauvegarde de la transaction elle-meme (deja actee a ce
+        // stade), meme en cas de probleme inattendu sur ce nettoyage annexe.
+        try {
+            payeeService.cleanupIfPayeeChanged(previousPayeeText, previousAmount, saved.getPayee(), saved.getAmount());
+        } catch (Exception e) {
+            log.warn("Echec du nettoyage de l'ancien tiers apres modification de la transaction {} : {}", id, e.getMessage(), e);
+        }
+
         return transactionMapper.toDTO(saved);
     }
 
     public void delete(Long id) {
+        Transaction existing = findEntityById(id);
+        String payeeText = existing.getPayee();
+        BigDecimal amount = existing.getAmount();
+
         transactionRepository.deleteById(id);
+
+        try {
+            payeeService.cleanupIfPayeeChanged(payeeText, amount, null, null);
+        } catch (Exception e) {
+            log.warn("Echec du nettoyage de l'ancien tiers apres suppression de la transaction {} : {}", id, e.getMessage(), e);
+        }
     }
 
     /** Passe toutes les transactions en attente au statut "validee". Renvoie le nombre concerne. */
@@ -187,7 +218,19 @@ public class TransactionService {
 
         transaction.setDate(payload.getDate());
         transaction.setAmount(payload.getAmount());
-        transaction.setPayee(payload.getPayee());
+
+        // Le tiers saisi/modifie passe par la meme reconnaissance/creation
+        // automatique que l'import (voir PayeeService#resolveOrCreate), afin
+        // que l'onglet "Tiers" reste toujours a jour avec les tiers realement
+        // utilises sur les transactions, meme lors d'une saisie manuelle.
+        String payeeText = payload.getPayee();
+        if (payeeText != null && !payeeText.isBlank()) {
+            Payee payee = payeeService.resolveOrCreate(payeeText, payload.getAmount());
+            transaction.setPayee(payee != null ? payee.getName() : payeeText);
+        } else {
+            transaction.setPayee(payeeText);
+        }
+
         transaction.setMemo(sanitizeMemo(payload.getMemo()));
         transaction.setPaymentMode(payload.getPaymentMode());
         transaction.setStatus(payload.getStatus());
