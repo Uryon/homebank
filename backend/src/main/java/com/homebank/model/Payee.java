@@ -23,8 +23,13 @@ public class Payee {
     private String name;
 
     /**
-     * Expression reguliere testee (insensible a la casse) sur le champ
-     * "payee" des transactions importees. Ex : "(?i)carrefour|market"
+     * Motif teste (insensible a la casse) sur le champ "payee" des
+     * transactions importees. Stocke et affiche tel quel, SANS etoile
+     * ("Carrefour") : les etoiles de "contient ce texte" ne sont ajoutees
+     * qu'au moment du traitement, jamais dans les donnees. Plusieurs motifs
+     * peuvent etre combines avec ";" (OR), et "*" reste utilisable comme
+     * joker pour un motif avance (ex : "Carrefour*Paris"). Voir PayeeService
+     * pour la logique complete.
      */
     @NotBlank
     @Column(nullable = false)

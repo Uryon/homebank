@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h1>Tiers</h1>
-        <div class="subtitle">Cliquez sur un tiers pour le modifier — catégorisation automatique par regexp à l'import</div>
+        <div class="subtitle">Cliquez sur un tiers pour le modifier — catégorisation automatique à l'import</div>
       </div>
       <div style="display:flex; gap:10px;">
         <button class="btn secondary" :disabled="initializing" @click="initializeFromTransactions">
@@ -33,8 +33,8 @@
       <table class="payees-table">
         <colgroup>
           <col style="width: 36px;" />
-          <col style="width: 220px;" />
-          <col />
+          <col style="width: 400px;" />
+          <col style="width: 160px;" />
           <col style="width: 130px;" />
           <col style="width: 220px;" />
           <col style="width: 90px;" />
@@ -43,7 +43,7 @@
           <tr>
             <th></th>
             <th>Nom</th>
-            <th>Regexp de reconnaissance</th>
+            <th title="Insensible aux majuscules. Tapez juste 'Carrefour' pour reconnaître tout libellé qui le contient.">Motif de reconnaissance</th>
             <th class="num">Montant</th>
             <th>Catégorie associée</th>
             <th></th>
@@ -62,7 +62,7 @@
 
             <template v-if="editingId === p.id">
               <td @click.stop><input v-model="editForm.name" ref="firstEditField" /></td>
-              <td @click.stop><input v-model="editForm.pattern" /></td>
+              <td @click.stop><input v-model="editForm.pattern" placeholder="Ex : Carrefour" /></td>
               <td class="num" @click.stop>
                 <input v-model.number="editForm.amount" type="number" step="0.01" style="text-align:right;" placeholder="Tous montants" />
               </td>
@@ -94,7 +94,7 @@
       {{
         searchQuery.trim()
           ? 'Aucun tiers ne correspond à cette recherche.'
-          : 'Aucun tiers enregistré. Créez-en un pour catégoriser automatiquement vos imports (ex : nom "Carrefour", regexp (?i)carrefour, catégorie "Alimentation").'
+          : 'Aucun tiers enregistré. Créez-en un pour catégoriser automatiquement vos imports (ex : nom "Carrefour", motif Carrefour, catégorie "Alimentation").'
       }}
     </div>
 
@@ -108,8 +108,15 @@
             <input v-model="form.name" placeholder="Ex : Carrefour" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
-            <label>Regexp de reconnaissance (testée sur le champ "tiers" importé)</label>
-            <input v-model="form.pattern" placeholder="Ex : (?i)carrefour|market" />
+            <label>Motif de reconnaissance</label>
+            <input v-model="form.pattern" placeholder='Ex : Carrefour' />
+            <div class="text-hint">
+              Tapez simplement le texte à repérer (ex : <code>Carrefour</code>) : il sera
+              reconnu partout où il apparaît dans le libellé de la transaction, quelle que
+              soit la casse (CARREFOUR, Carrefour, carrefour...). Pas besoin d'ajouter d'étoiles,
+              c'est fait automatiquement. Pour des cas plus précis, vous pouvez tout de même
+              utiliser <code>*</code> comme joker (ex : <code>Carrefour*Paris</code>).
+            </div>
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label>Montant associé (laisser vide = s'applique à tous les montants)</label>
@@ -232,13 +239,7 @@ function openCreate() {
 
 async function save() {
   if (!form.value.name.trim() || !form.value.pattern.trim()) {
-    alert('Le nom et la regexp sont obligatoires.')
-    return
-  }
-  try {
-    new RegExp(form.value.pattern)
-  } catch (e) {
-    alert('Cette regexp est invalide : ' + e.message)
+    alert('Le nom et le motif sont obligatoires.')
     return
   }
   await PayeesAPI.create(form.value)
@@ -286,13 +287,7 @@ function cancelEdit() {
 async function confirmEdit() {
   if (!editingId.value || !editForm.value) return
   if (!editForm.value.name.trim() || !editForm.value.pattern.trim()) {
-    alert('Le nom et la regexp sont obligatoires.')
-    return
-  }
-  try {
-    new RegExp(editForm.value.pattern)
-  } catch (e) {
-    alert('Cette regexp est invalide : ' + e.message)
+    alert('Le nom et le motif sont obligatoires.')
     return
   }
   const id = editingId.value
@@ -380,5 +375,17 @@ onMounted(async () => {
 }
 .payees-table tbody tr.row-editing td:last-child {
   background: var(--ink-800);
+}
+.text-hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+.text-hint code {
+  background: var(--ink-800);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
 }
 </style>

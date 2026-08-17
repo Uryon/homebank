@@ -14,15 +14,6 @@
         <input v-model="searchQuery" placeholder="Ex : Alimentation" style="min-width: 240px;" />
       </div>
 
-      <div class="form-field">
-        <label>Afficher</label>
-        <select v-model="typeFilter">
-          <option value="BOTH">Les deux</option>
-          <option value="EXPENSE">Dépenses</option>
-          <option value="INCOME">Gains</option>
-        </select>
-      </div>
-
       <div v-if="selectedIds.length >= 2" class="form-field" style="align-self: flex-end;">
         <button class="btn" @click="openMergeModal">
           Fusionner ({{ selectedIds.length }} sélectionnées)
@@ -33,76 +24,167 @@
       </div>
     </div>
 
-    <div v-if="filteredRoots.length" class="card">
-      <div v-for="root in filteredRoots" :key="root.id" style="margin-bottom: 18px;">
-        <!-- Ligne racine -->
-        <div
-          class="cat-row"
-          :class="{ 'cat-row-editing': editingId === root.id }"
-          style="border-bottom: 1px solid var(--line);"
-          @click="editingId !== root.id && startEdit(root)"
-          @keydown.enter.prevent="editingId === root.id && confirmEdit()"
-          @keydown.esc="cancelEdit"
-        >
-          <template v-if="editingId === root.id">
-            <div class="cat-row-inline" @click.stop>
-              <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
-              <select v-model="editForm.type">
-                <option value="EXPENSE">Dépense</option>
-                <option value="INCOME">Revenu</option>
-                <option value="BOTH">Les deux</option>
-              </select>
-              <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
-              <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
-            </div>
-          </template>
-          <template v-else>
-            <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
-              <input type="checkbox" :value="root.id" v-model="selectedIds" @click.stop />
-              <strong>{{ root.name }}</strong>
-              <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
-            </div>
-            <div @click.stop>
-              <button class="btn secondary" style="margin-right:6px;" @click="openCreate(root)">+ Sous-catégorie</button>
-              <button class="btn danger" @click="remove(root)">Supprimer</button>
-            </div>
-          </template>
+    <div v-if="expenseRoots.length || incomeRoots.length" class="categories-columns">
+      <!-- Colonne Dépenses -->
+      <div class="card column-card">
+        <div class="column-title">
+          <span class="column-dot expense"></span> Dépenses
         </div>
 
-        <!-- Sous-catégories -->
-        <div
-          v-for="child in filteredChildren(root.id)"
-          :key="child.id"
-          class="cat-row"
-          :class="{ 'cat-row-editing': editingId === child.id }"
-          style="padding-left: 24px; border-bottom: 1px solid var(--line);"
-          @click="editingId !== child.id && startEdit(child)"
-          @keydown.enter.prevent="editingId === child.id && confirmEdit()"
-          @keydown.esc="cancelEdit"
-        >
-          <template v-if="editingId === child.id">
-            <div class="cat-row-inline" @click.stop>
-              <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
-              <select v-model.number="editForm.parentId">
-                <option v-for="r in roots" :key="r.id" :value="r.id">{{ r.name }}</option>
-              </select>
-              <span class="text-muted" style="font-size: 12px;">
-                {{ typeLabel(roots.find(r => r.id === editForm.parentId)?.type) }} (hérité du parent)
-              </span>
-              <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
-              <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
+        <div v-if="expenseRoots.length">
+          <div v-for="root in expenseRoots" :key="'exp-' + root.id" style="margin-bottom: 18px;">
+            <!-- Ligne racine -->
+            <div
+              class="cat-row"
+              :class="{ 'cat-row-editing': editingId === root.id }"
+              style="border-bottom: 1px solid var(--line);"
+              @click="editingId !== root.id && startEdit(root)"
+              @keydown.enter.prevent="editingId === root.id && confirmEdit()"
+              @keydown.esc="cancelEdit"
+            >
+              <template v-if="editingId === root.id">
+                <div class="cat-row-inline" @click.stop>
+                  <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
+                  <select v-model="editForm.type">
+                    <option value="EXPENSE">Dépense</option>
+                    <option value="INCOME">Revenu</option>
+                    <option value="BOTH">Les deux</option>
+                  </select>
+                  <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
+                  <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
+                </div>
+              </template>
+              <template v-else>
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
+                  <input type="checkbox" :value="root.id" v-model="selectedIds" @click.stop />
+                  <strong>{{ root.name }}</strong>
+                  <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
+                </div>
+                <div @click.stop>
+                  <button class="btn secondary" style="margin-right:6px;" @click="openCreate(root)">+ Sous-catégorie</button>
+                  <button class="btn danger" @click="remove(root)">Supprimer</button>
+                </div>
+              </template>
             </div>
-          </template>
-          <template v-else>
-            <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);">
-              <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
-              <span>{{ child.name }}</span>
+
+            <!-- Sous-catégories -->
+            <div
+              v-for="child in filteredChildren(root.id)"
+              :key="child.id"
+              class="cat-row"
+              :class="{ 'cat-row-editing': editingId === child.id }"
+              style="padding-left: 24px; border-bottom: 1px solid var(--line);"
+              @click="editingId !== child.id && startEdit(child)"
+              @keydown.enter.prevent="editingId === child.id && confirmEdit()"
+              @keydown.esc="cancelEdit"
+            >
+              <template v-if="editingId === child.id">
+                <div class="cat-row-inline" @click.stop>
+                  <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
+                  <select v-model.number="editForm.parentId">
+                    <option v-for="r in roots" :key="r.id" :value="r.id">{{ r.name }}</option>
+                  </select>
+                  <span class="text-muted" style="font-size: 12px;">
+                    {{ typeLabel(roots.find(r => r.id === editForm.parentId)?.type) }} (hérité du parent)
+                  </span>
+                  <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
+                  <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
+                </div>
+              </template>
+              <template v-else>
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);">
+                  <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
+                  <span>{{ child.name }}</span>
+                </div>
+                <div @click.stop>
+                  <button class="btn danger" @click="remove(child)">Supprimer</button>
+                </div>
+              </template>
             </div>
-            <div @click.stop>
-              <button class="btn danger" @click="remove(child)">Supprimer</button>
-            </div>
-          </template>
+          </div>
         </div>
+        <div v-else class="empty-state">Aucune catégorie de dépense.</div>
+      </div>
+
+      <!-- Colonne Revenus -->
+      <div class="card column-card">
+        <div class="column-title">
+          <span class="column-dot income"></span> Revenus
+        </div>
+
+        <div v-if="incomeRoots.length">
+          <div v-for="root in incomeRoots" :key="'inc-' + root.id" style="margin-bottom: 18px;">
+            <!-- Ligne racine -->
+            <div
+              class="cat-row"
+              :class="{ 'cat-row-editing': editingId === root.id }"
+              style="border-bottom: 1px solid var(--line);"
+              @click="editingId !== root.id && startEdit(root)"
+              @keydown.enter.prevent="editingId === root.id && confirmEdit()"
+              @keydown.esc="cancelEdit"
+            >
+              <template v-if="editingId === root.id">
+                <div class="cat-row-inline" @click.stop>
+                  <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
+                  <select v-model="editForm.type">
+                    <option value="EXPENSE">Dépense</option>
+                    <option value="INCOME">Revenu</option>
+                    <option value="BOTH">Les deux</option>
+                  </select>
+                  <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
+                  <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
+                </div>
+              </template>
+              <template v-else>
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
+                  <input type="checkbox" :value="root.id" v-model="selectedIds" @click.stop />
+                  <strong>{{ root.name }}</strong>
+                  <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
+                </div>
+                <div @click.stop>
+                  <button class="btn secondary" style="margin-right:6px;" @click="openCreate(root)">+ Sous-catégorie</button>
+                  <button class="btn danger" @click="remove(root)">Supprimer</button>
+                </div>
+              </template>
+            </div>
+
+            <!-- Sous-catégories -->
+            <div
+              v-for="child in filteredChildren(root.id)"
+              :key="child.id"
+              class="cat-row"
+              :class="{ 'cat-row-editing': editingId === child.id }"
+              style="padding-left: 24px; border-bottom: 1px solid var(--line);"
+              @click="editingId !== child.id && startEdit(child)"
+              @keydown.enter.prevent="editingId === child.id && confirmEdit()"
+              @keydown.esc="cancelEdit"
+            >
+              <template v-if="editingId === child.id">
+                <div class="cat-row-inline" @click.stop>
+                  <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
+                  <select v-model.number="editForm.parentId">
+                    <option v-for="r in roots" :key="r.id" :value="r.id">{{ r.name }}</option>
+                  </select>
+                  <span class="text-muted" style="font-size: 12px;">
+                    {{ typeLabel(roots.find(r => r.id === editForm.parentId)?.type) }} (hérité du parent)
+                  </span>
+                  <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
+                  <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
+                </div>
+              </template>
+              <template v-else>
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);">
+                  <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
+                  <span>{{ child.name }}</span>
+                </div>
+                <div @click.stop>
+                  <button class="btn danger" @click="remove(child)">Supprimer</button>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+        <div v-else class="empty-state">Aucune catégorie de revenu.</div>
       </div>
     </div>
     <div v-else class="empty-state">
@@ -184,7 +266,6 @@ const categories = ref([])
 const roots = ref([])
 const showModal = ref(false)
 const searchQuery = ref('')
-const typeFilter = ref('BOTH')
 const form = ref(emptyForm())
 
 const editingId = ref(null)
@@ -204,27 +285,26 @@ function children(rootId) {
   return categories.value.filter(c => c.parentId === rootId)
 }
 
-/** Une catégorie correspond au filtre de type si son type matche exactement, ou si elle est marquée "Les deux". */
-function matchesTypeFilter(category) {
-  if (typeFilter.value === 'BOTH') return true
-  return category.type === typeFilter.value || category.type === 'BOTH'
-}
-
 const filteredRoots = computed(() => {
   const q = normalizeSearch(searchQuery.value)
-  return roots.value.filter(root => {
-    if (!matchesTypeFilter(root)) return false
-    if (!q) return true
-    return (
-      normalizeSearch(root.name).includes(q) ||
-      children(root.id).some(child => normalizeSearch(child.name).includes(q))
-    )
-  })
+  if (!q) return roots.value
+  return roots.value.filter(root =>
+    normalizeSearch(root.name).includes(q) ||
+    children(root.id).some(child => normalizeSearch(child.name).includes(q))
+  )
 })
+
+/**
+ * Répartition en deux colonnes : Dépenses à gauche, Revenus à droite.
+ * Une catégorie marquée "Les deux" apparaît dans les deux colonnes,
+ * puisqu'elle s'applique aux deux contextes.
+ */
+const expenseRoots = computed(() => filteredRoots.value.filter(r => r.type === 'EXPENSE' || r.type === 'BOTH'))
+const incomeRoots = computed(() => filteredRoots.value.filter(r => r.type === 'INCOME' || r.type === 'BOTH'))
 
 function filteredChildren(rootId) {
   const q = normalizeSearch(searchQuery.value)
-  const kids = children(rootId).filter(matchesTypeFilter)
+  const kids = children(rootId)
   if (!q) return kids
   const root = roots.value.find(r => r.id === rootId)
   if (root && normalizeSearch(root.name).includes(q)) return kids
@@ -347,6 +427,43 @@ onMounted(load)
 </script>
 
 <style scoped>
+.categories-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .categories-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.column-card {
+  min-width: 0;
+}
+
+.column-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid var(--line);
+}
+.column-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.column-dot.expense { background: var(--coral); }
+.column-dot.income { background: var(--mint); }
+
 .cat-row {
   display: flex;
   align-items: center;

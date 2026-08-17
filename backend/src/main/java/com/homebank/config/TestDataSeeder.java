@@ -71,10 +71,10 @@ public class TestDataSeeder implements CommandLineRunner {
         Category salaire = rootCategory("Salaire", Category.CategoryType.INCOME);
 
         // --- Tiers (auto-catégorisation) ---
-        payee("Carrefour", "(?i)carrefour", null, supermarche);
-        payee("Employeur", "(?i)employeur|virement salaire", null, salaire);
-        payee("Bailleur", "(?i)bailleur|loyer", null, loyer);
-        payee("Netflix", "(?i)netflix", new BigDecimal("15.00"), abonnements);
+        payee("Carrefour", "Carrefour", null, supermarche);
+        payee("Employeur", "Employeur;Virement salaire", null, salaire);
+        payee("Bailleur", "Bailleur;Loyer", null, loyer);
+        payee("Netflix", "Netflix", new BigDecimal("15.00"), abonnements);
 
         // --- Transactions : 4 derniers mois, revenus + depenses variees ---
         LocalDate today = LocalDate.now();

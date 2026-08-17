@@ -67,7 +67,21 @@ public class PayeeService {
 
     private void applyPayload(Payee p, PayeeDTO payload) {
         p.setName(payload.getName());
-        p.setPattern(payload.getPattern());
+
+        // Le champ "pattern" est du texte simple, stocke et affiche TEL QUEL
+        // (sans etoile) : "Carrefour" suffit. Les etoiles ne sont ajoutees
+        // qu'au moment du traitement (voir matchesPatternField), jamais dans
+        // les donnees stockees ni dans l'interface.
+        String pattern = payload.getPattern();
+        if (pattern == null || pattern.isBlank()) {
+            pattern = (p.getPattern() != null && !p.getPattern().isBlank())
+                    ? p.getPattern()
+                    : defaultPattern(payload.getName());
+        } else {
+            pattern = normalizePatternSegments(pattern);
+        }
+        p.setPattern(pattern);
+
         p.setAmount(payload.getAmount() != null ? payload.getAmount().abs() : null);
         if (payload.getCategoryId() != null) {
             Category category = categoryService.findById(payload.getCategoryId());
@@ -75,6 +89,79 @@ public class PayeeService {
         } else {
             p.setCategory(null);
         }
+    }
+
+    // =========================================================================
+    // Reconnaissance des tiers par "motif joker" (pas de vraie regex a connaitre)
+    // =========================================================================
+    //
+    // Le champ "pattern" d'un tiers, tel que stocke et affiche, est du texte
+    // simple SANS etoile ("Carrefour"). Les etoiles ne sont ajoutees que lors
+    // du TRAITEMENT (matching), jamais dans les donnees ni dans l'interface :
+    //   - "Carrefour"        -> traite comme "*Carrefour*" au moment de la
+    //                           comparaison : reconnait tout texte CONTENANT
+    //                           "Carrefour" (insensible a la casse)
+    //   - "Carrefour*Paris"  -> motif avance : l'utilisateur a lui-meme mis
+    //                           une etoile au milieu, donc pas d'etoiles
+    //                           ajoutees en plus ; reconnait "Carrefour" suivi
+    //                           n'importe ou plus loin de "Paris"
+    // Plusieurs motifs peuvent etre combines en les separant par un point-virgule
+    // ";" (utilise notamment lors d'une fusion de tiers) : le tiers matche si
+    // AU MOINS UN des motifs correspond.
+
+    /** Motif par defaut a partir du nom d'un tiers : le nom lui-meme, tel quel (sans etoile). */
+    private static String defaultPattern(String name) {
+        return name != null ? name.trim() : "";
+    }
+
+    /**
+     * Normalise un motif saisi par l'utilisateur : se contente de nettoyer les
+     * espaces autour de chaque morceau separe par ";", sans jamais ajouter
+     * d'etoile (le champ reste du texte simple, l'ajout des etoiles se fait
+     * uniquement au traitement, voir matchesPatternField).
+     */
+    private static String normalizePatternSegments(String rawField) {
+        String[] parts = rawField.split(";", -1);
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) result.append(";");
+            result.append(parts[i].trim());
+        }
+        return result.toString();
+    }
+
+    /** Convertit un seul motif "joker" (avec *) en expression reguliere Java equivalente. */
+    private static String wildcardToRegex(String wildcardPattern) {
+        String[] parts = wildcardPattern.split("\\*", -1);
+        StringBuilder regex = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) regex.append(".*");
+            if (!parts[i].isEmpty()) regex.append(Pattern.quote(parts[i]));
+        }
+        return regex.toString();
+    }
+
+    /** Teste si le champ "pattern" (un ou plusieurs motifs separes par ";") correspond au texte donne. */
+    private static boolean matchesPatternField(String patternField, String text) {
+        if (patternField == null || patternField.isBlank() || text == null || text.isBlank()) return false;
+        for (String rawPart : patternField.split(";")) {
+            String part = rawPart.trim();
+            if (part.isEmpty()) continue;
+            try {
+                // Le champ stocke/affiche est du texte simple, sans etoile
+                // ("Carrefour"). C'est ICI, au moment du traitement seulement,
+                // qu'on l'entoure d'etoiles ("*Carrefour*") pour qu'il soit
+                // reconnu partout ou il apparait dans le libelle. Si l'utilisateur
+                // a lui-meme mis une etoile (motif avance, ex : "Carrefour*Paris"),
+                // on ne touche a rien de plus : il sait ce qu'il fait.
+                String wildcarded = part.indexOf('*') < 0 ? "*" + part + "*" : part;
+                Pattern compiled = Pattern.compile(wildcardToRegex(wildcarded), Pattern.CASE_INSENSITIVE);
+                if (compiled.matcher(text).find()) return true;
+            } catch (PatternSyntaxException e) {
+                // motif invalide (ne devrait plus arriver avec le systeme "joker") : on l'ignore
+            }
+        }
+        return false;
     }
 
     /**
@@ -96,17 +183,12 @@ public class PayeeService {
         Payee genericMatch = null;
 
         for (Payee payee : payeeRepository.findAll()) {
-            try {
-                Pattern pattern = Pattern.compile(payee.getPattern(), Pattern.CASE_INSENSITIVE);
-                if (!pattern.matcher(text).find()) continue;
+            if (!matchesPatternField(payee.getPattern(), text)) continue;
 
-                if (payee.getAmount() == null) {
-                    if (genericMatch == null) genericMatch = payee;
-                } else if (amount != null && payee.getAmount().compareTo(amount) == 0) {
-                    return Optional.of(payee); // correspondance exacte nom + montant : priorite absolue
-                }
-            } catch (PatternSyntaxException e) {
-                // regexp invalide sur ce tiers : on l'ignore et on continue avec les suivants
+            if (payee.getAmount() == null) {
+                if (genericMatch == null) genericMatch = payee;
+            } else if (amount != null && payee.getAmount().compareTo(amount) == 0) {
+                return Optional.of(payee); // correspondance exacte nom + montant : priorite absolue
             }
         }
         return Optional.ofNullable(genericMatch);
@@ -118,11 +200,11 @@ public class PayeeService {
      *   generique sans montant), on le renvoie tel quel (son nom peut avoir
      *   ete renomme manuellement par l'utilisateur : c'est ce nom "canonique"
      *   qui sera utilise sur la transaction) ;
-     * - sinon, un nouveau tiers est cree automatiquement avec pour nom le texte
-     *   brut rencontre et pour montant le montant donne, avec une regexp qui
-     *   reconnait ce texte exact. Si ce meme texte brut revient plus tard avec
-     *   un montant different, un AUTRE tiers distinct sera cree, meme nom
-     *   au depart mais que l'utilisateur pourra renommer independamment
+     * - sinon, un nouveau tiers est cree automatiquement avec pour nom ET pour
+     *   motif le texte brut rencontre (tel quel, sans etoile ajoutee : voir
+     *   matchesPatternField pour le traitement). Si ce meme texte brut revient plus
+     *   tard avec un montant different, un AUTRE tiers distinct sera cree,
+     *   meme nom au depart mais que l'utilisateur pourra renommer independamment
      *   (ex : "Bouygues Mel" pour 10E, "Bouygues Val" pour 20E).
      */
     public Payee resolveOrCreate(String rawText, BigDecimal amount) {
@@ -134,13 +216,13 @@ public class PayeeService {
         if (matched.isPresent()) return matched.get();
 
         // Filet de securite : evite un doublon si un tiers de meme nom ET meme
-        // montant existe deja mais que sa regexp ne matchait pas ce texte precis.
+        // montant existe deja mais que son motif ne matchait pas ce texte precis.
         Optional<Payee> byNameAndAmount = payeeRepository.findByNameIgnoreCaseAndAmount(trimmed, normalizedAmount);
         if (byNameAndAmount.isPresent()) return byNameAndAmount.get();
 
         Payee created = new Payee();
         created.setName(trimmed);
-        created.setPattern(Pattern.quote(trimmed));
+        created.setPattern(defaultPattern(trimmed));
         created.setAmount(normalizedAmount);
         return payeeRepository.save(created);
     }
@@ -190,10 +272,9 @@ public class PayeeService {
      * modifie le tiers d'une transaction a la main.
      *
      * Par securite, ne supprime que les tiers encore dans leur etat
-     * "auto-cree" (regexp = citation exacte du nom, jamais personnalisee
-     * depuis) : un tiers renomme ou dont la regexp a ete modifiee a la main
-     * par l'utilisateur (page Tiers, fusion...) n'est jamais supprime
-     * automatiquement.
+     * "auto-cree" (motif = nom exact, jamais personnalise depuis) :
+     * un tiers renomme ou dont le motif a ete modifie a la main par l'utilisateur
+     * (page Tiers, fusion...) n'est jamais supprime automatiquement.
      */
     @org.springframework.transaction.annotation.Transactional
     public void cleanupIfPayeeChanged(String previousPayeeText, BigDecimal previousAmount,
@@ -211,9 +292,9 @@ public class PayeeService {
 
     private void pruneIfOrphan(Payee payee) {
         if (payee == null || payee.getId() == null) return;
-        // Tiers personnalise (renomme, regexp modifiee, fusion...) : on ne
+        // Tiers personnalise (renomme, motif modifie, fusion...) : on ne
         // touche jamais a un tiers dans lequel l'utilisateur a investi du travail.
-        if (!payee.getPattern().equals(Pattern.quote(payee.getName()))) return;
+        if (!payee.getPattern().equals(defaultPattern(payee.getName()))) return;
 
         boolean stillUsed = transactionRepository.findAllPayeeAmountPairs().stream()
                 .anyMatch(row -> matches(payee, (String) row[0], (BigDecimal) row[1]));
@@ -224,13 +305,7 @@ public class PayeeService {
     }
 
     private boolean matches(Payee payee, String text, BigDecimal amount) {
-        if (text == null || text.isBlank()) return false;
-        try {
-            Pattern pattern = Pattern.compile(payee.getPattern(), Pattern.CASE_INSENSITIVE);
-            if (!pattern.matcher(text.trim()).find()) return false;
-        } catch (PatternSyntaxException e) {
-            return false;
-        }
+        if (!matchesPatternField(payee.getPattern(), text != null ? text.trim() : null)) return false;
         if (payee.getAmount() == null) return true;
         return amount != null && payee.getAmount().compareTo(amount.abs()) == 0;
     }
@@ -240,8 +315,8 @@ public class PayeeService {
      * - toutes les transactions dont le tiers correspondait a une source
      *   (texte exact, insensible a la casse) sont renommees vers le nom
      *   du tiers cible ;
-     * - les regexp des tiers source sont combinees a celle de la cible
-     *   (alternation) pour que les futurs imports reconnaissant l'un ou
+     * - les motifs des tiers source sont combines a celui de la cible
+     *   (separes par ";") pour que les futurs imports reconnaissant l'un ou
      *   l'autre texte continuent d'aboutir au tiers fusionne ;
      * - la categorie de la cible est completee avec celle d'une source si
      *   la cible n'en avait pas encore ;
@@ -258,7 +333,7 @@ public class PayeeService {
 
             transactionRepository.renamePayeeText(source.getName(), target.getName());
 
-            target.setPattern(target.getPattern() + "|" + source.getPattern());
+            target.setPattern(target.getPattern() + ";" + source.getPattern());
 
             if (target.getCategory() == null && source.getCategory() != null) {
                 target.setCategory(source.getCategory());
