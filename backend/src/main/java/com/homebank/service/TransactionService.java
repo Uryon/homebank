@@ -68,6 +68,30 @@ public class TransactionService {
                 .toList();
     }
 
+    /**
+     * Recherche de transactions par montant, avec un operateur de comparaison
+     * (">", "<" ou "=") et optionnellement un compte pour restreindre la
+     * recherche — utilisee par le champ de recherche de l'onglet Transactions
+     * (ex : "> 100", "< 50", "= 42.50"). Filtree directement en base plutot
+     * que de charger toutes les transactions cote frontend pour les filtrer
+     * ensuite en Javascript.
+     */
+    public List<TransactionDTO> findByAmountFilter(Long accountId, String operator, BigDecimal amount) {
+        List<Transaction> results = switch (operator) {
+            case ">" -> accountId != null
+                    ? transactionRepository.findByAccount_IdAndAmountGreaterThanOrderByDateDescIdDesc(accountId, amount)
+                    : transactionRepository.findByAmountGreaterThanOrderByDateDescIdDesc(amount);
+            case "<" -> accountId != null
+                    ? transactionRepository.findByAccount_IdAndAmountLessThanOrderByDateDescIdDesc(accountId, amount)
+                    : transactionRepository.findByAmountLessThanOrderByDateDescIdDesc(amount);
+            case "=" -> accountId != null
+                    ? transactionRepository.findByAccount_IdAndAmountOrderByDateDescIdDesc(accountId, amount)
+                    : transactionRepository.findByAmountOrderByDateDescIdDesc(amount);
+            default -> throw new IllegalArgumentException("Operateur de montant invalide : " + operator);
+        };
+        return results.stream().map(transactionMapper::toDTO).toList();
+    }
+
     public List<TransactionDTO> findPending() {
         return transactionRepository.findByValidatedFalseOrderByDateDescIdDesc()
                 .stream()

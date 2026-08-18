@@ -22,6 +22,19 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
 
     List<Transaction> findByAccountIdAndDateBetween(Long accountId, LocalDate from, LocalDate to);
 
+    /** Recherche de transactions par montant (operateur > < =), utilisee par la recherche de l'onglet Transactions. */
+    List<Transaction> findByAmountGreaterThanOrderByDateDescIdDesc(BigDecimal amount);
+
+    List<Transaction> findByAmountLessThanOrderByDateDescIdDesc(BigDecimal amount);
+
+    List<Transaction> findByAmountOrderByDateDescIdDesc(BigDecimal amount);
+
+    List<Transaction> findByAccount_IdAndAmountGreaterThanOrderByDateDescIdDesc(Long accountId, BigDecimal amount);
+
+    List<Transaction> findByAccount_IdAndAmountLessThanOrderByDateDescIdDesc(Long accountId, BigDecimal amount);
+
+    List<Transaction> findByAccount_IdAndAmountOrderByDateDescIdDesc(Long accountId, BigDecimal amount);
+
     List<Transaction> findByValidatedFalseOrderByDateDescIdDesc();
 
     List<Transaction> findByMonthlyExpenseTrueOrderByDateDescIdDesc();
@@ -88,4 +101,32 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
                                               @Param("date") LocalDate date,
                                               @Param("amount") BigDecimal amount,
                                               @Param("payee") String payee);
+
+
+    /**
+     * Agrégation mensuelle par catégorie pour les rapports financiers.
+     * Le regroupement est effectué en base afin d'éviter de charger toutes les
+     * transactions côté application pour construire le tableau des 12 derniers mois.
+     */
+    @Query(value = """
+            SELECT c.id, c.name, p.id, p.name, c.type,
+                   EXTRACT(YEAR FROM t.date)::integer,
+                   EXTRACT(MONTH FROM t.date)::integer,
+                   SUM(t.amount)
+            FROM transactions t
+            LEFT JOIN categories c ON t.category_id = c.id
+            LEFT JOIN categories p ON c.parent_id = p.id
+            WHERE t.date BETWEEN :from AND :to
+              AND t.payment_mode <> 'TRANSFER'
+              AND (:accountId IS NULL OR t.account_id = :accountId)
+            GROUP BY c.id, c.name, p.id, p.name, c.type,
+                     EXTRACT(YEAR FROM t.date), EXTRACT(MONTH FROM t.date)
+            ORDER BY p.name ASC, c.name ASC,
+                     EXTRACT(YEAR FROM t.date) ASC, EXTRACT(MONTH FROM t.date) ASC
+            """, nativeQuery = true)
+    List<Object[]> aggregateMonthlyByCategory(
+            @Param("from") LocalDate from,
+            @Param("to") LocalDate to,
+            @Param("accountId") Long accountId);
+
 }

@@ -21,8 +21,11 @@
       </div>
 
       <div class="form-field">
-        <label>Recherche (tiers, dépense, revenu)</label>
-        <input v-model="searchQuery" placeholder="Ex : Carrefour ou 42,50" style="min-width: 240px;" />
+        <label>Recherche (tiers, montant, ou &gt; / &lt; / = un montant)</label>
+        <input v-model="searchQuery" placeholder="Ex : Carrefour, 42,50 ou > 100" style="min-width: 260px;" />
+        <div v-if="amountQuery" class="text-hint">
+          {{ amountSearchLoading ? 'Recherche…' : `${filteredTransactions.length} transaction(s) trouvée(s)` }}
+        </div>
       </div>
 
       <div class="form-field" style="align-self: flex-end;">
@@ -70,7 +73,11 @@
           <tr
             v-for="t in filteredTransactions"
             :key="t.id"
-            :class="{ 'row-editing': editingId === t.id, 'row-pending': editingId !== t.id && !t.validated }"
+            :class="{
+              'row-editing': editingId === t.id,
+              'row-pending': editingId !== t.id && !t.validated,
+              'row-future': editingId !== t.id && isFuture(t.date)
+            }"
             @click="editingId !== t.id && startEdit(t)"
             @keydown.esc="cancelEdit"
             @keydown.enter.prevent="editingId === t.id && confirmEdit()"
@@ -121,7 +128,10 @@
                   {{ t.validated ? '✓' : '' }}
                 </span>
               </td>
-              <td class="col-date">{{ formatDate(t.date) }}</td>
+              <td class="col-date">
+                {{ formatDate(t.date) }}
+                <span v-if="isFuture(t.date)" class="future-badge" title="Transaction prévue à une date future : elle n'a pas encore réellement eu lieu et n'est pas comptée dans les statistiques.">Prévu</span>
+              </td>
               <td>{{ accountName(t.accountId) }}</td>
               <td class="col-payee" :title="t.payee">{{ t.payee }}</td>
               <td>{{ categoryLabel(t.categoryId) }}</td>
@@ -235,12 +245,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, computed, nextTick, watch } from 'vue'
 import {
   TransactionsAPI
 } from '../services/api'
 import { dataStore } from '../services/dataStore'
-import { normalizeSearch } from '../services/search'
+import { normalizeSearch, parseAmountQuery } from '../services/search'
 
 const filterAccount = ref(null)
 const searchQuery = ref('')
@@ -289,8 +299,15 @@ function emptyForm() {
  * Filtre les transactions par le texte de recherche : cherche à la fois
  * dans le tiers (payee) et dans le montant (dépense ou revenu), peu importe
  * le format saisi (avec virgule, point, signe, ou juste des chiffres).
+ *
+ * Cas particulier : si le texte est une expression de comparaison de montant
+ * ("> 100", "< 50", "= 42.50"), la recherche bascule sur amountSearchResults,
+ * deja filtre cote backend (voir watcher plus bas) plutot que de filtrer en
+ * Javascript la liste complete des transactions.
  */
 const filteredTransactions = computed(() => {
+  if (amountQuery.value) return amountSearchResults.value ?? []
+
   const q = normalizeSearch(searchQuery.value)
   if (!q) return transactions.value
 
@@ -310,6 +327,38 @@ const filteredTransactions = computed(() => {
 
     return payeeMatch || amountMatch
   })
+})
+
+/**
+ * Recherche par montant avec operateur (">", "<", "=") : filtree directement
+ * cote backend (voir TransactionController/TransactionService) pour eviter
+ * de charger inutilement toutes les transactions cote frontend. Un leger
+ * debounce evite un appel reseau a chaque frappe pendant la saisie du nombre.
+ */
+const amountQuery = computed(() => parseAmountQuery(searchQuery.value))
+const amountSearchResults = ref(null)
+const amountSearchLoading = ref(false)
+let amountSearchTimer = null
+
+watch([amountQuery, filterAccount], ([query, accountId]) => {
+  clearTimeout(amountSearchTimer)
+  if (!query) {
+    amountSearchResults.value = null
+    amountSearchLoading.value = false
+    return
+  }
+  amountSearchLoading.value = true
+  amountSearchTimer = setTimeout(async () => {
+    try {
+      amountSearchResults.value = await TransactionsAPI.list({
+        accountId: accountId ?? undefined,
+        amountOperator: query.operator,
+        amountValue: query.value
+      })
+    } finally {
+      amountSearchLoading.value = false
+    }
+  }, 250)
 })
 
 const flatCategories = computed(() => {
@@ -359,6 +408,16 @@ function formatDate(iso) {
   if (!iso) return ''
   const [y, m, d] = iso.split('-')
   return `${d}/${m}/${y}`
+}
+
+/**
+ * Une transaction est "future" si sa date est strictement postérieure à
+ * aujourd'hui : elle est prévue mais n'a pas encore réellement eu lieu
+ * (comparaison de chaînes ISO "AAAA-MM-JJ", fiable sans passer par Date()).
+ */
+const todayIso = new Date().toISOString().slice(0, 10)
+function isFuture(iso) {
+  return !!iso && iso > todayIso
 }
 
 async function load() {
@@ -577,6 +636,39 @@ onMounted(async () => {
   overflow: visible;
 }
 
+/*
+ * Transaction future (date > aujourd'hui) : prevue mais pas encore
+ * reellement survenue, dans l'esprit YNAB. Fond attenue + texte plus clair
+ * pour la distinguer immediatement des transactions deja effectuees, tout
+ * en restant lisible et sans bloquer l'edition/les actions habituelles.
+ */
+.transactions-table tbody tr.row-future td {
+  background: var(--ink-800);
+  color: var(--text-faint);
+}
+.transactions-table tbody tr.row-future td.amount.negative {
+  color: #C98E8E;
+}
+.transactions-table tbody tr.row-future td.amount.positive {
+  color: #8FC0A6;
+}
+.transactions-table tbody tr.row-future:hover td {
+  background: var(--ink-700);
+}
+.future-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--ink-700);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  vertical-align: middle;
+}
+
 .status-dot {
   display: inline-flex;
   align-items: center;
@@ -631,8 +723,17 @@ onMounted(async () => {
 .transactions-table tbody tr.row-editing td:last-child {
   background: var(--ink-800);
 }
+.transactions-table tbody tr.row-future td:last-child {
+  background: var(--ink-800);
+}
 
 .text-muted {
   color: var(--text-muted);
+}
+.text-hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin-top: 4px;
+  line-height: 1.4;
 }
 </style>

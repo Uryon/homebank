@@ -6,6 +6,7 @@ import com.homebank.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -51,10 +52,17 @@ public class AccountService {
         accountRepository.deleteById(id);
     }
 
-    /** Solde courant = solde initial + somme de toutes les transactions */
+    /**
+     * Solde courant "reel" = solde initial + somme des transactions deja
+     * survenues (date <= aujourd'hui). Une transaction datee dans le futur
+     * est seulement prevue : elle n'a pas encore reellement eu lieu et ne
+     * doit donc pas encore impacter le solde affiche (voir aussi
+     * ReportService, meme principe applique aux statistiques).
+     */
     public BigDecimal currentBalance(Long accountId) {
         Account account = findById(accountId);
-        return account.getInitialBalance().add(transactionRepository.sumAmountByAccountId(accountId));
+        return account.getInitialBalance()
+                .add(transactionRepository.sumAmountByAccountIdAsOf(accountId, LocalDate.now()));
     }
 
     /** Solde de chaque compte, pour le tableau de bord */

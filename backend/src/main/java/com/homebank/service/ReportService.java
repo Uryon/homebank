@@ -31,9 +31,14 @@ public class ReportService {
         List<Transaction> transactions = accountId != null
                 ? transactionRepository.findByAccountIdAndDateBetween(accountId, from, to)
                 : transactionRepository.findByDateBetween(from, to);
-        // Les virements entre comptes ne sont ni une depense ni un revenu reel.
+        LocalDate today = LocalDate.now();
         return transactions.stream()
+                // Les virements entre comptes ne sont ni une depense ni un revenu reel.
                 .filter(t -> t.getPaymentMode() != PaymentMode.TRANSFER)
+                // Une transaction datee dans le futur est seulement prevue : elle n'a pas
+                // encore reellement eu lieu et ne doit donc pas fausser les statistiques
+                // (voir l'affichage attenue de ces transactions dans l'onglet Transactions).
+                .filter(t -> !t.getDate().isAfter(today))
                 .toList();
     }
 
@@ -63,7 +68,7 @@ public class ReportService {
                     row.put("percentage", grandTotal.signum() == 0
                             ? BigDecimal.ZERO
                             : e.getValue().multiply(BigDecimal.valueOf(100))
-                                    .divide(grandTotal, 1, RoundingMode.HALF_UP));
+                            .divide(grandTotal, 1, RoundingMode.HALF_UP));
                     return row;
                 })
                 .collect(Collectors.toList());
@@ -217,7 +222,13 @@ public class ReportService {
 
     /** Somme des transactions marquees "depense mensuelle" (une ligne par tiers, la plus recente). */
     public Map<String, Object> monthlyExpensesSummary() {
-        List<Transaction> flagged = transactionRepository.findByMonthlyExpenseTrueOrderByDateDescIdDesc();
+        LocalDate today = LocalDate.now();
+        List<Transaction> flagged = transactionRepository.findByMonthlyExpenseTrueOrderByDateDescIdDesc()
+                .stream()
+                // Une occurrence future n'a pas encore reellement eu lieu : on ne la
+                // retient pas comme "derniere" occurrence connue de la depense.
+                .filter(t -> !t.getDate().isAfter(today))
+                .toList();
 
         Map<String, Transaction> latestByPayee = new LinkedHashMap<>();
         for (Transaction t : flagged) {
@@ -276,4 +287,173 @@ public class ReportService {
         }
         return category.getName();
     }
+
+    /**
+     * Tableau d'analyse des revenus et dépenses par catégorie/sous-catégorie
+     * sur les 12 derniers mois entièrement terminés.
+     *
+     * Les montants sont agrégés en base, puis structurés côté backend afin que
+     * le frontend ne charge jamais l'ensemble des transactions.
+     */
+    public Map<String, Object> monthlyCategoryAnalysis(Long accountId) {
+        LocalDate firstOfCurrentMonth = LocalDate.now().withDayOfMonth(1);
+        LocalDate from = firstOfCurrentMonth.minusMonths(12);
+        LocalDate to = firstOfCurrentMonth.minusDays(1);
+
+        List<Map<String, Object>> months = new ArrayList<>();
+        DateTimeFormatter monthFormatter = DateTimeFormatter.ofPattern("MMM.", Locale.FRENCH);
+        for (LocalDate month = from; month.isBefore(firstOfCurrentMonth); month = month.plusMonths(1)) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("key", month.toString());
+            m.put("label", capitalize(month.format(monthFormatter)));
+            m.put("year", month.getYear());
+            m.put("month", month.getMonthValue());
+            months.add(m);
+        }
+
+        // Clé stable : catégorie (ou catégorie racine + sous-catégorie) + type de flux.
+        Map<String, Map<String, Object>> rows = new LinkedHashMap<>();
+        Map<String, BigDecimal> monthlyIncomeTotals = new LinkedHashMap<>();
+        Map<String, BigDecimal> monthlyExpenseTotals = new LinkedHashMap<>();
+
+        for (Map<String, Object> m : months) {
+            monthlyIncomeTotals.put((String) m.get("key"), BigDecimal.ZERO);
+            monthlyExpenseTotals.put((String) m.get("key"), BigDecimal.ZERO);
+        }
+
+        for (Object[] r : transactionRepository.aggregateMonthlyByCategory(from, to, accountId)) {
+            Long categoryId = (Long) r[0];
+            String categoryName = (String) r[1];
+            Long parentId = (Long) r[2];
+            String parentName = (String) r[3];
+            BigDecimal amount = (BigDecimal) r[7];
+
+            // Les transactions sans catégorie restent visibles dans le tableau.
+            String safeName = categoryName != null ? categoryName : "Sans catégorie";
+            String key = (categoryId != null ? categoryId.toString() : "uncategorized")
+                    + "|" + (amount.signum() > 0 ? "income" : "expense");
+
+            Map<String, Object> row = rows.get(key);
+            if (row == null) {
+                row = new LinkedHashMap<>();
+                row.put("key", key);
+                row.put("categoryId", categoryId);
+                row.put("name", safeName);
+                row.put("parentId", parentId);
+                row.put("parentName", parentName);
+                row.put("level", parentId == null ? 0 : 1);
+                row.put("type", amount.signum() > 0 ? "income" : "expense");
+                Map<String, BigDecimal> values = new LinkedHashMap<>();
+                for (Map<String, Object> m : months) {
+                    values.put((String) m.get("key"), BigDecimal.ZERO);
+                }
+                row.put("values", values);
+                rows.put(key, row);
+            }
+
+            String monthKey = LocalDate.of(((Number) r[5]).intValue(), ((Number) r[6]).intValue(), 1).toString();
+            @SuppressWarnings("unchecked")
+            Map<String, BigDecimal> values = (Map<String, BigDecimal>) row.get("values");
+            values.put(monthKey, values.getOrDefault(monthKey, BigDecimal.ZERO)
+                    .add(amount.abs()));
+
+            if (amount.signum() > 0) {
+                monthlyIncomeTotals.merge(monthKey, amount, BigDecimal::add);
+            } else if (amount.signum() < 0) {
+                monthlyExpenseTotals.merge(monthKey, amount.abs(), BigDecimal::add);
+            }
+        }
+
+        // Construit la hiérarchie : racines d'abord, sous-catégories juste après.
+        List<Map<String, Object>> incomeRows = rows.values().stream()
+                .filter(r -> "income".equals(r.get("type")))
+                .sorted(this::compareCategoryRows)
+                .map(this::completeAnalysisRow)
+                .toList();
+
+        List<Map<String, Object>> expenseRows = rows.values().stream()
+                .filter(r -> "expense".equals(r.get("type")))
+                .sorted(this::compareCategoryRows)
+                .map(this::completeAnalysisRow)
+                .toList();
+
+        Map<String, Object> incomeTotal = totalAnalysisRow("Total revenus", "income", months, monthlyIncomeTotals);
+        Map<String, Object> expenseTotal = totalAnalysisRow("Total dépenses", "expense", months, monthlyExpenseTotals);
+
+        List<Map<String, Object>> monthlySummary = new ArrayList<>();
+        for (Map<String, Object> m : months) {
+            String key = (String) m.get("key");
+            BigDecimal income = monthlyIncomeTotals.getOrDefault(key, BigDecimal.ZERO);
+            BigDecimal expenses = monthlyExpenseTotals.getOrDefault(key, BigDecimal.ZERO);
+            Map<String, Object> summary = new LinkedHashMap<>();
+            summary.put("key", key);
+            summary.put("income", income);
+            summary.put("expenses", expenses);
+            summary.put("net", income.subtract(expenses));
+            monthlySummary.add(summary);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("from", from);
+        result.put("to", to);
+        result.put("months", months);
+        result.put("income", incomeRows);
+        result.put("incomeTotal", incomeTotal);
+        result.put("expenses", expenseRows);
+        result.put("expenseTotal", expenseTotal);
+        result.put("summary", monthlySummary);
+        return result;
+    }
+
+    private Map<String, Object> completeAnalysisRow(Map<String, Object> row) {
+        @SuppressWarnings("unchecked")
+        Map<String, BigDecimal> values = (Map<String, BigDecimal>) row.get("values");
+        BigDecimal total = values.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal average = values.isEmpty()
+                ? BigDecimal.ZERO
+                : total.divide(BigDecimal.valueOf(values.size()), 2, RoundingMode.HALF_UP);
+        row.put("average", average);
+        row.put("total", total);
+        return row;
+    }
+
+    private Map<String, Object> totalAnalysisRow(
+            String name,
+            String type,
+            List<Map<String, Object>> months,
+            Map<String, BigDecimal> monthlyTotals) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("key", "total-" + type);
+        row.put("name", name);
+        row.put("level", 0);
+        row.put("type", type);
+        Map<String, BigDecimal> values = new LinkedHashMap<>();
+        for (Map<String, Object> month : months) {
+            String key = (String) month.get("key");
+            values.put(key, monthlyTotals.getOrDefault(key, BigDecimal.ZERO));
+        }
+        row.put("values", values);
+        return completeAnalysisRow(row);
+    }
+
+    private int compareCategoryRows(Map<String, Object> a, Map<String, Object> b) {
+        String ap = Objects.toString(a.get("parentName"), "");
+        String bp = Objects.toString(b.get("parentName"), "");
+        int parent = ap.compareToIgnoreCase(bp);
+        if (parent != 0) return parent;
+
+        int level = Integer.compare(
+                ((Number) a.get("level")).intValue(),
+                ((Number) b.get("level")).intValue());
+        if (level != 0) return level;
+
+        return Objects.toString(a.get("name"), "").compareToIgnoreCase(
+                Objects.toString(b.get("name"), ""));
+    }
+
+    private String capitalize(String value) {
+        if (value == null || value.isEmpty()) return value;
+        return value.substring(0, 1).toUpperCase(Locale.FRENCH) + value.substring(1);
+    }
+
 }

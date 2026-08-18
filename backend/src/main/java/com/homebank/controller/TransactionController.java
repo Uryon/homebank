@@ -7,6 +7,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -25,7 +26,12 @@ public class TransactionController {
     public List<TransactionDTO> findAll(
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) String amountOperator,
+            @RequestParam(required = false) BigDecimal amountValue) {
+        if (amountOperator != null && amountValue != null) {
+            return transactionService.findByAmountFilter(accountId, amountOperator, amountValue);
+        }
         if (accountId != null) {
             return transactionService.findByAccount(accountId);
         }

@@ -50,6 +50,13 @@ public class ReportController {
         return reportService.summary(from, to, accountId);
     }
 
+    /** Analyse détaillée revenus/dépenses par catégorie sur les 12 derniers mois terminés. */
+    @GetMapping("/monthly-category-analysis")
+    public Map<String, Object> monthlyCategoryAnalysis(
+            @RequestParam(required = false) Long accountId) {
+        return reportService.monthlyCategoryAnalysis(accountId);
+    }
+
     /** Epargne mensuelle (revenus - depenses) sur les N derniers mois termines. */
     @GetMapping("/monthly-savings")
     public List<Map<String, Object>> monthlySavings(

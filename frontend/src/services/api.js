@@ -42,6 +42,7 @@ export const ReportsAPI = {
     incomeByCategory: (params) => api.get('/reports/income-by-category', { params }).then(r => r.data),
     balanceEvolution: (params) => api.get('/reports/balance-evolution', { params }).then(r => r.data),
     summary: (params) => api.get('/reports/summary', { params }).then(r => r.data),
+    monthlyCategoryAnalysis: (params) => api.get('/reports/monthly-category-analysis', { params }).then(r => r.data),
     monthlySavings: (params) => api.get('/reports/monthly-savings', { params }).then(r => r.data),
     balanceForecast: (params) => api.get('/reports/balance-forecast', { params }).then(r => r.data),
     monthlyExpenses: () => api.get('/reports/monthly-expenses').then(r => r.data)
