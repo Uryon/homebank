@@ -94,9 +94,59 @@
         </div>
       </div>
       <div v-else class="empty-state">Aucune dépense sur les 12 derniers mois.</div>
+    </div>
 
     <div class="card monthly-analysis-card">
-      <div class="stat-label" style="margin-bottom: 4px;">Revenus et dépenses — 12 derniers mois</div>
+      <div class="stat-label" style="margin-bottom: 4px;">Résumé mensuel — 12 derniers mois</div>
+      <div class="monthly-analysis-subtitle">
+        Revenus, dépenses et solde par mois. Les 12 derniers mois entièrement terminés sont affichés.
+      </div>
+
+      <div v-if="monthlyAnalysis" class="monthly-analysis-wrap">
+        <table class="monthly-analysis-table">
+          <thead>
+            <tr>
+              <th class="category-sticky">Catégorie</th>
+              <th v-for="month in monthlyAnalysis.months" :key="month.key" class="num">
+                {{ month.label }}
+              </th>
+              <th class="num summary-col">Total</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            <tr>
+              <td class="category-sticky summary-label">Revenus</td>
+              <td v-for="month in monthlyAnalysis.summary" :key="'summary-income-' + month.key" class="num">
+                {{ formatAmount(month.income) }}
+              </td>
+              <td class="num summary-col">{{ formatAmount(monthlyAnalysis.incomeTotal.total) }}</td>
+            </tr>
+            <tr>
+              <td class="category-sticky summary-label">Dépenses</td>
+              <td v-for="month in monthlyAnalysis.summary" :key="'summary-expense-' + month.key" class="num">
+                {{ formatAmount(month.expenses) }}
+              </td>
+              <td class="num summary-col">{{ formatAmount(monthlyAnalysis.expenseTotal.total) }}</td>
+            </tr>
+            <tr class="monthly-balance-row">
+              <td class="category-sticky summary-label"><strong>Solde du mois</strong></td>
+              <td v-for="month in monthlyAnalysis.summary" :key="'summary-net-' + month.key"
+                  class="num" :class="Number(month.net) >= 0 ? 'positive' : 'negative'">
+                <strong>{{ formatAmount(month.net) }}</strong>
+              </td>
+              <td class="num summary-col">
+                <strong>{{ formatAmount(Number(monthlyAnalysis.incomeTotal.total) - Number(monthlyAnalysis.expenseTotal.total)) }}</strong>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else class="empty-state">Chargement de l'analyse mensuelle…</div>
+    </div>
+
+    <div class="card monthly-analysis-card">
+      <div class="stat-label" style="margin-bottom: 4px;">Revenus par catégorie — 12 derniers mois</div>
       <div class="monthly-analysis-subtitle">
         Évolution mensuelle par catégorie et sous-catégorie. Les 12 derniers mois entièrement terminés sont affichés.
       </div>
@@ -115,10 +165,6 @@
           </thead>
 
           <tbody>
-            <tr class="section-title-row">
-              <td :colspan="monthlyAnalysis.months.length + 3">Revenus</td>
-            </tr>
-
             <template v-for="group in incomeGroups" :key="'income-' + group.key">
               <tr class="category-row">
                 <td class="category-sticky category-name">
@@ -160,15 +206,32 @@
               <td class="num summary-col"><strong>{{ formatAmount(monthlyAnalysis.incomeTotal.average) }}</strong></td>
               <td class="num summary-col"><strong>{{ formatAmount(monthlyAnalysis.incomeTotal.total) }}</strong></td>
             </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else class="empty-state">Chargement de l'analyse mensuelle…</div>
+    </div>
 
-            <tr class="section-spacer">
-              <td :colspan="monthlyAnalysis.months.length + 3"></td>
+    <div class="card monthly-analysis-card">
+      <div class="stat-label" style="margin-bottom: 4px;">Dépenses par catégorie — 12 derniers mois</div>
+      <div class="monthly-analysis-subtitle">
+        Évolution mensuelle par catégorie et sous-catégorie. Les 12 derniers mois entièrement terminés sont affichés.
+      </div>
+
+      <div v-if="monthlyAnalysis" class="monthly-analysis-wrap">
+        <table class="monthly-analysis-table">
+          <thead>
+            <tr>
+              <th class="category-sticky">Catégorie</th>
+              <th v-for="month in monthlyAnalysis.months" :key="month.key" class="num">
+                {{ month.label }}
+              </th>
+              <th class="num summary-col">Moyenne</th>
+              <th class="num summary-col">Total</th>
             </tr>
+          </thead>
 
-            <tr class="section-title-row expense-section-title">
-              <td :colspan="monthlyAnalysis.months.length + 3">Dépenses</td>
-            </tr>
-
+          <tbody>
             <template v-for="group in expenseGroups" :key="'expense-' + group.key">
               <tr class="category-row">
                 <td class="category-sticky category-name">
@@ -210,46 +273,10 @@
               <td class="num summary-col"><strong>{{ formatAmount(monthlyAnalysis.expenseTotal.average) }}</strong></td>
               <td class="num summary-col"><strong>{{ formatAmount(monthlyAnalysis.expenseTotal.total) }}</strong></td>
             </tr>
-
-            <tr class="section-spacer">
-              <td :colspan="monthlyAnalysis.months.length + 3"></td>
-            </tr>
-
-            <tr class="monthly-summary-title">
-              <td :colspan="monthlyAnalysis.months.length + 3">Résumé mensuel</td>
-            </tr>
-            <tr>
-              <td class="category-sticky summary-label">Revenus</td>
-              <td v-for="month in monthlyAnalysis.summary" :key="'summary-income-' + month.key" class="num">
-                {{ formatAmount(month.income) }}
-              </td>
-              <td class="num summary-col">—</td>
-              <td class="num summary-col">{{ formatAmount(monthlyAnalysis.incomeTotal.total) }}</td>
-            </tr>
-            <tr>
-              <td class="category-sticky summary-label">Dépenses</td>
-              <td v-for="month in monthlyAnalysis.summary" :key="'summary-expense-' + month.key" class="num">
-                {{ formatAmount(month.expenses) }}
-              </td>
-              <td class="num summary-col">—</td>
-              <td class="num summary-col">{{ formatAmount(monthlyAnalysis.expenseTotal.total) }}</td>
-            </tr>
-            <tr class="monthly-balance-row">
-              <td class="category-sticky summary-label"><strong>Solde du mois</strong></td>
-              <td v-for="month in monthlyAnalysis.summary" :key="'summary-net-' + month.key"
-                  class="num" :class="Number(month.net) >= 0 ? 'positive' : 'negative'">
-                <strong>{{ formatAmount(month.net) }}</strong>
-              </td>
-              <td class="num summary-col">—</td>
-              <td class="num summary-col">
-                <strong>{{ formatAmount(Number(monthlyAnalysis.incomeTotal.total) - Number(monthlyAnalysis.expenseTotal.total)) }}</strong>
-              </td>
-            </tr>
           </tbody>
         </table>
       </div>
       <div v-else class="empty-state">Chargement de l'analyse mensuelle…</div>
-    </div>
     </div>
   </div>
 </template>
@@ -310,15 +337,7 @@ function analysisGroup(rows) {
     group.children.sort((a, b) => String(a.name).localeCompare(String(b.name), 'fr'))
   }
 
-  // On masque les lignes qui n'ont aucun montant sur toute la période.
-  const isZero = (value) => Math.abs(Number(value) || 0) < 0.005
-  for (const group of groups.values()) {
-    group.children = group.children.filter(child => !isZero(child.total))
-  }
-
-  return Array.from(groups.values())
-    .filter(group => !isZero(group.total))
-    .sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+  return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name, 'fr'))
 }
 
 const incomeGroups = computed(() => analysisGroup(monthlyAnalysis.value?.income || []))
@@ -583,8 +602,6 @@ onMounted(async () => {
   width: 100%;
   overflow: auto;
   max-height: 720px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
 }
 
 .monthly-analysis-table {
@@ -592,12 +609,12 @@ onMounted(async () => {
   min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .monthly-analysis-table th,
 .monthly-analysis-table td {
-  padding: 9px 12px;
+  padding: 6px 5px;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
@@ -608,7 +625,7 @@ onMounted(async () => {
   z-index: 4;
   background: var(--ink-900);
   color: var(--text-faint);
-  font-size: 10px;
+  font-size: 9px;
   text-transform: uppercase;
   letter-spacing: .05em;
 }
@@ -617,7 +634,7 @@ onMounted(async () => {
   position: sticky;
   left: 0;
   z-index: 3;
-  min-width: 190px;
+  min-width: 120px;
   text-align: left;
   background: var(--ink-900);
   border-right: 1px solid var(--line);
@@ -628,7 +645,7 @@ onMounted(async () => {
 }
 
 .monthly-analysis-table .num {
-  min-width: 100px;
+  min-width: 58px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -653,29 +670,7 @@ onMounted(async () => {
 }
 
 .monthly-analysis-table tbody tr.subcategory-row .category-sticky {
-  padding-left: 30px;
-}
-
-.monthly-analysis-table .section-title-row td,
-.monthly-analysis-table .monthly-summary-title td {
-  padding: 11px 12px;
-  background: var(--ink-800);
-  color: var(--text-primary);
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .06em;
-  border-bottom: 2px solid var(--line);
-}
-
-.monthly-analysis-table .expense-section-title td {
-  border-top: 1px solid var(--line);
-}
-
-.monthly-analysis-table .section-spacer td {
-  height: 14px;
-  padding: 0;
-  background: var(--ink-900);
-  border: 0;
+  padding-left: 18px;
 }
 
 .monthly-analysis-table .total-row td {
@@ -692,10 +687,6 @@ onMounted(async () => {
   color: var(--coral);
 }
 
-.monthly-analysis-table .monthly-summary-title td {
-  border-top: 2px solid var(--line);
-}
-
 .monthly-analysis-table .summary-label {
   font-weight: 700;
 }
@@ -706,19 +697,19 @@ onMounted(async () => {
 }
 
 .collapse-button {
-  width: 22px;
+  width: 16px;
   padding: 0;
-  margin-right: 4px;
+  margin-right: 2px;
   border: 0;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 11px;
 }
 
 .collapse-placeholder {
   display: inline-block;
-  width: 26px;
+  width: 18px;
 }
 
 </style>

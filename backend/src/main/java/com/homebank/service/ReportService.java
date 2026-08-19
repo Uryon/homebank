@@ -68,7 +68,7 @@ public class ReportService {
                     row.put("percentage", grandTotal.signum() == 0
                             ? BigDecimal.ZERO
                             : e.getValue().multiply(BigDecimal.valueOf(100))
-                            .divide(grandTotal, 1, RoundingMode.HALF_UP));
+                                    .divide(grandTotal, 1, RoundingMode.HALF_UP));
                     return row;
                 })
                 .collect(Collectors.toList());

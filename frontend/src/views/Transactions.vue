@@ -21,6 +21,14 @@
       </div>
 
       <div class="form-field">
+        <label>Statut</label>
+        <select v-model="filterStatus">
+          <option value="all">Toutes</option>
+          <option value="pending">À traiter ({{ pendingCount }})</option>
+        </select>
+      </div>
+
+      <div class="form-field">
         <label>Recherche (tiers, montant, ou &gt; / &lt; / = un montant)</label>
         <input v-model="searchQuery" placeholder="Ex : Carrefour, 42,50 ou > 100" style="min-width: 260px;" />
         <div v-if="amountQuery" class="text-hint">
@@ -246,13 +254,17 @@
 
 <script setup>
 import { ref, onMounted, computed, nextTick, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   TransactionsAPI
 } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { normalizeSearch, parseAmountQuery } from '../services/search'
 
+const route = useRoute()
+
 const filterAccount = ref(null)
+const filterStatus = ref('all')
 const searchQuery = ref('')
 
 // Donnees issues du cache partage (deja precharge au demarrage de l'app,
@@ -305,15 +317,25 @@ function emptyForm() {
  * deja filtre cote backend (voir watcher plus bas) plutot que de filtrer en
  * Javascript la liste complete des transactions.
  */
+const pendingCount = computed(() =>
+  transactions.value.filter(t => !t.validated).length
+)
+
 const filteredTransactions = computed(() => {
-  if (amountQuery.value) return amountSearchResults.value ?? []
+  const baseTransactions = amountQuery.value
+    ? (amountSearchResults.value ?? [])
+    : transactions.value
+
+  const statusFiltered = filterStatus.value === 'pending'
+    ? baseTransactions.filter(t => !t.validated)
+    : baseTransactions
 
   const q = normalizeSearch(searchQuery.value)
-  if (!q) return transactions.value
+  if (!q || amountQuery.value) return statusFiltered
 
   const normalizedQuery = q.replace(',', '.')
 
-  return transactions.value.filter(t => {
+  return statusFiltered.filter(t => {
     const payeeMatch = normalizeSearch(t.payee).includes(q)
 
     const rawAmount = String(t.amount ?? '').toLowerCase()
@@ -544,9 +566,6 @@ async function toggleMonthly(transaction) {
 
 const validating = ref(false)
 
-/** Nombre de transactions en attente de validation, calculé depuis les données déjà en mémoire. */
-const pendingCount = computed(() => transactions.value.filter(t => !t.validated).length)
-
 /** Bascule le statut validée/en attente d'une seule transaction. */
 async function toggleValidated(transaction) {
   await TransactionsAPI.toggleValidated(transaction.id)
@@ -582,6 +601,14 @@ onMounted(async () => {
   // le prechargement (cree ailleurs, autre onglet...).
   dataStore.refreshAll()
   if (filterAccount.value !== null) await load()
+
+  // Arrivee depuis "À traiter" > "Modifier" : ouvre directement la
+  // transaction concernee en edition complete, sans action supplementaire.
+  const editId = route.query.edit ? Number(route.query.edit) : null
+  if (editId) {
+    const target = transactions.value.find(t => t.id === editId)
+    if (target) startEdit(target)
+  }
 })
 </script>
 

@@ -167,8 +167,11 @@
 
 <script setup>
 import { ref, onMounted, computed, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { PayeesAPI, CategoriesAPI } from '../services/api'
 import { normalizeSearch } from '../services/search'
+
+const route = useRoute()
 
 const payees = ref([])
 const categories = ref([])
@@ -329,6 +332,21 @@ async function confirmMerge() {
 onMounted(async () => {
   await loadRefs()
   await load()
+
+  // Arrivee depuis "Transactions > À traiter > Créer une règle" :
+  // - si le tiers existe deja (cas quasi systematique, il a ete cree
+  //   automatiquement des la premiere transaction), on l'ouvre directement
+  //   en edition pour lui affecter une categorie ;
+  // - sinon (repli), on ouvre la modal de creation pre-remplie.
+  if (route.query.editId) {
+    const target = payees.value.find(p => p.id === Number(route.query.editId))
+    if (target) startEdit(target)
+  } else if (route.query.prefillName || route.query.prefillPattern) {
+    form.value = emptyForm()
+    form.value.name = route.query.prefillName || ''
+    form.value.pattern = route.query.prefillPattern || ''
+    showModal.value = true
+  }
 })
 </script>
 
