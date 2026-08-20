@@ -89,12 +89,19 @@ watch(() => props.modelValue, (id) => {
  * depense que pour un revenu). La recherche continue de filtrer a
  * l'interieur de chaque groupe, et un groupe sans aucun resultat est masque.
  */
+// Pretraitement (normalisation) qui ne depend que de `categories`, jamais
+// de `query`, pour ne pas renormaliser tous les libelles a chaque frappe
+// (meme principe que sortedNormalizedPayees dans PayeeAutocomplete).
+const normalizedCategories = computed(() =>
+  props.categories.map(c => ({ ...c, normalizedLabel: normalizeSearch(c.label) }))
+)
+
 const groupedOptions = computed(() => {
   const q = normalizeSearch(query.value)
-  const matches = (c) => !q || normalizeSearch(c.label).includes(q)
+  const matches = (c) => !q || c.normalizedLabel.includes(q)
 
-  const expense = props.categories.filter(c => (c.type === 'EXPENSE' || c.type === 'BOTH') && matches(c))
-  const income = props.categories.filter(c => (c.type === 'INCOME' || c.type === 'BOTH') && matches(c))
+  const expense = normalizedCategories.value.filter(c => (c.type === 'EXPENSE' || c.type === 'BOTH') && matches(c))
+  const income = normalizedCategories.value.filter(c => (c.type === 'INCOME' || c.type === 'BOTH') && matches(c))
 
   return [
     { key: 'expense', title: 'Dépenses', options: expense },

@@ -78,87 +78,25 @@
         </thead>
 
         <tbody>
-          <tr
+          <TransactionRow
             v-for="t in filteredTransactions"
             :key="t.id"
-            :class="{
-              'row-editing': editingId === t.id,
-              'row-pending': editingId !== t.id && !t.validated,
-              'row-future': editingId !== t.id && isFuture(t.date)
-            }"
-            @click="editingId !== t.id && startEdit(t)"
-            @keydown.esc="cancelEdit"
-            @keydown.enter.prevent="editingId === t.id && confirmEdit()"
-          >
-            <!-- Mode édition -->
-            <template v-if="editingId === t.id">
-              <td class="num" @click.stop>
-                <input type="checkbox" v-model="editForm.validated" title="Transaction validée (rapprochement bancaire)" />
-              </td>
-              <td @click.stop>
-                <input v-model="editForm.date" type="date" ref="firstEditField" />
-              </td>
-              <td @click.stop>
-                <select v-model.number="editForm.accountId">
-                  <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
-                </select>
-              </td>
-              <td @click.stop>
-                <input v-model="editForm.payee" list="payee-options" autocomplete="off" />
-              </td>
-              <td @click.stop>
-                <input v-model="editForm.categoryName" list="category-options" autocomplete="off" />
-              </td>
-              <td @click.stop>
-                <input v-model="editForm.memo" placeholder="Note libre" />
-              </td>
-              <td class="num" colspan="2" @click.stop>
-                <input v-model.number="editForm.amount" type="number" step="0.01" style="text-align: right;" />
-              </td>
-              <td class="num" @click.stop>
-                <input type="checkbox" v-model="editForm.monthlyExpense" title="Dépense mensuelle récurrente" />
-              </td>
-              <td @click.stop class="row-actions">
-                <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
-                <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
-              </td>
-            </template>
-
-            <!-- Mode lecture -->
-            <template v-else>
-              <td class="num" @click.stop>
-                <span
-                  class="status-dot"
-                  :class="t.validated ? 'validated' : 'pending'"
-                  :title="t.validated ? 'Validée' : 'En attente de validation — cliquer pour valider'"
-                  @click="toggleValidated(t)"
-                >
-                  {{ t.validated ? '✓' : '' }}
-                </span>
-              </td>
-              <td class="col-date">
-                {{ formatDate(t.date) }}
-                <span v-if="isFuture(t.date)" class="future-badge" title="Transaction prévue à une date future : elle n'a pas encore réellement eu lieu et n'est pas comptée dans les statistiques.">Prévu</span>
-              </td>
-              <td>{{ accountName(t.accountId) }}</td>
-              <td class="col-payee" :title="t.payee">{{ t.payee }}</td>
-              <td>{{ categoryLabel(t.categoryId) }}</td>
-              <td class="text-muted">{{ displayMemo(t.memo) }}</td>
-              <td class="num amount negative">{{ t.amount < 0 ? formatAmount(t.amount) : '' }}</td>
-              <td class="num amount positive">{{ t.amount > 0 ? formatAmount(t.amount) : '' }}</td>
-              <td class="num" @click.stop>
-                <input
-                  type="checkbox"
-                  :checked="t.monthlyExpense"
-                  title="Dépense mensuelle récurrente"
-                  @change="toggleMonthly(t)"
-                />
-              </td>
-              <td class="row-actions" @click.stop>
-                <button class="btn danger" @click="remove(t)">Suppr.</button>
-              </td>
-            </template>
-          </tr>
+            :transaction="t"
+            :is-editing="editingId === t.id"
+            :accounts="accounts"
+            :payees="payees"
+            :flat-categories="flatCategories"
+            :accounts-by-id="accountsById"
+            :categories-by-id="categoriesById"
+            :payee-index="payeeByNormalizedName"
+            :today-iso="todayIso"
+            @start-edit="startEdit(t)"
+            @cancel-edit="cancelEdit"
+            @confirm-edit="confirmEdit"
+            @toggle-validated="toggleValidated"
+            @toggle-monthly="toggleMonthly"
+            @remove="remove"
+          />
         </tbody>
       </table>
     </div>
@@ -172,14 +110,6 @@
             : 'Aucune transaction pour ce filtre.'
       }}
     </div>
-
-    <!-- datalists partagées (édition inline + modal création) -->
-    <datalist id="payee-options">
-      <option v-for="p in payees" :key="p.id" :value="p.name" />
-    </datalist>
-    <datalist id="category-options">
-      <option v-for="c in flatCategories" :key="c.id" :value="c.label" />
-    </datalist>
 
     <!-- Modal : création uniquement -->
     <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
@@ -201,7 +131,7 @@
 
           <div class="form-field">
             <label>Tiers (payee)</label>
-            <input v-model="form.payee" list="payee-options" autocomplete="off" placeholder="Ex : Supermarché" />
+            <PayeeAutocomplete v-model="form.payee" :payees="payees" placeholder="Ex : Supermarché" />
           </div>
 
           <div class="form-field">
@@ -211,7 +141,7 @@
 
           <div class="form-field">
             <label>Catégorie</label>
-            <input v-model="form.categoryName" list="category-options" autocomplete="off" placeholder="Tapez pour rechercher, ou laissez vide" />
+            <CategoryAutocomplete v-model="form.categoryId" :categories="flatCategories" placeholder="Tapez pour rechercher, ou laissez vide" />
           </div>
 
           <div class="form-field">
@@ -253,13 +183,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick, watch } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   TransactionsAPI
 } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { normalizeSearch, parseAmountQuery } from '../services/search'
+import PayeeAutocomplete from '../components/PayeeAutocomplete.vue'
+import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
+import TransactionRow from '../components/TransactionRow.vue'
+import { formatAmount } from '../services/format'
 
 const route = useRoute()
 
@@ -286,9 +220,11 @@ const showModal = ref(false)
 const form = ref(emptyForm())
 
 // --- Édition inline ---
+// L'etat du formulaire d'edition (editForm) vit desormais localement dans
+// TransactionRow.vue : seul l'id de la ligne en cours d'edition reste ici,
+// pour garantir qu'une seule ligne est editee a la fois. Voir le commentaire
+// en tete de TransactionRow.vue pour le detail de l'optimisation.
 const editingId = ref(null)
-const editForm = ref(null)
-const firstEditField = ref(null)
 
 function emptyForm() {
   return {
@@ -296,7 +232,7 @@ function emptyForm() {
     date: new Date().toISOString().slice(0, 10),
     payee: '',
     amount: 0,
-    categoryName: '',
+    categoryId: null,
     paymentMode: 'NONE',
     status: 'NONE',
     memo: '',
@@ -387,50 +323,22 @@ const flatCategories = computed(() => {
   const roots = categories.value.filter(c => !c.parentId)
   const result = []
   for (const root of roots) {
-    result.push({ id: root.id, label: root.name })
+    result.push({ id: root.id, label: root.name, type: root.type })
     const children = categories.value.filter(c => c.parentId === root.id)
     for (const child of children) {
-      result.push({ id: child.id, label: `${root.name} : ${child.name}` })
+      result.push({ id: child.id, label: `${root.name} : ${child.name}`, type: child.type })
     }
   }
   return result
 })
 
-function accountName(id) {
-  return accounts.value.find(a => a.id === id)?.name || '—'
-}
-
-function categoryLabel(categoryId) {
-  if (!categoryId) return '—'
-  const category = categories.value.find(c => c.id === categoryId)
-  if (!category) return '—'
-  if (category.parentId) {
-    const parent = categories.value.find(c => c.id === category.parentId)
-    if (parent) return `${parent.name} : ${category.name}`
-  }
-  return category.name
-}
-
-/**
- * N'affiche rien si le mémo est vide, null, ou contient littéralement
- * "(NULL)" (certains exports CSV/QIF écrivent cette valeur telle quelle
- * pour un champ vide).
- */
-function displayMemo(memo) {
-  if (!memo) return ''
-  if (memo.trim().toUpperCase() === '(NULL)') return ''
-  return memo
-}
-
-function formatAmount(value) {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(value || 0)
-}
-
-function formatDate(iso) {
-  if (!iso) return ''
-  const [y, m, d] = iso.split('-')
-  return `${d}/${m}/${y}`
-}
+// Index Map (id -> objet) pour accounts/categories, precalcules une seule
+// fois quand ces listes changent (rarement), et passes en prop a chaque
+// TransactionRow : evite un scan lineaire de accounts/categories pour
+// chaque ligne affichee (categoryLabel/accountName vivent desormais dans
+// TransactionRow.vue et consomment ces Map en O(1)).
+const accountsById = computed(() => new Map(accounts.value.map(a => [a.id, a])))
+const categoriesById = computed(() => new Map(categories.value.map(c => [c.id, c])))
 
 /**
  * Une transaction est "future" si sa date est strictement postérieure à
@@ -438,9 +346,6 @@ function formatDate(iso) {
  * (comparaison de chaînes ISO "AAAA-MM-JJ", fiable sans passer par Date()).
  */
 const todayIso = new Date().toISOString().slice(0, 10)
-function isFuture(iso) {
-  return !!iso && iso > todayIso
-}
 
 async function load() {
   if (filterAccount.value !== null) {
@@ -450,13 +355,6 @@ async function load() {
     // cache reste visible pendant ce temps, aucun blocage / clignotement).
     await dataStore.refreshTransactions()
   }
-}
-
-function resolveCategoryId(typedLabel) {
-  if (!typedLabel || !typedLabel.trim()) return null
-  const trimmed = typedLabel.trim().toLowerCase()
-  const match = flatCategories.value.find(c => c.label.toLowerCase() === trimmed)
-  return match ? match.id : null
 }
 
 /**
@@ -470,27 +368,32 @@ function resolveCategoryId(typedLabel) {
  * (voir TransactionService#applyPayload) pour rester fiable meme si ce
  * pre-remplissage frontend echouait ou etait court-circuite.
  */
+// Indexe les tiers par nom normalise, memoise (recalcule uniquement quand
+// la liste des tiers change, pas a chaque frappe) : evite un scan lineaire
+// de tous les tiers a chaque caractere tape dans le champ Tiers.
+const payeeByNormalizedName = computed(() => {
+  const map = new Map()
+  for (const p of payees.value) {
+    if (p.name) map.set(p.name.trim().toLowerCase(), p)
+  }
+  return map
+})
+
 function findPayeeByName(name) {
   if (!name || !name.trim()) return null
-  const trimmed = name.trim().toLowerCase()
-  return payees.value.find(p => (p.name || '').trim().toLowerCase() === trimmed) || null
+  return payeeByNormalizedName.value.get(name.trim().toLowerCase()) || null
 }
 
-function applyDefaultCategoryFromPayee(payeeName, targetForm) {
-  if (!targetForm || (targetForm.categoryName && targetForm.categoryName.trim())) return
+// L'edition inline applique la meme logique localement, voir
+// TransactionRow.vue (elle y a besoin de sa propre copie car editForm n'est
+// plus accessible depuis ce composant).
+function applyDefaultCategoryFromPayee(payeeName) {
+  if (form.value.categoryId) return
   const payee = findPayeeByName(payeeName)
-  if (!payee || !payee.categoryId) return
-  const label = categoryLabel(payee.categoryId)
-  if (label !== '—') targetForm.categoryName = label
+  if (payee?.categoryId) form.value.categoryId = payee.categoryId
 }
 
-watch(() => form.value.payee, (payeeName) => {
-  applyDefaultCategoryFromPayee(payeeName, form.value)
-})
-
-watch(() => editForm.value?.payee, (payeeName) => {
-  applyDefaultCategoryFromPayee(payeeName, editForm.value)
-})
+watch(() => form.value.payee, applyDefaultCategoryFromPayee)
 
 function openCreate() {
   form.value = emptyForm()
@@ -509,7 +412,7 @@ async function save() {
     date: form.value.date,
     payee: form.value.payee,
     amount: form.value.amount,
-    categoryId: resolveCategoryId(form.value.categoryName),
+    categoryId: form.value.categoryId,
     paymentMode: form.value.paymentMode,
     status: form.value.status,
     memo: form.value.memo,
@@ -527,57 +430,17 @@ async function save() {
 /* --- Édition inline : clic sur une ligne --- */
 
 function startEdit(t) {
-  const label = categoryLabel(t.categoryId)
   editingId.value = t.id
-  editForm.value = {
-    accountId: t.accountId,
-    date: t.date,
-    payee: t.payee || '',
-    amount: t.amount,
-    categoryName: label === '—' ? '' : label,
-    paymentMode: t.paymentMode || 'NONE',
-    status: t.status || 'NONE',
-    memo: displayMemo(t.memo),
-    tags: t.tags || '',
-    transferTransactionId: t.transferTransactionId ?? null,
-    monthlyExpense: !!t.monthlyExpense,
-    validated: !!t.validated
-  }
-  nextTick(() => {
-    firstEditField.value?.[0]?.focus?.()
-  })
 }
 
 function cancelEdit() {
   editingId.value = null
-  editForm.value = null
 }
 
-async function confirmEdit() {
-  if (!editingId.value || !editForm.value) return
-  if (!editForm.value.accountId) {
-    alert('Veuillez sélectionner un compte.')
-    return
-  }
-
-  const payload = {
-    accountId: editForm.value.accountId,
-    date: editForm.value.date,
-    payee: editForm.value.payee,
-    amount: editForm.value.amount,
-    categoryId: resolveCategoryId(editForm.value.categoryName),
-    paymentMode: editForm.value.paymentMode,
-    status: editForm.value.status,
-    memo: editForm.value.memo,
-    tags: editForm.value.tags,
-    transferTransactionId: editForm.value.transferTransactionId,
-    monthlyExpense: editForm.value.monthlyExpense,
-    validated: editForm.value.validated
-  }
-
+async function confirmEdit(payload) {
+  if (!editingId.value) return
   const id = editingId.value
   editingId.value = null
-  editForm.value = null
 
   await TransactionsAPI.update(id, payload)
   await load()
@@ -666,130 +529,27 @@ onMounted(async () => {
 .col-monthly { width: 90px; }
 .col-actions { width: 110px; }
 
-.transactions-table td, .transactions-table th {
+.transactions-table th {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.transactions-table .col-actions,
-.transactions-table td:last-child {
-  max-width: none;
-  overflow: visible;
-}
-.transactions-table .col-memo,
-.transactions-table td:nth-child(5) {
-  white-space: normal;
-}
-
-.transactions-table tbody tr {
-  cursor: pointer;
-}
-.transactions-table tbody tr.row-editing {
-  cursor: default;
-  background: var(--ink-800);
-  box-shadow: inset 3px 0 0 var(--azure);
-}
-.transactions-table tbody tr.row-pending {
-  box-shadow: inset 3px 0 0 var(--amber);
-}
-.transactions-table tbody tr.row-editing td {
-  overflow: visible;
-}
-
-/*
- * Transaction future (date > aujourd'hui) : prevue mais pas encore
- * reellement survenue, dans l'esprit YNAB. Fond attenue + texte plus clair
- * pour la distinguer immediatement des transactions deja effectuees, tout
- * en restant lisible et sans bloquer l'edition/les actions habituelles.
- */
-.transactions-table tbody tr.row-future td {
-  background: var(--ink-800);
-  color: var(--text-faint);
-}
-.transactions-table tbody tr.row-future td.amount.negative {
-  color: #C98E8E;
-}
-.transactions-table tbody tr.row-future td.amount.positive {
-  color: #8FC0A6;
-}
-.transactions-table tbody tr.row-future:hover td {
-  background: var(--ink-700);
-}
-.future-badge {
-  display: inline-block;
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--ink-700);
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  vertical-align: middle;
-}
-
-.status-dot {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-}
-.status-dot.validated {
-  background: var(--mint-dim);
-  color: var(--mint);
-}
-.status-dot.pending {
-  background: var(--amber-dim);
-  border: 2px solid var(--amber);
-}
-.transactions-table tbody tr.row-editing input,
-.transactions-table tbody tr.row-editing select {
-  width: 100%;
-}
-
-.row-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
 }
 
 /*
  * La colonne Actions reste toujours visible même si le tableau déborde
  * horizontalement (beaucoup de colonnes) : on la fixe à droite plutôt que
  * de forcer l'utilisateur à scroller jusqu'au bout pour supprimer/valider
- * une ligne.
+ * une ligne. Le style des cellules (td) correspondantes vit desormais dans
+ * TransactionRow.vue, qui gere sa propre ligne.
  */
-.transactions-table th:last-child,
-.transactions-table td:last-child {
+.transactions-table th:last-child {
   position: sticky;
   right: 0;
-  background: var(--ink-900);
-  box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
-}
-.transactions-table thead th:last-child {
   background: var(--ink-800);
   z-index: 2;
-}
-.transactions-table tbody tr:hover td:last-child {
-  background: var(--ink-800);
-}
-.transactions-table tbody tr.row-editing td:last-child {
-  background: var(--ink-800);
-}
-.transactions-table tbody tr.row-future td:last-child {
-  background: var(--ink-800);
+  box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
 }
 
-.text-muted {
-  color: var(--text-muted);
-}
 .text-hint {
   font-size: 12px;
   color: var(--text-faint);
