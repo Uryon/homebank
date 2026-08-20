@@ -25,14 +25,13 @@
           <!-- Tiers : cliquable pour éditer en ligne -->
           <div class="process-payee">
             <template v-if="editingField.id === t.id && editingField.field === 'payee'">
-              <input
+              <PayeeAutocomplete
+                ref="payeeEditRef"
                 v-model="editingField.value"
-                list="atraiter-payee-options"
-                autocomplete="off"
-                ref="inlineInput"
+                :payees="payees"
                 @keydown.enter="confirmInlineEdit(t)"
                 @keydown.esc="cancelInlineEdit"
-                @blur="confirmInlineEdit(t)"
+                @focusout="confirmInlineEdit(t)"
               />
             </template>
             <template v-else>
@@ -49,14 +48,14 @@
           <!-- Catégorie : cliquable pour éditer en ligne, "?" si absente -->
           <div class="process-category">
             <template v-if="editingField.id === t.id && editingField.field === 'category'">
-              <input
+              <CategoryAutocomplete
+                ref="categoryEditRef"
                 v-model="editingField.value"
-                list="atraiter-category-options"
-                autocomplete="off"
-                ref="inlineInput"
+                :categories="flatCategories"
+                placeholder="Aucune"
                 @keydown.enter="confirmInlineEdit(t)"
                 @keydown.esc="cancelInlineEdit"
-                @blur="confirmInlineEdit(t)"
+                @focusout="confirmInlineEdit(t)"
               />
             </template>
             <template v-else>
@@ -84,13 +83,6 @@
     <div v-else class="empty-state">
       🎉 Rien à traiter pour l'instant — toutes les transactions sont validées.
     </div>
-
-    <datalist id="atraiter-payee-options">
-      <option v-for="p in payees" :key="p.id" :value="p.name" />
-    </datalist>
-    <datalist id="atraiter-category-options">
-      <option v-for="c in flatCategories" :key="c.id" :value="c.label" />
-    </datalist>
   </div>
 </template>
 
@@ -99,7 +91,10 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { TransactionsAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
+import { flattenCategories } from '../services/categories'
 import TransactionsSubNav from './TransactionsSubNav.vue'
+import PayeeAutocomplete from '../components/PayeeAutocomplete.vue'
+import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 
 const router = useRouter()
 
@@ -118,34 +113,21 @@ const toProcess = computed(() =>
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
 )
 
-const flatCategories = computed(() => {
-  const roots = categories.value.filter(c => !c.parentId)
-  const result = []
-  for (const root of roots) {
-    result.push({ id: root.id, label: root.name })
-    const children = categories.value.filter(c => c.parentId === root.id)
-    for (const child of children) {
-      result.push({ id: child.id, label: `${root.name} : ${child.name}` })
-    }
-  }
-  return result
-})
+const flatCategories = computed(() => flattenCategories(categories.value))
+
+// Index Map (id -> objet), precalcule une seule fois quand `categories`
+// change, pour eviter un scan lineaire de la liste a chaque ligne affichee
+// (meme principe que categoriesById dans Transactions.vue).
+const categoriesById = computed(() => new Map(categories.value.map(c => [c.id, c])))
 
 function categoryLabel(categoryId) {
-  const category = categories.value.find(c => c.id === categoryId)
+  const category = categoriesById.value.get(categoryId)
   if (!category) return '?'
   if (category.parentId) {
-    const parent = categories.value.find(c => c.id === category.parentId)
+    const parent = categoriesById.value.get(category.parentId)
     if (parent) return `${parent.name} : ${category.name}`
   }
   return category.name
-}
-
-function resolveCategoryId(typedLabel) {
-  if (!typedLabel || !typedLabel.trim()) return null
-  const trimmed = typedLabel.trim().toLowerCase()
-  const match = flatCategories.value.find(c => c.label.toLowerCase() === trimmed)
-  return match ? match.id : null
 }
 
 function formatAmount(value) {
@@ -161,15 +143,19 @@ function formatDate(iso) {
 /* --- Édition rapide en ligne (tiers ou catégorie uniquement) --- */
 
 const editingField = ref({ id: null, field: null, value: '' })
-const inlineInput = ref(null)
+const payeeEditRef = ref(null)
+const categoryEditRef = ref(null)
 
 function startInlineEdit(t, field) {
   editingField.value = {
     id: t.id,
     field,
-    value: field === 'payee' ? (t.payee || '') : (t.categoryId ? categoryLabel(t.categoryId) : '')
+    // Le champ tiers reste un texte libre ; le champ categorie porte
+    // directement l'id (CategoryAutocomplete ne propose que des categories
+    // existantes, voir son composant).
+    value: field === 'payee' ? (t.payee || '') : (t.categoryId ?? null)
   }
-  nextTick(() => inlineInput.value?.[0]?.focus?.())
+  nextTick(() => (field === 'payee' ? payeeEditRef : categoryEditRef).value?.focus?.())
 }
 
 function cancelInlineEdit() {
@@ -184,7 +170,7 @@ async function confirmInlineEdit(t) {
 
   const payload = buildPayload(t)
   if (field === 'payee') payload.payee = value
-  if (field === 'category') payload.categoryId = resolveCategoryId(value)
+  if (field === 'category') payload.categoryId = value
 
   await TransactionsAPI.update(t.id, payload)
   await dataStore.refreshTransactions()
@@ -334,8 +320,11 @@ onMounted(async () => {
   flex-shrink: 0;
 }
 
-.process-payee input,
-.process-category input {
+/* PayeeAutocomplete/CategoryAutocomplete rendent leur <input> dans leur
+   propre template : :deep() est necessaire pour l'atteindre depuis le CSS
+   scope de ce composant. */
+.process-payee :deep(input),
+.process-category :deep(input) {
   width: 100%;
   background: var(--ink-800);
   border: 1px solid var(--azure);

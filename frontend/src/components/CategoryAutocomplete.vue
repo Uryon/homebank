@@ -203,6 +203,8 @@ function handleBlur() {
   reconcileTypedText()
   closeDropdown()
 }
+
+defineExpose({ focus: () => inputEl.value?.focus() })
 </script>
 
 <style scoped>

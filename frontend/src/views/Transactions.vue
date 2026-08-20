@@ -190,6 +190,7 @@ import {
 } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { normalizeSearch, parseAmountQuery } from '../services/search'
+import { flattenCategories } from '../services/categories'
 import PayeeAutocomplete from '../components/PayeeAutocomplete.vue'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import TransactionRow from '../components/TransactionRow.vue'
@@ -319,18 +320,7 @@ watch([amountQuery, filterAccount], ([query, accountId]) => {
   }, 250)
 })
 
-const flatCategories = computed(() => {
-  const roots = categories.value.filter(c => !c.parentId)
-  const result = []
-  for (const root of roots) {
-    result.push({ id: root.id, label: root.name, type: root.type })
-    const children = categories.value.filter(c => c.parentId === root.id)
-    for (const child of children) {
-      result.push({ id: child.id, label: `${root.name} : ${child.name}`, type: child.type })
-    }
-  }
-  return result
-})
+const flatCategories = computed(() => flattenCategories(categories.value))
 
 // Index Map (id -> objet) pour accounts/categories, precalcules une seule
 // fois quand ces listes changent (rarement), et passes en prop a chaque
