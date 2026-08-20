@@ -11,6 +11,8 @@
       </button>
     </div>
 
+    <TransactionsSubNav />
+
     <div class="toolbar">
       <div class="form-field">
         <label>Compte</label>
@@ -72,7 +74,7 @@
             <th>Mémo</th>
             <th class="num">Dépense</th>
             <th class="num">Revenu</th>
-            <th class="num" title="Dépense mensuelle récurrente">Mensuelle</th>
+            <th class="num" title="Dépense périodique récurrente">Périodique</th>
             <th></th>
           </tr>
         </thead>
@@ -94,7 +96,7 @@
             @cancel-edit="cancelEdit"
             @confirm-edit="confirmEdit"
             @toggle-validated="toggleValidated"
-            @toggle-monthly="toggleMonthly"
+            @toggle-periodic="togglePeriodic"
             @remove="remove"
           />
         </tbody>
@@ -168,8 +170,8 @@
           </div>
 
           <div class="form-field" style="grid-column: span 2; flex-direction: row; align-items: center; gap: 8px;">
-            <input type="checkbox" v-model="form.monthlyExpense" id="new-monthly-expense" style="width: auto;" />
-            <label for="new-monthly-expense" style="margin: 0;">Dépense mensuelle récurrente (loyer, abonnement...)</label>
+            <input type="checkbox" v-model="form.periodicExpense" id="new-periodic-expense" style="width: auto;" />
+            <label for="new-periodic-expense" style="margin: 0;">Dépense périodique récurrente (loyer, abonnement...)</label>
           </div>
         </div>
 
@@ -194,6 +196,7 @@ import { flattenCategories } from '../services/categories'
 import PayeeAutocomplete from '../components/PayeeAutocomplete.vue'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import TransactionRow from '../components/TransactionRow.vue'
+import TransactionsSubNav from './TransactionsSubNav.vue'
 import { formatAmount } from '../services/format'
 
 const route = useRoute()
@@ -239,7 +242,7 @@ function emptyForm() {
     memo: '',
     tags: '',
     transferTransactionId: null,
-    monthlyExpense: false,
+    periodicExpense: false,
     validated: true
   }
 }
@@ -408,7 +411,7 @@ async function save() {
     memo: form.value.memo,
     tags: form.value.tags,
     transferTransactionId: form.value.transferTransactionId,
-    monthlyExpense: form.value.monthlyExpense,
+    periodicExpense: form.value.periodicExpense,
     validated: form.value.validated
   }
 
@@ -442,9 +445,9 @@ async function remove(transaction) {
   await load()
 }
 
-/** Bascule directement le statut "dépense mensuelle" sans passer par l'édition complète. */
-async function toggleMonthly(transaction) {
-  await TransactionsAPI.toggleMonthlyExpense(transaction.id)
+/** Bascule directement le statut "dépense périodique" sans passer par l'édition complète. */
+async function togglePeriodic(transaction) {
+  await TransactionsAPI.togglePeriodicExpense(transaction.id)
   await load()
 }
 

@@ -74,65 +74,6 @@ public class ReportService {
                 .collect(Collectors.toList());
     }
 
-    /** Idem, mais pour les revenus (montants positifs). Les virements sont exclus. */
-    public List<Map<String, Object>> incomeByCategory(LocalDate from, LocalDate to, Long accountId) {
-        List<Transaction> transactions = loadTransactions(from, to, accountId);
-
-        Map<String, BigDecimal> totals = new LinkedHashMap<>();
-        for (Transaction t : transactions) {
-            if (t.getAmount().signum() <= 0) continue;
-            String label = categoryLabel(t.getCategory());
-            totals.merge(label, t.getAmount(), BigDecimal::add);
-        }
-
-        return totals.entrySet().stream()
-                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                .map(e -> {
-                    Map<String, Object> row = new LinkedHashMap<>();
-                    row.put("category", e.getKey());
-                    row.put("total", e.getValue());
-                    return row;
-                })
-                .collect(Collectors.toList());
-    }
-
-    /**
-     * Evolution du solde jour par jour sur une periode, pour un compte
-     * (ou tous les comptes confondus si accountId est null). Les virements
-     * sont inclus ici car ils modifient bien le solde reel du compte.
-     */
-    public List<Map<String, Object>> balanceEvolution(LocalDate from, LocalDate to, Long accountId) {
-        List<Account> accounts = loadAccounts(accountId);
-
-        BigDecimal startingBalance = BigDecimal.ZERO;
-        for (Account a : accounts) {
-            startingBalance = startingBalance.add(a.getInitialBalance());
-            startingBalance = startingBalance.add(
-                    transactionRepository.sumAmountByAccountIdAsOf(a.getId(), from.minusDays(1)));
-        }
-
-        List<Transaction> periodTransactions = accountId != null
-                ? transactionRepository.findByAccountIdAndDateBetween(accountId, from, to)
-                : transactionRepository.findByDateBetween(from, to);
-
-        Map<LocalDate, BigDecimal> dailyNet = new TreeMap<>();
-        for (Transaction t : periodTransactions) {
-            dailyNet.merge(t.getDate(), t.getAmount(), BigDecimal::add);
-        }
-
-        List<Map<String, Object>> series = new ArrayList<>();
-        BigDecimal running = startingBalance;
-        DateTimeFormatter fmt = DateTimeFormatter.ISO_LOCAL_DATE;
-        for (LocalDate d = from; !d.isAfter(to); d = d.plusDays(1)) {
-            running = running.add(dailyNet.getOrDefault(d, BigDecimal.ZERO));
-            Map<String, Object> point = new LinkedHashMap<>();
-            point.put("date", d.format(fmt));
-            point.put("balance", running);
-            series.add(point);
-        }
-        return series;
-    }
-
     /** Resume global : revenus, depenses et net sur la periode. Les virements sont exclus. */
     public Map<String, Object> summary(LocalDate from, LocalDate to, Long accountId) {
         List<Transaction> transactions = loadTransactions(from, to, accountId);
@@ -221,10 +162,10 @@ public class ReportService {
         return result;
     }
 
-    /** Somme des transactions marquees "depense mensuelle" (une ligne par tiers, la plus recente). */
-    public Map<String, Object> monthlyExpensesSummary() {
+    /** Somme des transactions marquees "depense periodique" (une ligne par tiers, la plus recente). */
+    public Map<String, Object> periodicExpensesSummary() {
         LocalDate today = LocalDate.now();
-        List<Transaction> flagged = transactionRepository.findByMonthlyExpenseTrueOrderByDateDescIdDesc()
+        List<Transaction> flagged = transactionRepository.findByPeriodicExpenseTrueOrderByDateDescIdDesc()
                 .stream()
                 // Une occurrence future n'a pas encore reellement eu lieu : on ne la
                 // retient pas comme "derniere" occurrence connue de la depense.

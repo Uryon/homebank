@@ -27,6 +27,6 @@ public class TransactionDTO {
     private String tags;
     private Long transferTransactionId;
     private boolean validated;
-    private boolean monthlyExpense;
+    private boolean periodicExpense;
     private String externalId;
 }

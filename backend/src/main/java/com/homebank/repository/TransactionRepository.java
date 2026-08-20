@@ -35,14 +35,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
 
     List<Transaction> findByAccount_IdAndAmountOrderByDateDescIdDesc(Long accountId, BigDecimal amount);
 
-    List<Transaction> findByValidatedFalseOrderByDateDescIdDesc();
-
-    List<Transaction> findByMonthlyExpenseTrueOrderByDateDescIdDesc();
-
-    long countByValidatedFalse();
-
-    @Query("select coalesce(sum(t.amount), 0) from Transaction t where t.account.id = :accountId")
-    BigDecimal sumAmountByAccountId(@Param("accountId") Long accountId);
+    List<Transaction> findByPeriodicExpenseTrueOrderByDateDescIdDesc();
 
     @Query("select coalesce(sum(t.amount), 0) from Transaction t where t.account.id = :accountId and t.date <= :asOf")
     BigDecimal sumAmountByAccountIdAsOf(@Param("accountId") Long accountId, @Param("asOf") LocalDate asOf);

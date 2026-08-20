@@ -205,7 +205,7 @@ public class TestDataSeeder implements CommandLineRunner {
 
     private Transaction transaction(Account account, LocalDate date, BigDecimal amount, String payee,
                                      String memo, Category category, PaymentMode mode,
-                                     boolean validated, boolean monthlyExpense) {
+                                     boolean validated, boolean periodicExpense) {
         Transaction t = new Transaction();
         t.setAccount(account);
         t.setDate(date);
@@ -216,7 +216,7 @@ public class TestDataSeeder implements CommandLineRunner {
         t.setPaymentMode(mode);
         t.setStatus(TransactionStatus.NONE);
         t.setValidated(validated);
-        t.setMonthlyExpense(monthlyExpense);
+        t.setPeriodicExpense(periodicExpense);
         return transactionRepository.save(t);
     }
 }

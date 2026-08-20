@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import Dashboard from '../views/Dashboard.vue'
 import Accounts from '../views/Accounts.vue'
 import Transactions from '../views/Transactions.vue'
+import TransactionsPeriodicSuggestions from '../views/TransactionsPeriodicSuggestions.vue'
 import Categories from '../views/Categories.vue'
 import Payees from '../views/Payees.vue'
 import Loans from '../views/Loans.vue'
@@ -11,6 +12,7 @@ const routes = [
     { path: '/', name: 'dashboard', component: Dashboard },
     { path: '/accounts', name: 'accounts', component: Accounts },
     { path: '/transactions', name: 'transactions', component: Transactions },
+    { path: '/transactions/periodiques', name: 'transactions-periodic-suggestions', component: TransactionsPeriodicSuggestions },
     { path: '/categories', name: 'categories', component: Categories },
     { path: '/payees', name: 'payees', component: Payees },
     { path: '/loans', name: 'loans', component: Loans },

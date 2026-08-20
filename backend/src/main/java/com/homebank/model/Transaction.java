@@ -70,12 +70,16 @@ public class Transaction {
     private boolean validated = false;
 
     /**
-     * Coche par l'utilisateur pour indiquer une depense mensuelle recurrente
-     * (loyer, abonnements, assurances...), utilisee pour l'encart
-     * "Depenses mensuelles" du tableau de bord.
+     * Coche par l'utilisateur (ou acceptee depuis une suggestion automatique,
+     * voir TransactionService#findPeriodicSuggestions) pour indiquer une
+     * depense/revenu periodique recurrent (loyer, abonnements, assurances,
+     * salaire...), utilise pour l'encart "Depenses periodiques" du tableau de
+     * bord. Le nom de colonne reste "monthly_expense" en base (ancien nom) :
+     * seul le concept applicatif a ete renomme, pour eviter toute migration
+     * de schema sur les donnees existantes.
      */
-    @Column(nullable = false)
-    private boolean monthlyExpense = false;
+    @Column(name = "monthly_expense", nullable = false)
+    private boolean periodicExpense = false;
 
     /**
      * Identifiant unique fourni par la banque ou le fichier importe (si

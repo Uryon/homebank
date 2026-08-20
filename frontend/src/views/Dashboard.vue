@@ -50,24 +50,25 @@
       </div>
 
       <div class="card">
-        <div class="stat-label" style="margin-bottom: 16px;">Dépenses mensuelles</div>
-        <div v-if="monthlyExpenses.items.length">
+        <div class="stat-label" style="margin-bottom: 16px;">Dépenses périodiques</div>
+        <div v-if="periodicExpenses.items.length">
           <table class="plain-table">
             <tbody>
-              <tr v-for="item in monthlyExpenses.items" :key="item.payee">
+              <tr v-for="item in periodicExpenses.items" :key="item.payee">
                 <td>{{ item.payee || 'Sans nom' }}</td>
                 <td class="num amount negative">{{ formatAmount(item.amount) }}</td>
               </tr>
             </tbody>
           </table>
-          <div class="monthly-total">
+          <div class="periodic-total">
             <span>Total</span>
-            <span class="amount negative">{{ formatAmount(monthlyExpenses.total) }}</span>
+            <span class="amount negative">{{ formatAmount(periodicExpenses.total) }}</span>
           </div>
         </div>
         <div v-else class="empty-state">
-          Aucune dépense mensuelle marquée. Coche "Mensuelle" sur une transaction récurrente
-          (loyer, abonnement...) dans l'onglet Transactions pour la voir apparaître ici.
+          Aucune dépense périodique marquée. Coche "Périodique" sur une transaction récurrente
+          (loyer, abonnement...) dans l'onglet Transactions, ou regarde l'onglet "Périodiques"
+          pour des suggestions automatiques.
         </div>
       </div>
     </div>
@@ -312,7 +313,7 @@ const accounts = ref([])
 const balances = ref({})
 const summary = ref({ income: 0, expenses: 0, net: 0 })
 const monthLabel = ref('')
-const monthlyExpenses = ref({ items: [], total: 0 })
+const periodicExpenses = ref({ items: [], total: 0 })
 
 const forecastChart = ref(null)
 const savingsChart = ref(null)
@@ -440,7 +441,7 @@ async function loadDashboard() {
   const { from, to } = lastCompletedMonthRange()
   summary.value = await ReportsAPI.summary({ from, to })
 
-  monthlyExpenses.value = await ReportsAPI.monthlyExpenses()
+  periodicExpenses.value = await ReportsAPI.periodicExpenses()
 
   const [forecast, savings, whereMoney, monthly] = await Promise.all([
     ReportsAPI.balanceForecast({}),
@@ -625,7 +626,7 @@ onMounted(loadDashboard)
   border-bottom: none;
 }
 
-.monthly-total {
+.periodic-total {
   display: flex;
   justify-content: space-between;
   align-items: center;

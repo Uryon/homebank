@@ -1,9 +1,8 @@
 /**
  * Aplati l'arbre de categories (racines + enfants directs) en une liste
- * plate { id, label, type }, utilisee par les autocompletes et les
- * datalists. Partagee entre Transactions.vue et TransactionsToProcess.vue
- * pour eviter que les deux implementations divergent au prochain
- * changement.
+ * plate { id, label, type }, utilisee par les autocompletes. Partagee entre
+ * Transactions.vue et Payees.vue pour eviter que les deux implementations
+ * divergent au prochain changement.
  *
  * Les enfants sont indexes par parentId en un seul passage (Map), plutot
  * que de refaire un `.filter(c => c.parentId === root.id)` pour chaque

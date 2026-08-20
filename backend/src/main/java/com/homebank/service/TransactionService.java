@@ -1,5 +1,6 @@
 package com.homebank.service;
 
+import com.homebank.dto.PeriodicSuggestionDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.dto.TransferRequestDTO;
 import com.homebank.mapper.TransactionMapper;
@@ -16,9 +17,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.stream.Collectors;
 
 @Service
 public class TransactionService {
@@ -92,22 +99,6 @@ public class TransactionService {
         return results.stream().map(transactionMapper::toDTO).toList();
     }
 
-    public List<TransactionDTO> findPending() {
-        return transactionRepository.findByValidatedFalseOrderByDateDescIdDesc()
-                .stream()
-                .map(transactionMapper::toDTO)
-                .toList();
-    }
-
-    public long countPending() {
-        return transactionRepository.countByValidatedFalse();
-    }
-
-    public TransactionDTO findById(Long id) {
-        Transaction transaction = findEntityById(id);
-        return transactionMapper.toDTO(transaction);
-    }
-
     private Transaction findEntityById(Long id) {
         return transactionRepository.findById(id)
                 .orElseThrow(() ->
@@ -170,11 +161,115 @@ public class TransactionService {
         return transactionMapper.toDTO(transactionRepository.save(t));
     }
 
-    /** Bascule le statut "depense mensuelle" d'une transaction. */
-    public TransactionDTO toggleMonthlyExpense(Long id) {
+    /** Bascule le statut "depense periodique" d'une transaction. */
+    public TransactionDTO togglePeriodicExpense(Long id) {
         Transaction t = findEntityById(id);
-        t.setMonthlyExpense(!t.isMonthlyExpense());
+        t.setPeriodicExpense(!t.isPeriodicExpense());
         return transactionMapper.toDTO(transactionRepository.save(t));
+    }
+
+    /**
+     * Nombre minimum d'occurrences (meme tiers, montant proche) pour qu'un
+     * groupe soit suggere comme periodique : en dessous, le rapprochement est
+     * trop peu fiable (pourrait n'etre qu'une coincidence).
+     */
+    private static final int PERIODIC_MIN_OCCURRENCES = 3;
+
+    /** Tolerance sur le montant a l'interieur d'un groupe (ex : facture d'energie qui varie legerement). */
+    private static final BigDecimal PERIODIC_AMOUNT_TOLERANCE = new BigDecimal("1.10");
+
+    /**
+     * Suggere des groupes de transactions qui semblent periodiques : meme
+     * tiers, montant proche (tolerance +/-10%), avec au moins
+     * PERIODIC_MIN_OCCURRENCES occurrences. Ignore les transactions deja
+     * marquees periodiques (deja acceptees) et les virements internes (jamais
+     * une depense/revenu periodique au sens metier).
+     */
+    public List<PeriodicSuggestionDTO> findPeriodicSuggestions() {
+        List<Transaction> candidates = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
+                .filter(t -> !t.isPeriodicExpense())
+                .filter(t -> t.getPaymentMode() != PaymentMode.TRANSFER)
+                .filter(t -> t.getPayee() != null && !t.getPayee().isBlank())
+                .toList();
+
+        Map<String, List<Transaction>> byPayee = candidates.stream()
+                .collect(Collectors.groupingBy(t -> t.getPayee().trim().toLowerCase()));
+
+        List<PeriodicSuggestionDTO> suggestions = new ArrayList<>();
+        for (List<Transaction> group : byPayee.values()) {
+            if (group.size() < PERIODIC_MIN_OCCURRENCES) continue;
+            for (List<Transaction> amountGroup : groupByToleranteAmount(group)) {
+                if (amountGroup.size() >= PERIODIC_MIN_OCCURRENCES) {
+                    suggestions.add(buildPeriodicSuggestion(amountGroup));
+                }
+            }
+        }
+
+        suggestions.sort((a, b) -> b.getCount() - a.getCount());
+        return suggestions;
+    }
+
+    /**
+     * Regroupe des transactions d'un meme tiers par montant proche : trie par
+     * montant absolu croissant, puis constitue des groupes successifs tant
+     * que chaque nouveau montant reste dans la tolerance du plus petit montant
+     * deja present dans le groupe courant (glissement progressif accepte,
+     * comme une facture d'energie qui augmente legerement mois apres mois).
+     */
+    private List<List<Transaction>> groupByToleranteAmount(List<Transaction> transactions) {
+        List<Transaction> sorted = transactions.stream()
+                .sorted(Comparator.comparing(t -> t.getAmount().abs()))
+                .toList();
+
+        List<List<Transaction>> clusters = new ArrayList<>();
+        List<Transaction> current = new ArrayList<>();
+        BigDecimal clusterMin = null;
+
+        for (Transaction t : sorted) {
+            BigDecimal abs = t.getAmount().abs();
+            if (current.isEmpty()) {
+                current.add(t);
+                clusterMin = abs;
+                continue;
+            }
+            if (abs.compareTo(clusterMin.multiply(PERIODIC_AMOUNT_TOLERANCE)) <= 0) {
+                current.add(t);
+            } else {
+                clusters.add(current);
+                current = new ArrayList<>();
+                current.add(t);
+                clusterMin = abs;
+            }
+        }
+        if (!current.isEmpty()) clusters.add(current);
+        return clusters;
+    }
+
+    private PeriodicSuggestionDTO buildPeriodicSuggestion(List<Transaction> transactions) {
+        List<Transaction> sorted = transactions.stream()
+                .sorted(Comparator.comparing(Transaction::getDate))
+                .toList();
+
+        long totalDays = 0;
+        for (int i = 1; i < sorted.size(); i++) {
+            totalDays += ChronoUnit.DAYS.between(sorted.get(i - 1).getDate(), sorted.get(i).getDate());
+        }
+        int averageIntervalDays = sorted.size() > 1
+                ? (int) Math.round((double) totalDays / (sorted.size() - 1))
+                : 0;
+
+        BigDecimal averageAmount = sorted.stream()
+                .map(Transaction::getAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .divide(BigDecimal.valueOf(sorted.size()), 2, RoundingMode.HALF_UP);
+
+        return PeriodicSuggestionDTO.builder()
+                .payee(sorted.get(sorted.size() - 1).getPayee())
+                .count(sorted.size())
+                .averageAmount(averageAmount)
+                .averageIntervalDays(averageIntervalDays)
+                .transactions(sorted.stream().map(transactionMapper::toDTO).toList())
+                .build();
     }
 
     /**
@@ -260,7 +355,7 @@ public class TransactionService {
         transaction.setPaymentMode(payload.getPaymentMode());
         transaction.setStatus(payload.getStatus());
         transaction.setTags(payload.getTags());
-        transaction.setMonthlyExpense(payload.isMonthlyExpense());
+        transaction.setPeriodicExpense(payload.isPeriodicExpense());
         transaction.setExternalId(payload.getExternalId());
         // Une transaction saisie/modifiee manuellement est consideree comme validee ;
         // seules les transactions importees/synchronisees demarrent "en attente".

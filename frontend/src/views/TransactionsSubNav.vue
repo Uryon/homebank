@@ -3,21 +3,12 @@
     <RouterLink to="/transactions" class="subnav-item" :class="{ active: $route.name === 'transactions' }">
       Toutes
     </RouterLink>
-    <RouterLink to="/transactions/a-traiter" class="subnav-item" :class="{ active: $route.name === 'transactions-to-process' }">
-      À traiter
-      <span v-if="pendingCount > 0" class="subnav-badge">{{ pendingCount }}</span>
+    <RouterLink to="/transactions/periodiques" class="subnav-item" :class="{ active: $route.name === 'transactions-periodic-suggestions' }">
+      Périodiques
     </RouterLink>
   </div>
 </template>
 
-<script setup>
-import { computed } from 'vue'
-import { dataStore } from '../services/dataStore'
-
-const pendingCount = computed(() =>
-  dataStore.state.transactions.filter(t => !t.validated).length
-)
-</script>
 
 <style scoped>
 .subnav {
@@ -44,18 +35,5 @@ const pendingCount = computed(() =>
 .subnav-item.active {
   color: var(--azure);
   border-bottom-color: var(--azure);
-}
-.subnav-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 999px;
-  background: var(--amber);
-  color: #FFFFFF;
-  font-size: 11px;
-  font-weight: 700;
 }
 </style>

@@ -26,22 +26,6 @@ public class ReportController {
         return reportService.expensesByCategory(from, to, accountId);
     }
 
-    @GetMapping("/income-by-category")
-    public List<Map<String, Object>> incomeByCategory(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestParam(required = false) Long accountId) {
-        return reportService.incomeByCategory(from, to, accountId);
-    }
-
-    @GetMapping("/balance-evolution")
-    public List<Map<String, Object>> balanceEvolution(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestParam(required = false) Long accountId) {
-        return reportService.balanceEvolution(from, to, accountId);
-    }
-
     @GetMapping("/summary")
     public Map<String, Object> summary(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -71,9 +55,9 @@ public class ReportController {
         return reportService.balanceForecast(accountId);
     }
 
-    /** Total des transactions marquees "depense mensuelle". */
-    @GetMapping("/monthly-expenses")
-    public Map<String, Object> monthlyExpenses() {
-        return reportService.monthlyExpensesSummary();
+    /** Total des transactions marquees "depense periodique". */
+    @GetMapping("/periodic-expenses")
+    public Map<String, Object> periodicExpenses() {
+        return reportService.periodicExpensesSummary();
     }
 }

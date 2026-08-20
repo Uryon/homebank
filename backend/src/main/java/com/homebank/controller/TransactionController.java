@@ -1,5 +1,6 @@
 package com.homebank.controller;
 
+import com.homebank.dto.PeriodicSuggestionDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.dto.TransferRequestDTO;
 import com.homebank.service.TransactionService;
@@ -42,19 +43,6 @@ public class TransactionController {
     }
 
     /**
-     * Transactions en attente de validation (rapprochement bancaire).
-     */
-    @GetMapping("/pending")
-    public List<TransactionDTO> findPending() {
-        return transactionService.findPending();
-    }
-
-    @GetMapping("/pending-count")
-    public Map<String, Long> countPending() {
-        return Map.of("count", transactionService.countPending());
-    }
-
-    /**
      * Passe toutes les transactions en attente au statut "validee".
      */
     @PostMapping("/validate-all")
@@ -67,9 +55,19 @@ public class TransactionController {
         return transactionService.toggleValidated(id);
     }
 
-    @PostMapping("/{id}/toggle-monthly-expense")
-    public TransactionDTO toggleMonthlyExpense(@PathVariable Long id) {
-        return transactionService.toggleMonthlyExpense(id);
+    @PostMapping("/{id}/toggle-periodic-expense")
+    public TransactionDTO togglePeriodicExpense(@PathVariable Long id) {
+        return transactionService.togglePeriodicExpense(id);
+    }
+
+    /**
+     * Suggestions de transactions qui semblent periodiques (meme tiers,
+     * montant proche, plusieurs occurrences), pas encore marquees comme
+     * telles. Voir TransactionService#findPeriodicSuggestions.
+     */
+    @GetMapping("/periodic-suggestions")
+    public List<PeriodicSuggestionDTO> periodicSuggestions() {
+        return transactionService.findPeriodicSuggestions();
     }
 
     /**
@@ -78,11 +76,6 @@ public class TransactionController {
     @PostMapping("/transfer")
     public List<TransactionDTO> createTransfer(@RequestBody TransferRequestDTO request) {
         return transactionService.createTransfer(request);
-    }
-
-    @GetMapping("/{id}")
-    public TransactionDTO findById(@PathVariable Long id) {
-        return transactionService.findById(id);
     }
 
     @PostMapping

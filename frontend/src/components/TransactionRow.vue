@@ -35,7 +35,7 @@
         <input v-model.number="editForm.amount" type="number" step="0.01" style="text-align: right;" />
       </td>
       <td class="num" @click.stop>
-        <input type="checkbox" v-model="editForm.monthlyExpense" title="Dépense mensuelle récurrente" />
+        <input type="checkbox" v-model="editForm.periodicExpense" title="Dépense périodique récurrente" />
       </td>
       <td @click.stop class="row-actions">
         <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
@@ -68,9 +68,9 @@
       <td class="num" @click.stop>
         <input
           type="checkbox"
-          :checked="transaction.monthlyExpense"
-          title="Dépense mensuelle récurrente"
-          @change="$emit('toggle-monthly', transaction)"
+          :checked="transaction.periodicExpense"
+          title="Dépense périodique récurrente"
+          @change="$emit('toggle-periodic', transaction)"
         />
       </td>
       <td class="row-actions" @click.stop>
@@ -125,7 +125,7 @@ const emit = defineEmits([
   'cancel-edit',
   'confirm-edit',
   'toggle-validated',
-  'toggle-monthly',
+  'toggle-periodic',
   'remove'
 ])
 
@@ -144,7 +144,7 @@ function buildEditForm(t) {
     memo: displayMemo(t.memo),
     tags: t.tags || '',
     transferTransactionId: t.transferTransactionId ?? null,
-    monthlyExpense: !!t.monthlyExpense,
+    periodicExpense: !!t.periodicExpense,
     validated: !!t.validated
   }
 }
@@ -208,7 +208,7 @@ function confirmEdit() {
     memo: editForm.value.memo,
     tags: editForm.value.tags,
     transferTransactionId: editForm.value.transferTransactionId,
-    monthlyExpense: editForm.value.monthlyExpense,
+    periodicExpense: editForm.value.periodicExpense,
     validated: editForm.value.validated
   })
 }
