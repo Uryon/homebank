@@ -31,10 +31,6 @@ public class CategoryService {
         return categoryRepository.findAll();
     }
 
-    public List<Category> findRoots() {
-        return categoryRepository.findByParentIsNull();
-    }
-
     public Category findById(Long id) {
         return categoryRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Categorie introuvable : " + id));

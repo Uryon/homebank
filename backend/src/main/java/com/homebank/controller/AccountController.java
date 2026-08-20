@@ -29,16 +29,6 @@ public class AccountController {
                 .toList();
     }
 
-    @GetMapping("/{id}")
-    public AccountDTO findById(@PathVariable Long id) {
-        return accountMapper.toDTO(accountService.findById(id));
-    }
-
-    @GetMapping("/{id}/balance")
-    public Map<String, BigDecimal> balance(@PathVariable Long id) {
-        return Map.of("balance", accountService.currentBalance(id));
-    }
-
     @GetMapping("/balances")
     public Map<Long, BigDecimal> allBalances() {
         return accountService.allBalances();

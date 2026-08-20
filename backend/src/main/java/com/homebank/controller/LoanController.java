@@ -29,11 +29,6 @@ public class LoanController {
                 .toList();
     }
 
-    @GetMapping("/{id}")
-    public LoanDTO findById(@PathVariable Long id) {
-        return loanMapper.toDTO(loanService.findById(id));
-    }
-
     /** Echeancier complet (tableau d'amortissement) pour le graphique et le tableau detaille. */
     @GetMapping("/{id}/schedule")
     public LoanScheduleDTO schedule(@PathVariable Long id) {

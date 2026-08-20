@@ -70,10 +70,6 @@ public class AccountService {
      * doit donc pas encore impacter le solde affiche (voir aussi
      * ReportService, meme principe applique aux statistiques).
      */
-    public BigDecimal currentBalance(Long accountId) {
-        return currentBalance(findById(accountId));
-    }
-
     private BigDecimal currentBalance(Account account) {
         return account.getInitialBalance()
                 .add(transactionRepository.sumAmountByAccountIdAsOf(account.getId(), LocalDate.now()));
@@ -82,7 +78,7 @@ public class AccountService {
     /**
      * Solde de chaque compte, pour le tableau de bord. Reutilise directement
      * les comptes deja charges par findAll() au lieu de les recharger un par
-     * un par id (currentBalance(Long) refait un findById a chaque appel).
+     * un par id.
      */
     public Map<Long, BigDecimal> allBalances() {
         return accountRepository.findAll().stream()

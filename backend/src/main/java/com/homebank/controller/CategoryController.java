@@ -28,13 +28,6 @@ public class CategoryController {
                 .toList();
     }
 
-    @GetMapping("/roots")
-    public List<CategoryDTO> findRoots() {
-        return categoryService.findRoots().stream()
-                .map(categoryMapper::toDTO)
-                .toList();
-    }
-
     @GetMapping("/{id}")
     public CategoryDTO findById(@PathVariable Long id) {
         return categoryMapper.toDTO(categoryService.findById(id));

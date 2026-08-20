@@ -66,3 +66,9 @@
 - Nommage explicite plutôt que commentaires explicatifs quand possible.
 - Ne jamais casser la création de tiers/catégories à la volée (texte libre
   autorisé pour le tiers, résolu côté backend).
+
+## Qualité
+Corrige les problèmes Sonar etc si possible
+Utilise des loggers plutôt que des `System.out.println()`
+Log au niveau INFO pour les actions utilisateur, WARN pour les erreurs non bloquantes, ERROR pour les exceptions bloquantes
+Supprime le code mort

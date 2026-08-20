@@ -24,11 +24,6 @@ public class PayeeController {
         return payeeService.findAll();
     }
 
-    @GetMapping("/{id}")
-    public PayeeDTO findById(@PathVariable Long id) {
-        return payeeService.findById(id);
-    }
-
     @PostMapping
     public ResponseEntity<PayeeDTO> create(@RequestBody PayeeDTO payee) {
         return ResponseEntity.ok(payeeService.create(payee));

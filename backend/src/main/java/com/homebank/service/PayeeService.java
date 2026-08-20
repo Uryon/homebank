@@ -40,10 +40,6 @@ public class PayeeService {
                 .toList();
     }
 
-    public PayeeDTO findById(Long id) {
-        return payeeMapper.toDTO(findEntityById(id));
-    }
-
     private Payee findEntityById(Long id) {
         return payeeRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Tiers introuvable : " + id));
