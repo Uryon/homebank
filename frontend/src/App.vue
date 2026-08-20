@@ -18,9 +18,6 @@
         <RouterLink to="/payees" class="nav-item" :class="{ active: $route.name === 'payees' }">
           <span class="dot"></span> Tiers
         </RouterLink>
-        <RouterLink to="/reports" class="nav-item" :class="{ active: $route.name === 'reports' }">
-          <span class="dot"></span> Rapports
-        </RouterLink>
         <RouterLink to="/loans" class="nav-item" :class="{ active: $route.name === 'loans' }">
           <span class="dot"></span> Prêts
         </RouterLink>

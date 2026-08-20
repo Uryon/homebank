@@ -155,7 +155,10 @@ function startInlineEdit(t, field) {
     // existantes, voir son composant).
     value: field === 'payee' ? (t.payee || '') : (t.categoryId ?? null)
   }
-  nextTick(() => (field === 'payee' ? payeeEditRef : categoryEditRef).value?.focus?.())
+  // Le ref est defini dans un v-for (v-for="t in toProcess") : Vue le
+  // peuple donc sous forme de tableau (un seul element, puisque seule la
+  // ligne en cours d'edition rend effectivement ce composant).
+  nextTick(() => (field === 'payee' ? payeeEditRef : categoryEditRef).value?.[0]?.focus?.())
 }
 
 function cancelInlineEdit() {

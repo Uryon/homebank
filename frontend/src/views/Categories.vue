@@ -281,8 +281,22 @@ function emptyForm() {
   return { name: '', parentId: null, type: 'EXPENSE' }
 }
 
+// Index Map (parentId -> enfants), precalcule une seule fois quand
+// `categories` change, pour eviter un scan lineaire de toute la liste a
+// chaque appel de children() (fait plusieurs fois par racine : filteredRoots,
+// filteredChildren, et a chaque frappe dans la recherche).
+const childrenByParentId = computed(() => {
+  const map = new Map()
+  for (const c of categories.value) {
+    if (!c.parentId) continue
+    if (!map.has(c.parentId)) map.set(c.parentId, [])
+    map.get(c.parentId).push(c)
+  }
+  return map
+})
+
 function children(rootId) {
-  return categories.value.filter(c => c.parentId === rootId)
+  return childrenByParentId.value.get(rootId) || []
 }
 
 const filteredRoots = computed(() => {

@@ -172,6 +172,7 @@ import { ref, onMounted, computed, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { PayeesAPI, CategoriesAPI } from '../services/api'
 import { normalizeSearch } from '../services/search'
+import { flattenCategories } from '../services/categories'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 
 const route = useRoute()
@@ -206,28 +207,17 @@ const filteredPayees = computed(() => {
   )
 })
 
-const flatCategories = computed(() => {
-  const roots = categories.value.filter(c => !c.parentId)
-  const result = []
-  for (const root of roots) {
-    // Le type (revenu/depense/les deux) provient directement du modele
-    // existant (Category#type, deja renvoye par l'API) : jamais deduit du
-    // nom. Une sous-categorie herite toujours du type de son parent (regle
-    // deja appliquee cote backend, cf. CategoryService), mais on relit son
-    // propre champ "type" tel que fourni par l'API plutot que de le
-    // recalculer ici.
-    result.push({ id: root.id, label: root.name, type: root.type })
-    const children = categories.value.filter(c => c.parentId === root.id)
-    for (const child of children) {
-      result.push({ id: child.id, label: `${root.name} : ${child.name}`, type: child.type })
-    }
-  }
-  return result
-})
+const flatCategories = computed(() => flattenCategories(categories.value))
+
+// Index Map (id -> libelle deja compose "Parent : Enfant"), precalcule une
+// seule fois quand `categories` change, pour eviter un scan lineaire de
+// flatCategories pour chaque tiers a chaque frappe dans la recherche (voir
+// filteredPayees ci-dessous, qui appelle categoryLabel pour chaque ligne).
+const categoryLabelById = computed(() => new Map(flatCategories.value.map(c => [c.id, c.label])))
 
 function categoryLabel(categoryId) {
   if (!categoryId) return '—'
-  return flatCategories.value.find(c => c.id === categoryId)?.label || '—'
+  return categoryLabelById.value.get(categoryId) || '—'
 }
 
 function formatAmount(v) {
