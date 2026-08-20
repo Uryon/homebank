@@ -102,9 +102,7 @@ public class ReportService {
      * sont inclus ici car ils modifient bien le solde reel du compte.
      */
     public List<Map<String, Object>> balanceEvolution(LocalDate from, LocalDate to, Long accountId) {
-        List<Account> accounts = accountId != null
-                ? List.of(accountRepository.findById(accountId).orElseThrow())
-                : accountRepository.findAll();
+        List<Account> accounts = loadAccounts(accountId);
 
         BigDecimal startingBalance = BigDecimal.ZERO;
         for (Account a : accounts) {
@@ -189,17 +187,20 @@ public class ReportService {
         List<Map<String, Object>> result = new ArrayList<>();
         LocalDate today = LocalDate.now();
         LocalDate firstOfCurrentMonth = today.withDayOfMonth(1);
+        // Charge les comptes une seule fois pour tout le calcul (13 points),
+        // plutot qu'a chaque appel de balanceAsOf (findAll()/findById() repete).
+        List<Account> accounts = loadAccounts(accountId);
 
         List<BigDecimal> historicalBalances = new ArrayList<>();
         for (int i = 12; i >= 1; i--) {
             LocalDate monthStart = firstOfCurrentMonth.minusMonths(i);
             LocalDate monthEnd = monthStart.plusMonths(1).minusDays(1);
-            BigDecimal balance = balanceAsOf(monthEnd, accountId);
+            BigDecimal balance = balanceAsOf(monthEnd, accounts);
             historicalBalances.add(balance);
             result.add(point(monthEnd, balance, "historique"));
         }
 
-        BigDecimal presentBalance = balanceAsOf(today, accountId);
+        BigDecimal presentBalance = balanceAsOf(today, accounts);
         result.add(point(today, presentBalance, "present"));
 
         BigDecimal avgMonthlyNet = BigDecimal.ZERO;
@@ -253,17 +254,19 @@ public class ReportService {
         return result;
     }
 
-    private BigDecimal balanceAsOf(LocalDate date, Long accountId) {
-        List<Account> accounts = accountId != null
-                ? List.of(accountRepository.findById(accountId).orElseThrow())
-                : accountRepository.findAll();
-
+    private BigDecimal balanceAsOf(LocalDate date, List<Account> accounts) {
         BigDecimal total = BigDecimal.ZERO;
         for (Account a : accounts) {
             total = total.add(a.getInitialBalance())
                     .add(transactionRepository.sumAmountByAccountIdAsOf(a.getId(), date));
         }
         return total;
+    }
+
+    private List<Account> loadAccounts(Long accountId) {
+        return accountId != null
+                ? List.of(accountRepository.findById(accountId).orElseThrow())
+                : accountRepository.findAll();
     }
 
     private Map<String, Object> point(LocalDate date, BigDecimal balance, String type) {

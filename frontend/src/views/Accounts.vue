@@ -135,6 +135,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { AccountsAPI, TransactionsAPI } from '../services/api'
+import { formatAmount } from '../services/format'
 
 const accounts = ref([])
 const balances = ref({})
@@ -163,10 +164,6 @@ function emptyTransferForm() {
 function typeLabel(type) {
   const labels = { CHECKING: 'Courant', SAVINGS: 'Épargne', CASH: 'Espèces', CREDIT_CARD: 'Carte', INVESTMENT: 'Placement' }
   return labels[type] || type
-}
-
-function formatAmount(v) {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v || 0)
 }
 
 async function load() {

@@ -7,12 +7,10 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.math.BigDecimal;
 import java.util.Optional;
 
 public interface PayeeRepository extends JpaRepository<Payee, Long> {
     Optional<Payee> findByNameIgnoreCase(String name);
-    Optional<Payee> findByNameIgnoreCaseAndAmount(String name, BigDecimal amount);
 
     /**
      * Reaffecte en masse la categorie par defaut des tiers qui pointaient

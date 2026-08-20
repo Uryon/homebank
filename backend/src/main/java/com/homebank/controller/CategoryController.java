@@ -3,7 +3,6 @@ package com.homebank.controller;
 import com.homebank.dto.CategoryDTO;
 import com.homebank.dto.MergeRequestDTO;
 import com.homebank.mapper.CategoryMapper;
-import com.homebank.model.Category;
 import com.homebank.service.CategoryService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -42,13 +41,13 @@ public class CategoryController {
     }
 
     @PostMapping
-    public ResponseEntity<CategoryDTO> create(@RequestBody Category category) {
-        return ResponseEntity.ok(categoryMapper.toDTO(categoryService.create(category)));
+    public ResponseEntity<CategoryDTO> create(@RequestBody CategoryDTO payload) {
+        return ResponseEntity.ok(categoryMapper.toDTO(categoryService.create(payload)));
     }
 
     @PutMapping("/{id}")
-    public CategoryDTO update(@PathVariable Long id, @RequestBody Category category) {
-        return categoryMapper.toDTO(categoryService.update(id, category));
+    public CategoryDTO update(@PathVariable Long id, @RequestBody CategoryDTO payload) {
+        return categoryMapper.toDTO(categoryService.update(id, payload));
     }
 
     @DeleteMapping("/{id}")

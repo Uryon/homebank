@@ -361,7 +361,7 @@ async function save() {
   const payload = {
     name: form.value.name,
     type: form.value.type,
-    parent: form.value.parentId ? { id: form.value.parentId } : null
+    parentId: form.value.parentId
   }
   await CategoriesAPI.create(payload)
   showModal.value = false
@@ -400,7 +400,7 @@ async function confirmEdit() {
   const payload = {
     name: editForm.value.name,
     type: editForm.value.type,
-    parent: editForm.value.parentId ? { id: editForm.value.parentId } : null
+    parentId: editForm.value.parentId
   }
   const id = editingId.value
   editingId.value = null

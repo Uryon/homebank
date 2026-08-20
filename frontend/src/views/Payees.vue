@@ -173,6 +173,7 @@ import { useRoute } from 'vue-router'
 import { PayeesAPI, CategoriesAPI } from '../services/api'
 import { normalizeSearch } from '../services/search'
 import { flattenCategories } from '../services/categories'
+import { formatAmount } from '../services/format'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 
 const route = useRoute()
@@ -218,10 +219,6 @@ const categoryLabelById = computed(() => new Map(flatCategories.value.map(c => [
 function categoryLabel(categoryId) {
   if (!categoryId) return '—'
   return categoryLabelById.value.get(categoryId) || '—'
-}
-
-function formatAmount(v) {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v || 0)
 }
 
 async function load() {

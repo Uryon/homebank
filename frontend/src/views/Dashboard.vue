@@ -305,6 +305,7 @@
 <script setup>
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { AccountsAPI, ReportsAPI } from '../services/api'
+import { formatAmount } from '../services/format'
 import Chart from 'chart.js/auto'
 
 const accounts = ref([])
@@ -332,10 +333,6 @@ const PALETTE = ['#1F9D6C', '#D64545', '#3B6FE0', '#C98A1B', '#8B6FE0', '#2CA8C9
 const totalBalance = computed(() =>
     Object.values(balances.value).reduce((sum, v) => sum + Number(v), 0)
 )
-
-function formatAmount(v) {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v || 0)
-}
 
 /** Version compacte pour le total au centre du donut (ex : "3 780 €" au lieu de "3 780,00 €"). */
 function formatAmountCompact(v) {

@@ -92,6 +92,7 @@ import { useRouter } from 'vue-router'
 import { TransactionsAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { flattenCategories } from '../services/categories'
+import { formatAmount, formatDate } from '../services/format'
 import TransactionsSubNav from './TransactionsSubNav.vue'
 import PayeeAutocomplete from '../components/PayeeAutocomplete.vue'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
@@ -128,16 +129,6 @@ function categoryLabel(categoryId) {
     if (parent) return `${parent.name} : ${category.name}`
   }
   return category.name
-}
-
-function formatAmount(value) {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(value || 0)
-}
-
-function formatDate(iso) {
-  if (!iso) return ''
-  const [y, m, d] = iso.split('-')
-  return `${d}/${m}/${y}`
 }
 
 /* --- Édition rapide en ligne (tiers ou catégorie uniquement) --- */

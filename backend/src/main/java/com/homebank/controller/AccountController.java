@@ -2,7 +2,6 @@ package com.homebank.controller;
 
 import com.homebank.dto.AccountDTO;
 import com.homebank.mapper.AccountMapper;
-import com.homebank.model.Account;
 import com.homebank.service.AccountService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -46,13 +45,13 @@ public class AccountController {
     }
 
     @PostMapping
-    public ResponseEntity<AccountDTO> create(@RequestBody Account account) {
-        return ResponseEntity.ok(accountMapper.toDTO(accountService.create(account)));
+    public ResponseEntity<AccountDTO> create(@RequestBody AccountDTO payload) {
+        return ResponseEntity.ok(accountMapper.toDTO(accountService.create(payload)));
     }
 
     @PutMapping("/{id}")
-    public AccountDTO update(@PathVariable Long id, @RequestBody Account account) {
-        return accountMapper.toDTO(accountService.update(id, account));
+    public AccountDTO update(@PathVariable Long id, @RequestBody AccountDTO payload) {
+        return accountMapper.toDTO(accountService.update(id, payload));
     }
 
     @DeleteMapping("/{id}")

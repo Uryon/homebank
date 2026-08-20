@@ -1,5 +1,6 @@
 package com.homebank.service;
 
+import com.homebank.dto.AccountDTO;
 import com.homebank.model.Account;
 import com.homebank.repository.AccountRepository;
 import com.homebank.repository.TransactionRepository;
@@ -32,12 +33,19 @@ public class AccountService {
                 .orElseThrow(() -> new NoSuchElementException("Compte introuvable : " + id));
     }
 
-    public Account create(Account account) {
-        account.setId(null);
+    public Account create(AccountDTO payload) {
+        Account account = new Account();
+        account.setName(payload.getName());
+        account.setType(payload.getType());
+        account.setInitialBalance(payload.getInitialBalance());
+        account.setCurrency(payload.getCurrency());
+        account.setNotes(payload.getNotes());
+        account.setArchived(payload.isArchived());
+        account.setExternalRef(payload.getExternalRef());
         return accountRepository.save(account);
     }
 
-    public Account update(Long id, Account payload) {
+    public Account update(Long id, AccountDTO payload) {
         Account existing = findById(id);
         existing.setName(payload.getName());
         existing.setType(payload.getType());
@@ -45,6 +53,9 @@ public class AccountService {
         existing.setCurrency(payload.getCurrency());
         existing.setNotes(payload.getNotes());
         existing.setArchived(payload.isArchived());
+        // externalRef n'est jamais modifie ici : c'est le lien vers un compte
+        // agregateur (Powens), gere par la synchronisation automatique, jamais
+        // par une modification manuelle du formulaire Comptes.
         return accountRepository.save(existing);
     }
 
@@ -60,14 +71,21 @@ public class AccountService {
      * ReportService, meme principe applique aux statistiques).
      */
     public BigDecimal currentBalance(Long accountId) {
-        Account account = findById(accountId);
-        return account.getInitialBalance()
-                .add(transactionRepository.sumAmountByAccountIdAsOf(accountId, LocalDate.now()));
+        return currentBalance(findById(accountId));
     }
 
-    /** Solde de chaque compte, pour le tableau de bord */
+    private BigDecimal currentBalance(Account account) {
+        return account.getInitialBalance()
+                .add(transactionRepository.sumAmountByAccountIdAsOf(account.getId(), LocalDate.now()));
+    }
+
+    /**
+     * Solde de chaque compte, pour le tableau de bord. Reutilise directement
+     * les comptes deja charges par findAll() au lieu de les recharger un par
+     * un par id (currentBalance(Long) refait un findById a chaque appel).
+     */
     public Map<Long, BigDecimal> allBalances() {
         return accountRepository.findAll().stream()
-                .collect(Collectors.toMap(Account::getId, a -> currentBalance(a.getId())));
+                .collect(Collectors.toMap(Account::getId, this::currentBalance));
     }
 }

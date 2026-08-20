@@ -1,5 +1,6 @@
 package com.homebank.service;
 
+import com.homebank.dto.CategoryDTO;
 import com.homebank.model.Category;
 import com.homebank.repository.CategoryRepository;
 import com.homebank.repository.PayeeRepository;
@@ -39,29 +40,31 @@ public class CategoryService {
                 .orElseThrow(() -> new NoSuchElementException("Categorie introuvable : " + id));
     }
 
-    public Category create(Category category) {
-        category.setId(null);
-        if (category.getParent() != null && category.getParent().getId() != null) {
-            Category parent = findById(category.getParent().getId());
+    public Category create(CategoryDTO payload) {
+        Category category = new Category();
+        category.setName(payload.getName());
+        if (payload.getParentId() != null) {
+            Category parent = findById(payload.getParentId());
             category.setParent(parent);
             // Une sous-categorie appartient toujours au meme groupe (revenu/depense/les deux)
             // que sa categorie parente : son propre type n'est pas selectionnable independamment.
             category.setType(parent.getType());
         } else {
             category.setParent(null);
+            category.setType(payload.getType());
         }
         return categoryRepository.save(category);
     }
 
-    public Category update(Long id, Category payload) {
+    public Category update(Long id, CategoryDTO payload) {
         Category existing = findById(id);
         existing.setName(payload.getName());
 
-        if (payload.getParent() != null && payload.getParent().getId() != null) {
-            if (payload.getParent().getId().equals(id)) {
+        if (payload.getParentId() != null) {
+            if (payload.getParentId().equals(id)) {
                 throw new IllegalArgumentException("Une categorie ne peut pas etre son propre parent");
             }
-            Category parent = findById(payload.getParent().getId());
+            Category parent = findById(payload.getParentId());
             existing.setParent(parent);
             // Sous-categorie : le type suit toujours celui du parent, non modifiable independamment.
             existing.setType(parent.getType());

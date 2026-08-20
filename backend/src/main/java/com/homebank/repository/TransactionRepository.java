@@ -56,6 +56,16 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     List<Object[]> findAllPayeeAmountPairs();
 
     /**
+     * Sous-ensemble de findAllPayeeAmountPairs(), filtre sur les transactions
+     * dont le tiers contient (insensible a la casse) le texte donne. Utilise
+     * pour verifier l'orphelinage d'UN tiers auto-cree (voir
+     * PayeeService#pruneIfOrphan) sans charger toutes les transactions de la
+     * base a chaque edition/suppression de transaction.
+     */
+    @Query("select t.payee, t.amount from Transaction t where t.payee is not null and lower(t.payee) like lower(concat('%', :text, '%'))")
+    List<Object[]> findPayeeAmountPairsContaining(@Param("text") String text);
+
+    /**
      * Renomme en masse toutes les transactions dont le tiers correspond
      * exactement (insensible a la casse) a oldName, vers newName.
      * Utilise lors de la fusion de deux tiers.

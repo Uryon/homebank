@@ -1,6 +1,7 @@
 package com.homebank.service;
 
 import com.homebank.dto.AmortizationRowDTO;
+import com.homebank.dto.LoanDTO;
 import com.homebank.model.Loan;
 import com.homebank.repository.LoanRepository;
 import org.springframework.stereotype.Service;
@@ -33,22 +34,27 @@ public class LoanService {
                 .orElseThrow(() -> new NoSuchElementException("Pret introuvable : " + id));
     }
 
-    public Loan create(Loan payload) {
-        payload.setId(null);
-        return loanRepository.save(payload);
+    public Loan create(LoanDTO payload) {
+        Loan loan = new Loan();
+        applyPayload(loan, payload);
+        return loanRepository.save(loan);
     }
 
-    public Loan update(Long id, Loan payload) {
+    public Loan update(Long id, LoanDTO payload) {
         Loan existing = findById(id);
-        existing.setName(payload.getName());
-        existing.setPrincipal(payload.getPrincipal());
-        existing.setAnnualRate(payload.getAnnualRate());
-        existing.setTermMonths(payload.getTermMonths());
-        existing.setStartDate(payload.getStartDate());
-        existing.setMonthlyPayment(payload.getMonthlyPayment());
-        existing.setMonthlyInsurance(payload.getMonthlyInsurance());
-        existing.setNotes(payload.getNotes());
+        applyPayload(existing, payload);
         return loanRepository.save(existing);
+    }
+
+    private void applyPayload(Loan loan, LoanDTO payload) {
+        loan.setName(payload.getName());
+        loan.setPrincipal(payload.getPrincipal());
+        loan.setAnnualRate(payload.getAnnualRate());
+        loan.setTermMonths(payload.getTermMonths());
+        loan.setStartDate(payload.getStartDate());
+        loan.setMonthlyPayment(payload.getMonthlyPayment());
+        loan.setMonthlyInsurance(payload.getMonthlyInsurance());
+        loan.setNotes(payload.getNotes());
     }
 
     public void delete(Long id) {

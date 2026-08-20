@@ -152,6 +152,7 @@
 import { ref, onMounted, computed, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
 import { LoansAPI } from '../services/api'
+import { formatAmount } from '../services/format'
 
 const loans = ref([])
 const selectedId = ref(null)
@@ -211,10 +212,9 @@ function progressPercent(loan) {
   return Math.min(100, Math.max(0, (paid / loan.principal) * 100))
 }
 
-function formatAmount(value) {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(value || 0)
-}
-
+// Fallback "—" (au lieu de "" cote services/format.js) : une echeance de
+// pret sans date doit rester visuellement signalee dans le tableau
+// d'amortissement, contrairement a un memo ou un mode de paiement vide.
 function formatDate(iso) {
   if (!iso) return '—'
   const [y, m, d] = iso.split('-')

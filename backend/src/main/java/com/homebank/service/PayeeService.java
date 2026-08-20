@@ -179,10 +179,21 @@ public class PayeeService {
      *               pas en compte dans la distinction des tiers)
      */
     public Optional<Payee> matchPayee(String text, BigDecimal amount) {
+        return matchPayee(text, amount, payeeRepository.findAll());
+    }
+
+    /**
+     * Variante de matchPayee qui reutilise une liste de tiers deja chargee en
+     * memoire au lieu de refaire payeeRepository.findAll() a chaque appel.
+     * Utilisee pour les traitements en boucle (import CSV/QIF, initialisation
+     * depuis les transactions existantes) afin de ne charger tous les tiers
+     * qu'une seule fois pour tout le lot, plutot qu'une fois par ligne.
+     */
+    Optional<Payee> matchPayee(String text, BigDecimal amount, List<Payee> candidates) {
         if (text == null || text.isBlank()) return Optional.empty();
         Payee genericMatch = null;
 
-        for (Payee payee : payeeRepository.findAll()) {
+        for (Payee payee : candidates) {
             if (!matchesPatternField(payee.getPattern(), text)) continue;
 
             if (payee.getAmount() == null) {
@@ -192,6 +203,11 @@ public class PayeeService {
             }
         }
         return Optional.ofNullable(genericMatch);
+    }
+
+    private static boolean sameAmount(BigDecimal a, BigDecimal b) {
+        if (a == null || b == null) return a == b;
+        return a.compareTo(b) == 0;
     }
 
     /**
@@ -208,23 +224,43 @@ public class PayeeService {
      *   (ex : "Bouygues Mel" pour 10E, "Bouygues Val" pour 20E).
      */
     public Payee resolveOrCreate(String rawText, BigDecimal amount) {
+        return resolveOrCreate(rawText, amount, payeeRepository.findAll());
+    }
+
+    /**
+     * Variante de resolveOrCreate qui reutilise une liste de tiers deja
+     * chargee en memoire (voir matchPayee(String, BigDecimal, List)) : le
+     * tiers eventuellement cree est ajoute a cette liste, pour que les lignes
+     * suivantes du meme lot le retrouvent sans requete supplementaire.
+     */
+    Payee resolveOrCreate(String rawText, BigDecimal amount, List<Payee> knownPayees) {
         if (rawText == null || rawText.isBlank()) return null;
         String trimmed = rawText.trim();
         BigDecimal normalizedAmount = amount != null ? amount.abs() : null;
 
-        Optional<Payee> matched = matchPayee(trimmed, normalizedAmount);
+        Optional<Payee> matched = matchPayee(trimmed, normalizedAmount, knownPayees);
         if (matched.isPresent()) return matched.get();
 
         // Filet de securite : evite un doublon si un tiers de meme nom ET meme
         // montant existe deja mais que son motif ne matchait pas ce texte precis.
-        Optional<Payee> byNameAndAmount = payeeRepository.findByNameIgnoreCaseAndAmount(trimmed, normalizedAmount);
+        Optional<Payee> byNameAndAmount = knownPayees.stream()
+                .filter(p -> p.getName() != null && p.getName().equalsIgnoreCase(trimmed))
+                .filter(p -> sameAmount(p.getAmount(), normalizedAmount))
+                .findFirst();
         if (byNameAndAmount.isPresent()) return byNameAndAmount.get();
 
         Payee created = new Payee();
         created.setName(trimmed);
         created.setPattern(defaultPattern(trimmed));
         created.setAmount(normalizedAmount);
-        return payeeRepository.save(created);
+        Payee saved = payeeRepository.save(created);
+        knownPayees.add(saved);
+        return saved;
+    }
+
+    /** Charge tous les tiers, pour etre reutilise a travers tout un lot (import, initialisation...). */
+    List<Payee> findAllForMatching() {
+        return payeeRepository.findAll();
     }
 
     /**
@@ -237,6 +273,10 @@ public class PayeeService {
     public Map<String, Integer> initializeFromExistingTransactions() {
         int created = 0;
         int alreadyKnown = 0;
+        // Charge tous les tiers une seule fois pour tout le balayage, plutot
+        // que de refaire un findAll() a chaque paire (tiers, montant) — voir
+        // resolveOrCreate(String, BigDecimal, List).
+        List<Payee> knownPayees = findAllForMatching();
 
         for (Object[] row : transactionRepository.findAllPayeeAmountPairs()) {
             String rawText = (String) row[0];
@@ -246,10 +286,11 @@ public class PayeeService {
             String trimmed = rawText.trim();
             BigDecimal normalizedAmount = amount != null ? amount.abs() : null;
 
-            boolean existedBefore = matchPayee(trimmed, normalizedAmount).isPresent()
-                    || payeeRepository.findByNameIgnoreCaseAndAmount(trimmed, normalizedAmount).isPresent();
+            boolean existedBefore = matchPayee(trimmed, normalizedAmount, knownPayees).isPresent()
+                    || knownPayees.stream().anyMatch(p ->
+                            p.getName() != null && p.getName().equalsIgnoreCase(trimmed) && sameAmount(p.getAmount(), normalizedAmount));
 
-            resolveOrCreate(trimmed, normalizedAmount);
+            resolveOrCreate(trimmed, normalizedAmount, knownPayees);
 
             if (existedBefore) {
                 alreadyKnown++;
@@ -296,7 +337,11 @@ public class PayeeService {
         // touche jamais a un tiers dans lequel l'utilisateur a investi du travail.
         if (!payee.getPattern().equals(defaultPattern(payee.getName()))) return;
 
-        boolean stillUsed = transactionRepository.findAllPayeeAmountPairs().stream()
+        // Filtre large fait en base (le tiers doit au moins contenir le nom du
+        // tiers auto-cree) avant d'appliquer matches() pour la correspondance
+        // exacte : evite de charger toutes les transactions de la base a
+        // chaque edition/suppression, alors que seul CE tiers nous interesse.
+        boolean stillUsed = transactionRepository.findPayeeAmountPairsContaining(payee.getName()).stream()
                 .anyMatch(row -> matches(payee, (String) row[0], (BigDecimal) row[1]));
 
         if (!stillUsed) {

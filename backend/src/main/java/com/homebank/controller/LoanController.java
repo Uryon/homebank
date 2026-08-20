@@ -45,13 +45,13 @@ public class LoanController {
     }
 
     @PostMapping
-    public ResponseEntity<LoanDTO> create(@RequestBody Loan loan) {
-        return ResponseEntity.ok(loanMapper.toDTO(loanService.create(loan)));
+    public ResponseEntity<LoanDTO> create(@RequestBody LoanDTO payload) {
+        return ResponseEntity.ok(loanMapper.toDTO(loanService.create(payload)));
     }
 
     @PutMapping("/{id}")
-    public LoanDTO update(@PathVariable Long id, @RequestBody Loan loan) {
-        return loanMapper.toDTO(loanService.update(id, loan));
+    public LoanDTO update(@PathVariable Long id, @RequestBody LoanDTO payload) {
+        return loanMapper.toDTO(loanService.update(id, payload));
     }
 
     @DeleteMapping("/{id}")

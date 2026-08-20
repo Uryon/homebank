@@ -57,9 +57,14 @@ public class ImportService {
      * Determine le tiers canonique (cree automatiquement si inconnu) et la
      * categorie a appliquer, sans encore creer/sauvegarder la transaction.
      * Renvoie le tiers resolu (peut etre null si le texte brut est vide).
+     *
+     * `knownPayees` est charge UNE FOIS par import (voir importCsv/importQif)
+     * et reutilise pour toutes les lignes du fichier, plutot que de recharger
+     * tous les tiers en base a chaque ligne (un import peut contenir des
+     * centaines/milliers de lignes).
      */
-    private Payee resolvePayee(String payeeText, BigDecimal amount) {
-        return payeeService.resolveOrCreate(payeeText, amount);
+    private Payee resolvePayee(String payeeText, BigDecimal amount, List<Payee> knownPayees) {
+        return payeeService.resolveOrCreate(payeeText, amount, knownPayees);
     }
 
     private Category resolveCategory(Payee payee, String categoryNameFromFile) {
@@ -109,6 +114,7 @@ public class ImportService {
     public ImportResult importCsv(MultipartFile file, Long accountId) {
         Account account = accountService.findById(accountId);
         ImportResult result = new ImportResult();
+        List<Payee> knownPayees = payeeService.findAllForMatching();
 
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
@@ -136,7 +142,7 @@ public class ImportService {
                     String categoryName = fields.length > 6 ? fields[6].trim() : "";
                     String tags = fields.length > 7 ? fields[7].trim() : "";
 
-                    Payee payee = resolvePayee(payeeText, amount);
+                    Payee payee = resolvePayee(payeeText, amount, knownPayees);
                     String canonicalPayee = payee != null ? payee.getName() : payeeText;
 
                     if (isDuplicate(accountId, date, amount, canonicalPayee, null)) {
@@ -174,6 +180,7 @@ public class ImportService {
     public ImportResult importQif(MultipartFile file, Long accountId) {
         Account account = accountService.findById(accountId);
         ImportResult result = new ImportResult();
+        List<Payee> knownPayees = payeeService.findAllForMatching();
 
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
@@ -232,7 +239,7 @@ public class ImportService {
                                 );
                             }
 
-                            Payee payee = resolvePayee(payeeText, amount);
+                            Payee payee = resolvePayee(payeeText, amount, knownPayees);
                             String canonicalPayee = payee != null ? payee.getName() : payeeText;
 
                             if (isDuplicate(accountId, date, amount, canonicalPayee, null)) {
