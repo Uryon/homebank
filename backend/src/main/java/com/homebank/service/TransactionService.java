@@ -248,9 +248,10 @@ public class TransactionService {
         // que l'onglet "Tiers" reste toujours a jour avec les tiers realement
         // utilises sur les transactions, meme lors d'une saisie manuelle.
         String payeeText = payload.getPayee();
+        Payee resolvedPayee = null;
         if (payeeText != null && !payeeText.isBlank()) {
-            Payee payee = payeeService.resolveOrCreate(payeeText, payload.getAmount());
-            transaction.setPayee(payee != null ? payee.getName() : payeeText);
+            resolvedPayee = payeeService.resolveOrCreate(payeeText, payload.getAmount());
+            transaction.setPayee(resolvedPayee != null ? resolvedPayee.getName() : payeeText);
         } else {
             transaction.setPayee(payeeText);
         }
@@ -266,10 +267,19 @@ public class TransactionService {
         transaction.setValidated(payload.isValidated());
 
         if (payload.getCategoryId() != null) {
+            // Categorie choisie explicitement (saisie manuelle, ou deja
+            // presente sur une transaction existante en cours de modification) :
+            // ce choix prevaut toujours et n'est jamais ecrase.
             Category category =
                     categoryService.findById(payload.getCategoryId());
 
             transaction.setCategory(category);
+        } else if (resolvedPayee != null && resolvedPayee.getCategory() != null) {
+            // Aucune categorie fournie explicitement : on applique la
+            // categorie par defaut du tiers, si elle existe (source unique
+            // de categorisation automatique, cf. Payee#category). On ne
+            // touche a rien si le tiers n'a pas de categorie par defaut.
+            transaction.setCategory(resolvedPayee.getCategory());
         } else {
             transaction.setCategory(null);
         }

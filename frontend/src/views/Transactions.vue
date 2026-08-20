@@ -459,6 +459,39 @@ function resolveCategoryId(typedLabel) {
   return match ? match.id : null
 }
 
+/**
+ * Categorisation automatique par tiers : un tiers connu (page "Tiers") peut
+ * avoir une seule categorie par defaut (Payee#category cote backend). Quand
+ * l'utilisateur saisit/selectionne un tiers reconnu dans le formulaire et
+ * que le champ Categorie est encore vide, on pre-remplit ce champ avec la
+ * categorie par defaut du tiers, SANS jamais ecraser une categorie deja
+ * choisie (manuellement ou par un remplissage precedent). C'est un simple
+ * confort d'affichage : la source de verite reste appliquee cote backend
+ * (voir TransactionService#applyPayload) pour rester fiable meme si ce
+ * pre-remplissage frontend echouait ou etait court-circuite.
+ */
+function findPayeeByName(name) {
+  if (!name || !name.trim()) return null
+  const trimmed = name.trim().toLowerCase()
+  return payees.value.find(p => (p.name || '').trim().toLowerCase() === trimmed) || null
+}
+
+function applyDefaultCategoryFromPayee(payeeName, targetForm) {
+  if (!targetForm || (targetForm.categoryName && targetForm.categoryName.trim())) return
+  const payee = findPayeeByName(payeeName)
+  if (!payee || !payee.categoryId) return
+  const label = categoryLabel(payee.categoryId)
+  if (label !== '—') targetForm.categoryName = label
+}
+
+watch(() => form.value.payee, (payeeName) => {
+  applyDefaultCategoryFromPayee(payeeName, form.value)
+})
+
+watch(() => editForm.value?.payee, (payeeName) => {
+  applyDefaultCategoryFromPayee(payeeName, editForm.value)
+})
+
 function openCreate() {
   form.value = emptyForm()
   if (accounts.value.length) form.value.accountId = accounts.value[0].id

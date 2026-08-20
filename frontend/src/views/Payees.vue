@@ -67,10 +67,11 @@
                 <input v-model.number="editForm.amount" type="number" step="0.01" style="text-align:right;" placeholder="Tous montants" />
               </td>
               <td @click.stop>
-                <select v-model.number="editForm.categoryId">
-                  <option :value="null">Aucune</option>
-                  <option v-for="c in flatCategories" :key="c.id" :value="c.id">{{ c.label }}</option>
-                </select>
+                <CategoryAutocomplete
+                  v-model="editForm.categoryId"
+                  :categories="flatCategories"
+                  placeholder="Aucune"
+                />
               </td>
               <td @click.stop class="row-actions">
                 <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
@@ -123,11 +124,12 @@
             <input v-model.number="form.amount" type="number" step="0.01" min="0" placeholder="Ex : 10" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
-            <label>Catégorie à appliquer automatiquement</label>
-            <select v-model.number="form.categoryId">
-              <option :value="null">Aucune (pas de catégorisation auto)</option>
-              <option v-for="c in flatCategories" :key="c.id" :value="c.id">{{ c.label }}</option>
-            </select>
+            <label>Catégorie associée (appliquée automatiquement aux transactions de ce tiers)</label>
+            <CategoryAutocomplete
+              v-model="form.categoryId"
+              :categories="flatCategories"
+              placeholder="Rechercher une catégorie… (ex : ali)"
+            />
           </div>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
@@ -170,6 +172,7 @@ import { ref, onMounted, computed, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { PayeesAPI, CategoriesAPI } from '../services/api'
 import { normalizeSearch } from '../services/search'
+import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 
 const route = useRoute()
 
@@ -207,10 +210,16 @@ const flatCategories = computed(() => {
   const roots = categories.value.filter(c => !c.parentId)
   const result = []
   for (const root of roots) {
-    result.push({ id: root.id, label: root.name })
+    // Le type (revenu/depense/les deux) provient directement du modele
+    // existant (Category#type, deja renvoye par l'API) : jamais deduit du
+    // nom. Une sous-categorie herite toujours du type de son parent (regle
+    // deja appliquee cote backend, cf. CategoryService), mais on relit son
+    // propre champ "type" tel que fourni par l'API plutot que de le
+    // recalculer ici.
+    result.push({ id: root.id, label: root.name, type: root.type })
     const children = categories.value.filter(c => c.parentId === root.id)
     for (const child of children) {
-      result.push({ id: child.id, label: `${root.name} : ${child.name}` })
+      result.push({ id: child.id, label: `${root.name} : ${child.name}`, type: child.type })
     }
   }
   return result
@@ -363,10 +372,17 @@ onMounted(async () => {
   cursor: default;
   background: var(--ink-800);
   box-shadow: inset 3px 0 0 var(--azure);
+  position: relative;
+  z-index: 5;
 }
 .payees-table tbody tr.row-editing input,
 .payees-table tbody tr.row-editing select {
   width: 100%;
+}
+/* Permet au menu deroulant de l'autocompletion de categorie de deborder
+   de la cellule/ligne sans etre coupe. */
+.payees-table tbody tr.row-editing td {
+  overflow: visible;
 }
 .row-actions {
   display: flex;
