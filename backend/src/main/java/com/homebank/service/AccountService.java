@@ -41,7 +41,6 @@ public class AccountService {
         account.setCurrency(payload.getCurrency());
         account.setNotes(payload.getNotes());
         account.setArchived(payload.isArchived());
-        account.setExternalRef(payload.getExternalRef());
         return accountRepository.save(account);
     }
 
@@ -53,9 +52,6 @@ public class AccountService {
         existing.setCurrency(payload.getCurrency());
         existing.setNotes(payload.getNotes());
         existing.setArchived(payload.isArchived());
-        // externalRef n'est jamais modifie ici : c'est le lien vers un compte
-        // agregateur (Powens), gere par la synchronisation automatique, jamais
-        // par une modification manuelle du formulaire Comptes.
         return accountRepository.save(existing);
     }
 

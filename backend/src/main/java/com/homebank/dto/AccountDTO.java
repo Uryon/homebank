@@ -19,5 +19,4 @@ public class AccountDTO {
     private String currency;
     private String notes;
     private boolean archived;
-    private String externalRef;
 }

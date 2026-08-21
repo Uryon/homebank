@@ -40,14 +40,6 @@ public class Account {
     @Column(nullable = false)
     private boolean archived = false;
 
-    /**
-     * Reference externe optionnelle (ex : "POWENS:12345") permettant de relier
-     * ce compte a un compte chez un agregateur bancaire (Powens), pour la
-     * synchronisation automatique. Null pour un compte purement local.
-     */
-    @Column(name = "external_ref", unique = true)
-    private String externalRef;
-
     @JsonIgnore
     @OneToMany(mappedBy = "account", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Transaction> transactions = new ArrayList<>();
