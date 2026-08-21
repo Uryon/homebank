@@ -745,6 +745,9 @@ onMounted(loadDashboard)
   width: 100%;
   overflow: auto;
   max-height: 720px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
 }
 
 .monthly-analysis-table {

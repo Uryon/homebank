@@ -241,7 +241,11 @@ tbody tr:last-child td { border-bottom: none; }
 td.num, th.num { text-align: right; }
 
 /* Table "nue" (hors .table-scroll) : bordure + arrondi + ombre cohérents */
-table:not(.transactions-table):not(.payees-table) {
+/* .monthly-analysis-table exclue : son "overflow: hidden" casserait le
+   position: sticky de son thead (même piège que .transactions-table et
+   .payees-table) car il deviendrait l'ancêtre de référence du sticky à la
+   place de .monthly-analysis-wrap, qui est le vrai conteneur qui scrolle. */
+table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
     overflow: hidden;
