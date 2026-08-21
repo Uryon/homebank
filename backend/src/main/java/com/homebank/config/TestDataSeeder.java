@@ -2,9 +2,9 @@ package com.homebank.config;
 
 import com.homebank.model.*;
 import com.homebank.repository.*;
+import com.homebank.service.PayeeService;
 import com.homebank.utils.AccountType;
 import com.homebank.utils.PaymentMode;
-import com.homebank.utils.TransactionStatus;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -32,17 +32,20 @@ public class TestDataSeeder implements CommandLineRunner {
     private final PayeeRepository payeeRepository;
     private final TransactionRepository transactionRepository;
     private final LoanRepository loanRepository;
+    private final PayeeService payeeService;
 
     public TestDataSeeder(AccountRepository accountRepository,
                            CategoryRepository categoryRepository,
                            PayeeRepository payeeRepository,
                            TransactionRepository transactionRepository,
-                           LoanRepository loanRepository) {
+                           LoanRepository loanRepository,
+                           PayeeService payeeService) {
         this.accountRepository = accountRepository;
         this.categoryRepository = categoryRepository;
         this.payeeRepository = payeeRepository;
         this.transactionRepository = transactionRepository;
         this.loanRepository = loanRepository;
+        this.payeeService = payeeService;
     }
 
     @Override
@@ -131,9 +134,7 @@ public class TestDataSeeder implements CommandLineRunner {
         debit.setAccount(courant);
         debit.setDate(transferDate);
         debit.setAmount(new BigDecimal("-200.00"));
-        debit.setPayee("Virement vers Livret A");
         debit.setPaymentMode(PaymentMode.TRANSFER);
-        debit.setStatus(TransactionStatus.NONE);
         debit.setValidated(true);
         Transaction savedDebit = transactionRepository.save(debit);
 
@@ -141,9 +142,7 @@ public class TestDataSeeder implements CommandLineRunner {
         credit.setAccount(epargne);
         credit.setDate(transferDate);
         credit.setAmount(new BigDecimal("200.00"));
-        credit.setPayee("Virement depuis Compte courant");
         credit.setPaymentMode(PaymentMode.TRANSFER);
-        credit.setStatus(TransactionStatus.NONE);
         credit.setValidated(true);
         credit.setTransferTransaction(savedDebit);
         Transaction savedCredit = transactionRepository.save(credit);
@@ -203,18 +202,24 @@ public class TestDataSeeder implements CommandLineRunner {
         payeeRepository.save(p);
     }
 
-    private Transaction transaction(Account account, LocalDate date, BigDecimal amount, String payee,
+    /**
+     * `payeeName` passe par la meme reconnaissance/creation automatique que
+     * l'import ou la saisie manuelle (voir PayeeService#resolveOrCreate),
+     * pour que les donnees de demo utilisent exactement le meme chemin que
+     * du code reel : un nom deja enregistre via payee(...) rejoint le meme
+     * tiers, un nom inconnu (ex : "Le Bistrot") en cree un a la volee.
+     */
+    private Transaction transaction(Account account, LocalDate date, BigDecimal amount, String payeeName,
                                      String memo, Category category, PaymentMode mode,
                                      boolean validated, boolean periodicExpense) {
         Transaction t = new Transaction();
         t.setAccount(account);
         t.setDate(date);
         t.setAmount(amount);
-        t.setPayee(payee);
+        t.setPayee(payeeName != null ? payeeService.resolveOrCreate(payeeName, amount) : null);
         t.setMemo(memo);
         t.setCategory(category);
         t.setPaymentMode(mode);
-        t.setStatus(TransactionStatus.NONE);
         t.setValidated(validated);
         t.setPeriodicExpense(periodicExpense);
         return transactionRepository.save(t);

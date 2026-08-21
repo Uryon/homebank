@@ -459,16 +459,19 @@ async function loadDashboard() {
 }
 
 /**
- * Affiche le solde sur 12 mois historiques + le mois en cours ("présent")
- * + 12 mois prévisionnels, avec deux jeux de données superposés partageant
- * le point "présent" : une ligne pleine pour le réel, une ligne en
- * pointillés pour le prévisionnel.
+ * Affiche le solde sur 12 mois historiques (deja termines, ligne pleine
+ * "Réel") + 12 mois prévisionnels a partir du mois en cours inclus (ligne
+ * pointillee "Prévisionnel") : un mois n'est compte comme réel qu'a partir
+ * du 1er du mois suivant, une fois entierement termine. Les deux lignes
+ * partagent le dernier point historique (mois precedent) comme point de
+ * jonction, pour eviter tout trou visuel entre les deux.
  */
 function renderForecastChart(points) {
-  const presentIndex = points.findIndex(p => p.type === 'present')
+  const firstForecastIndex = points.findIndex(p => p.type === 'previsionnel')
+  const junctionIndex = firstForecastIndex - 1
 
-  const actualData = points.map((p, i) => (i <= presentIndex ? p.balance : null))
-  const forecastData = points.map((p, i) => (i >= presentIndex ? p.balance : null))
+  const actualData = points.map((p, i) => (i < firstForecastIndex ? p.balance : null))
+  const forecastData = points.map((p, i) => (i >= junctionIndex ? p.balance : null))
 
   if (forecastChartInstance) forecastChartInstance.destroy()
   forecastChartInstance = new Chart(forecastChart.value, {
@@ -483,8 +486,7 @@ function renderForecastChart(points) {
           backgroundColor: 'rgba(31, 157, 108, 0.10)',
           fill: true,
           tension: 0.25,
-          pointRadius: (ctx) => (points[ctx.dataIndex]?.type === 'present' ? 4 : 0),
-          pointBackgroundColor: '#1F9D6C',
+          pointRadius: 0,
           borderWidth: 2,
           spanGaps: false
         },
@@ -496,7 +498,8 @@ function renderForecastChart(points) {
           borderDash: [6, 5],
           fill: true,
           tension: 0.25,
-          pointRadius: 0,
+          pointRadius: (ctx) => (ctx.dataIndex === junctionIndex ? 4 : 0),
+          pointBackgroundColor: '#3B6FE0',
           borderWidth: 2,
           spanGaps: false
         }

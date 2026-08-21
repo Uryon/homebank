@@ -22,20 +22,15 @@
         </select>
       </div>
 
-      <div class="form-field">
-        <label>Statut</label>
-        <select v-model="filterStatus">
-          <option value="all">Toutes</option>
-          <option value="pending">À traiter ({{ pendingCount }})</option>
-        </select>
-      </div>
-
-      <div class="form-field">
-        <label>Recherche (tiers, montant, ou &gt; / &lt; / = un montant)</label>
-        <input v-model="searchQuery" placeholder="Ex : Carrefour, 42,50 ou > 100" style="min-width: 260px;" />
-        <div v-if="amountQuery" class="text-hint">
-          {{ amountSearchLoading ? 'Recherche…' : `${filteredTransactions.length} transaction(s) trouvée(s)` }}
-        </div>
+      <div class="form-field" style="align-self: flex-end;">
+        <button
+          class="btn"
+          :class="{ secondary: !pendingOnly }"
+          @click="pendingOnly = !pendingOnly"
+          :title="pendingOnly ? 'Revenir à toutes les transactions' : 'N\'afficher que les transactions à traiter'"
+        >
+          À traiter ({{ pendingCount }})
+        </button>
       </div>
 
       <div class="form-field" style="align-self: flex-end;">
@@ -47,6 +42,14 @@
         >
           {{ validating ? 'Validation…' : `Tout valider (${pendingCount} en attente)` }}
         </button>
+      </div>
+
+      <div class="form-field" style="margin-left: auto;">
+        <label>Recherche (tiers, montant, ou &gt; / &lt; / = un montant)</label>
+        <input v-model="searchQuery" placeholder="Ex : Carrefour, 42,50 ou > 100" style="min-width: 260px;" />
+        <div v-if="amountQuery" class="text-hint">
+          {{ amountSearchLoading ? 'Recherche…' : `${filteredTransactions.length} transaction(s) trouvée(s)` }}
+        </div>
       </div>
     </div>
 
@@ -138,7 +141,7 @@
 
           <div class="form-field">
             <label>Montant (négatif = dépense)</label>
-            <input v-model.number="form.amount" type="number" step="0.01" />
+            <AmountInput v-model="form.amount" />
           </div>
 
           <div class="form-field">
@@ -196,13 +199,14 @@ import { flattenCategories } from '../services/categories'
 import PayeeAutocomplete from '../components/PayeeAutocomplete.vue'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import TransactionRow from '../components/TransactionRow.vue'
+import AmountInput from '../components/AmountInput.vue'
 import TransactionsSubNav from './TransactionsSubNav.vue'
 import { formatAmount } from '../services/format'
 
 const route = useRoute()
 
 const filterAccount = ref(null)
-const filterStatus = ref('all')
+const pendingOnly = ref(false)
 const searchQuery = ref('')
 
 // Donnees issues du cache partage (deja precharge au demarrage de l'app,
@@ -238,7 +242,6 @@ function emptyForm() {
     amount: 0,
     categoryId: null,
     paymentMode: 'NONE',
-    status: 'NONE',
     memo: '',
     tags: '',
     transferTransactionId: null,
@@ -266,7 +269,7 @@ const filteredTransactions = computed(() => {
     ? (amountSearchResults.value ?? [])
     : transactions.value
 
-  const statusFiltered = filterStatus.value === 'pending'
+  const statusFiltered = pendingOnly.value
     ? baseTransactions.filter(t => !t.validated)
     : baseTransactions
 
@@ -407,7 +410,6 @@ async function save() {
     amount: form.value.amount,
     categoryId: form.value.categoryId,
     paymentMode: form.value.paymentMode,
-    status: form.value.status,
     memo: form.value.memo,
     tags: form.value.tags,
     transferTransactionId: form.value.transferTransactionId,

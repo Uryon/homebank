@@ -32,7 +32,7 @@
         <input v-model="editForm.memo" placeholder="Note libre" />
       </td>
       <td class="num" colspan="2" @click.stop>
-        <input v-model.number="editForm.amount" type="number" step="0.01" style="text-align: right;" />
+        <AmountInput v-model="editForm.amount" style="text-align: right;" />
       </td>
       <td class="num" @click.stop>
         <input type="checkbox" v-model="editForm.periodicExpense" title="Dépense périodique récurrente" />
@@ -101,6 +101,7 @@
 import { ref, watch, nextTick } from 'vue'
 import PayeeAutocomplete from './PayeeAutocomplete.vue'
 import CategoryAutocomplete from './CategoryAutocomplete.vue'
+import AmountInput from './AmountInput.vue'
 import { formatAmount, formatDate, displayMemo } from '../services/format'
 
 const props = defineProps({
@@ -140,7 +141,6 @@ function buildEditForm(t) {
     amount: t.amount,
     categoryId: t.categoryId ?? null,
     paymentMode: t.paymentMode || 'NONE',
-    status: t.status || 'NONE',
     memo: displayMemo(t.memo),
     tags: t.tags || '',
     transferTransactionId: t.transferTransactionId ?? null,
@@ -204,7 +204,6 @@ function confirmEdit() {
     amount: editForm.value.amount,
     categoryId: editForm.value.categoryId,
     paymentMode: editForm.value.paymentMode,
-    status: editForm.value.status,
     memo: editForm.value.memo,
     tags: editForm.value.tags,
     transferTransactionId: editForm.value.transferTransactionId,

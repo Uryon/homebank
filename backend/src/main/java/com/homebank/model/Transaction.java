@@ -1,7 +1,6 @@
 package com.homebank.model;
 
 import com.homebank.utils.PaymentMode;
-import com.homebank.utils.TransactionStatus;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
@@ -36,7 +35,18 @@ public class Transaction {
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
 
-    private String payee;
+    /**
+     * Tiers de la transaction : vraie relation (et non plus un texte
+     * denormalise recopie sur chaque transaction), pour que le nom affiche
+     * soit toujours lu en direct depuis Payee#name. Un renommage ou une
+     * fusion de tiers (voir PayeeService) se repercute donc automatiquement
+     * sur toutes les transactions liees, sans etape de synchronisation a
+     * part qui pourrait etre oubliee. Null pour une transaction sans tiers
+     * (ex : virement interne, dont le libelle est recalcule a l'affichage).
+     */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "payee_id")
+    private Payee payee;
 
     private String memo;
 
@@ -47,10 +57,6 @@ public class Transaction {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private PaymentMode paymentMode = PaymentMode.NONE;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private TransactionStatus status = TransactionStatus.NONE;
 
     /** Tags libres separes par des espaces, comme dans HomeBank */
     private String tags;

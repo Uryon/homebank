@@ -12,13 +12,16 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 @Service
 public class ImportService {
@@ -83,94 +86,204 @@ public class ImportService {
     }
 
     /**
-     * Detection de doublons, commune aux imports CSV/QIF (et reutilisable
-     * pour une future synchronisation bancaire automatique) :
+     * Cle de deduplication (date+montant+tiers canonique, insensible a la
+     * casse) : montant toujours ramene a l'echelle 2 (comme la colonne SQL
+     * "amount", numeric(19,2)) pour qu'un texte source sans decimales
+     * ("150") et un montant deja enregistre ("150.00") soient bien reconnus
+     * comme identiques.
+     */
+    private record DuplicateKey(LocalDate date, BigDecimal amount, String canonicalPayee) {
+        static DuplicateKey of(LocalDate date, BigDecimal amount, String canonicalPayee) {
+            return new DuplicateKey(
+                    date,
+                    amount.setScale(2, RoundingMode.HALF_UP),
+                    canonicalPayee != null ? canonicalPayee.trim().toLowerCase(Locale.ROOT) : "");
+        }
+    }
+
+    /**
+     * Precharge, en une seule requete, les cles (date+montant+tiers) de
+     * toutes les transactions deja enregistrees sur ce compte : un import
+     * peut contenir des centaines/milliers de lignes, et interroger la base
+     * une fois par ligne pour verifier les doublons (comme avant) rendait
+     * l'import lineairement plus lent avec la taille du fichier ET la taille
+     * de l'historique deja importe. La detection se fait ensuite en memoire,
+     * en O(1) par ligne.
+     */
+    private Set<DuplicateKey> loadDuplicateKeys(Long accountId) {
+        Set<DuplicateKey> keys = new HashSet<>();
+        for (Transaction t : transactionRepository.findByAccount_IdOrderByDateDescIdDesc(accountId)) {
+            keys.add(DuplicateKey.of(t.getDate(), t.getAmount(),
+                    t.getPayee() != null ? t.getPayee().getName() : null));
+        }
+        return keys;
+    }
+
+    /**
+     * Detection de doublons, commune aux imports CSV/QIF :
      * - si un identifiant externe (fourni par la banque/le fichier) est
      *   disponible et qu'une transaction du meme compte le porte deja,
      *   c'est un doublon certain ;
      * - sinon, on considere qu'il y a doublon si une transaction du meme
      *   compte, a la meme date, pour le meme montant et le meme tiers
-     *   (canonique, insensible a la casse) existe deja. Cette combinaison
-     *   large (date+montant+tiers) evite de rejeter deux operations
-     *   distinctes qui se ressembleraient partiellement.
+     *   (canonique, insensible a la casse) existe deja (voir DuplicateKey).
+     *   Cette combinaison large (date+montant+tiers) evite de rejeter deux
+     *   operations distinctes qui se ressembleraient partiellement.
      */
     private boolean isDuplicate(Long accountId, LocalDate date, BigDecimal amount,
-                                 String canonicalPayee, String externalId) {
+                                 String canonicalPayee, String externalId, Set<DuplicateKey> existingKeys) {
         if (externalId != null && !externalId.isBlank()) {
             if (transactionRepository.findByAccountIdAndExternalId(accountId, externalId).isPresent()) {
                 return true;
             }
         }
-        return !transactionRepository
-                .findPossibleDuplicates(accountId, date, amount, canonicalPayee)
-                .isEmpty();
+        return existingKeys.contains(DuplicateKey.of(date, amount, canonicalPayee));
     }
 
     /**
-     * Import d'un fichier CSV au format HomeBank :
-     * date;paymode;info;payee;memo;amount;category;tags
-     * Le separateur ';' est celui utilise par defaut par HomeBank.
+     * Positions des colonnes utiles dans un CSV, deduites de sa ligne
+     * d'en-tete (voir detectLayout ci-dessous). -1 pour une colonne absente
+     * de ce format (ex : pas de memo/categorie/tags separes dans un export
+     * bancaire brut).
+     */
+    private record CsvLayout(int dateIdx, int payeeIdx, int memoIdx, int amountIdx, int categoryIdx, int tagsIdx) {
+
+        /** Repli si aucune ligne d'en-tete n'est reconnue : format HomeBank classique, positions fixes. */
+        static final CsvLayout HOMEBANK_DEFAULT = new CsvLayout(0, 3, 4, 5, 6, 7);
+
+        /** Export bancaire brut (une seule colonne "Libelle" texte + un montant) : pas de memo/categorie/tags separes. */
+        static final CsvLayout BANK_STATEMENT = new CsvLayout(0, 1, -1, 2, -1, -1);
+    }
+
+    /**
+     * Import d'un fichier CSV. Reconnait deux formats :
+     * - le format HomeBank : date;paymode;info;payee;memo;amount;category;tags ;
+     * - un export bancaire brut (ex : "Date;Libelle;Montant(EUROS)"), tel que
+     *   telecharge directement depuis l'espace client d'une banque : peut etre
+     *   precede de quelques lignes de metadonnees ("Numero Compte;...", "Solde;...")
+     *   avant la vraie ligne d'en-tete, ignorees automatiquement. Le libelle
+     *   complet (guillemets retires) sert alors de texte de reconnaissance du
+     *   tiers, exactement comme le ferait un texte de payee brut a l'import.
+     * Le separateur ';' est celui utilise par defaut par HomeBank comme par
+     * la plupart des banques francaises.
      */
     public ImportResult importCsv(MultipartFile file, Long accountId) {
         Account account = accountService.findById(accountId);
         ImportResult result = new ImportResult();
         List<Payee> knownPayees = payeeService.findAllForMatching();
+        Set<DuplicateKey> existingKeys = loadDuplicateKeys(accountId);
 
+        List<String> lines;
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
+            lines = reader.lines().toList();
+        } catch (IOException e) {
+            result.errors.add("Erreur de lecture du fichier : " + e.getMessage());
+            return result;
+        }
 
-            String line;
-            int lineNumber = 0;
-            while ((line = reader.readLine()) != null) {
-                lineNumber++;
-                if (line.isBlank()) continue;
-                // Ligne d'en-tete HomeBank (commence par "date;")
-                if (lineNumber == 1 && line.toLowerCase(Locale.ROOT).startsWith("date")) continue;
+        int headerLineIndex = findHeaderLineIndex(lines);
+        CsvLayout layout = headerLineIndex >= 0
+                ? layoutFromHeader(lines.get(headerLineIndex).split(";", -1))
+                : CsvLayout.HOMEBANK_DEFAULT;
+        int firstDataLine = headerLineIndex >= 0 ? headerLineIndex + 1 : 0;
+        int minRequiredFields = Math.max(layout.dateIdx(), layout.amountIdx()) + 1;
 
-                String[] fields = line.split(";", -1);
-                if (fields.length < 6) {
-                    result.skipped++;
-                    result.errors.add("Ligne " + lineNumber + " : nombre de colonnes insuffisant");
+        for (int i = firstDataLine; i < lines.size(); i++) {
+            int lineNumber = i + 1;
+            String line = lines.get(i);
+            if (line.isBlank()) continue;
+
+            String[] fields = line.split(";", -1);
+            if (fields.length < minRequiredFields) {
+                result.skipped++;
+                result.errors.add("Ligne " + lineNumber + " : nombre de colonnes insuffisant");
+                continue;
+            }
+
+            try {
+                LocalDate date = parseDate(csvField(fields, layout.dateIdx()));
+                String payeeText = csvField(fields, layout.payeeIdx());
+                String memo = csvField(fields, layout.memoIdx());
+                BigDecimal amount = parseAmount(csvField(fields, layout.amountIdx()));
+                String categoryName = csvField(fields, layout.categoryIdx());
+                String tags = csvField(fields, layout.tagsIdx());
+
+                Payee payee = resolvePayee(payeeText, amount, knownPayees);
+                String canonicalPayee = payee != null ? payee.getName() : payeeText;
+
+                if (isDuplicate(accountId, date, amount, canonicalPayee, null, existingKeys)) {
+                    result.duplicates++;
                     continue;
                 }
 
-                try {
-                    LocalDate date = parseDate(fields[0].trim());
-                    String payeeText = fields.length > 3 ? fields[3].trim() : "";
-                    String memo = fields.length > 4 ? fields[4].trim() : "";
-                    BigDecimal amount = parseAmount(fields[5].trim());
-                    String categoryName = fields.length > 6 ? fields[6].trim() : "";
-                    String tags = fields.length > 7 ? fields[7].trim() : "";
-
-                    Payee payee = resolvePayee(payeeText, amount, knownPayees);
-                    String canonicalPayee = payee != null ? payee.getName() : payeeText;
-
-                    if (isDuplicate(accountId, date, amount, canonicalPayee, null)) {
-                        result.duplicates++;
-                        continue;
-                    }
-
-                    Transaction t = new Transaction();
-                    t.setAccount(account);
-                    t.setDate(date);
-                    t.setAmount(amount);
-                    t.setMemo(sanitizeMemo(memo));
-                    t.setTags(tags);
-                    t.setPayee(canonicalPayee);
-                    t.setCategory(resolveCategory(payee, categoryName));
-                    t.setValidated(false); // toute transaction importee demarre "en attente"
-                    transactionRepository.save(t);
-                    result.imported++;
-                } catch (Exception e) {
-                    result.skipped++;
-                    result.errors.add("Ligne " + lineNumber + " : " + e.getMessage());
-                }
+                Transaction t = new Transaction();
+                t.setAccount(account);
+                t.setDate(date);
+                t.setAmount(amount);
+                t.setMemo(sanitizeMemo(memo));
+                t.setTags(tags);
+                t.setPayee(payee);
+                t.setCategory(resolveCategory(payee, categoryName));
+                t.setValidated(false); // toute transaction importee demarre "en attente"
+                transactionRepository.save(t);
+                existingKeys.add(DuplicateKey.of(date, amount, canonicalPayee));
+                result.imported++;
+            } catch (Exception e) {
+                result.skipped++;
+                result.errors.add("Ligne " + lineNumber + " : " + e.getMessage());
             }
-        } catch (IOException e) {
-            result.errors.add("Erreur de lecture du fichier : " + e.getMessage());
         }
 
         return result;
+    }
+
+    /**
+     * Cherche la ligne d'en-tete ("Date;..." avec au moins 3 colonnes) parmi
+     * les premieres lignes non vides du fichier, en ignorant les eventuelles
+     * lignes de metadonnees d'un export bancaire ("Numero Compte;...",
+     * "Solde;...") qui les precedent : celles-ci n'ont que 2 colonnes
+     * ("Cle;Valeur"), jamais 3 ou plus. Si aucune ligne d'en-tete n'est
+     * trouvee avant la premiere ligne qui ressemble deja a une transaction
+     * (3 colonnes ou plus sans commencer par "date"), le fichier est
+     * considere sans en-tete (repli sur CsvLayout.HOMEBANK_DEFAULT).
+     */
+    private int findHeaderLineIndex(List<String> lines) {
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (line.isBlank()) continue;
+
+            String[] fields = line.split(";", -1);
+            if (fields.length >= 3 && stripQuotes(fields[0]).equalsIgnoreCase("date")) {
+                return i;
+            }
+            if (fields.length < 3) continue; // ligne de metadonnees ("Cle;Valeur"), on continue a chercher
+            return -1; // deja de la donnee (3+ colonnes, ne commence pas par "date") : pas d'en-tete du tout
+        }
+        return -1;
+    }
+
+    /**
+     * Deduit les positions des colonnes utiles a partir du nombre de colonnes
+     * de la ligne d'en-tete : 6 colonnes ou plus -> format HomeBank complet,
+     * moins -> export bancaire brut (une seule colonne "libelle" texte).
+     */
+    private CsvLayout layoutFromHeader(String[] header) {
+        return header.length >= 6 ? CsvLayout.HOMEBANK_DEFAULT : CsvLayout.BANK_STATEMENT;
+    }
+
+    /** Valeur d'un champ CSV a une position donnee, guillemets et espaces retires ; "" si la colonne n'existe pas pour ce format. */
+    private static String csvField(String[] fields, int idx) {
+        return (idx >= 0 && idx < fields.length) ? stripQuotes(fields[idx]) : "";
+    }
+
+    /** Retire un encadrement par des guillemets doubles (export bancaire), sinon se contente de trim(). */
+    private static String stripQuotes(String raw) {
+        String trimmed = raw.trim();
+        if (trimmed.length() >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+            return trimmed.substring(1, trimmed.length() - 1).trim();
+        }
+        return trimmed;
     }
 
     /**
@@ -181,6 +294,7 @@ public class ImportService {
         Account account = accountService.findById(accountId);
         ImportResult result = new ImportResult();
         List<Payee> knownPayees = payeeService.findAllForMatching();
+        Set<DuplicateKey> existingKeys = loadDuplicateKeys(accountId);
 
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
@@ -242,7 +356,7 @@ public class ImportService {
                             Payee payee = resolvePayee(payeeText, amount, knownPayees);
                             String canonicalPayee = payee != null ? payee.getName() : payeeText;
 
-                            if (isDuplicate(accountId, date, amount, canonicalPayee, null)) {
+                            if (isDuplicate(accountId, date, amount, canonicalPayee, null, existingKeys)) {
                                 result.duplicates++;
                             } else {
                                 Transaction t = new Transaction();
@@ -250,11 +364,12 @@ public class ImportService {
                                 t.setDate(date);
                                 t.setAmount(amount);
                                 t.setMemo(sanitizeMemo(memo));
-                                t.setPayee(canonicalPayee);
+                                t.setPayee(payee);
                                 t.setCategory(resolveCategory(payee, categoryName));
                                 t.setValidated(false);
 
                                 transactionRepository.save(t);
+                                existingKeys.add(DuplicateKey.of(date, amount, canonicalPayee));
                                 result.imported++;
                             }
 

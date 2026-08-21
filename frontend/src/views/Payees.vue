@@ -6,9 +6,6 @@
         <div class="subtitle">Cliquez sur un tiers pour le modifier — catégorisation automatique à l'import</div>
       </div>
       <div style="display:flex; gap:10px;">
-        <button class="btn secondary" :disabled="initializing" @click="initializeFromTransactions">
-          {{ initializing ? 'Initialisation…' : 'Initialiser depuis les transactions existantes' }}
-        </button>
         <button class="btn" @click="openCreate">+ Nouveau tiers</button>
       </div>
     </div>
@@ -41,7 +38,14 @@
         </colgroup>
         <thead>
           <tr>
-            <th></th>
+            <th>
+              <input
+                type="checkbox"
+                :checked="allFilteredSelected"
+                title="Sélectionner / désélectionner tous les tiers actuellement affichés"
+                @change="toggleSelectAllFiltered"
+              />
+            </th>
             <th>Nom</th>
             <th title="Insensible aux majuscules. Tapez juste 'Carrefour' pour reconnaître tout libellé qui le contient.">Motif de reconnaissance</th>
             <th class="num">Montant</th>
@@ -64,7 +68,7 @@
               <td @click.stop><input v-model="editForm.name" ref="firstEditField" /></td>
               <td @click.stop><input v-model="editForm.pattern" placeholder="Ex : Carrefour" /></td>
               <td class="num" @click.stop>
-                <input v-model.number="editForm.amount" type="number" step="0.01" style="text-align:right;" placeholder="Tous montants" />
+                <AmountInput v-model="editForm.amount" style="text-align:right;" placeholder="Tous montants" />
               </td>
               <td @click.stop>
                 <CategoryAutocomplete
@@ -121,7 +125,7 @@
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label>Montant associé (laisser vide = s'applique à tous les montants)</label>
-            <input v-model.number="form.amount" type="number" step="0.01" min="0" placeholder="Ex : 10" />
+            <AmountInput v-model="form.amount" placeholder="Ex : 10" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label>Catégorie associée (appliquée automatiquement aux transactions de ce tiers)</label>
@@ -175,13 +179,13 @@ import { normalizeSearch } from '../services/search'
 import { flattenCategories } from '../services/categories'
 import { formatAmount } from '../services/format'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
+import AmountInput from '../components/AmountInput.vue'
 
 const route = useRoute()
 
 const payees = ref([])
 const categories = ref([])
 const showModal = ref(false)
-const initializing = ref(false)
 const searchQuery = ref('')
 const form = ref(emptyForm())
 
@@ -252,19 +256,6 @@ async function remove(payee) {
   await load()
 }
 
-async function initializeFromTransactions() {
-  initializing.value = true
-  try {
-    const result = await PayeesAPI.initializeFromTransactions()
-    alert(`${result.created} tiers créé(s), ${result.alreadyKnown} déjà connu(s).`)
-    await load()
-  } catch (e) {
-    alert("Erreur lors de l'initialisation : " + (e.response?.data?.error || e.message))
-  } finally {
-    initializing.value = false
-  }
-}
-
 /* --- Édition inline --- */
 
 function startEdit(payee) {
@@ -296,6 +287,23 @@ async function confirmEdit() {
 
   await PayeesAPI.update(id, payload)
   await load()
+}
+
+/** Vrai si tous les tiers actuellement affichés (selon le filtre) sont sélectionnés. */
+const allFilteredSelected = computed(() =>
+  filteredPayees.value.length > 0 && filteredPayees.value.every(p => selectedIds.value.includes(p.id))
+)
+
+/**
+ * Case à cocher d'en-tête : sélectionne, ou désélectionne, tous les tiers
+ * actuellement affichés (selon le filtre), sans toucher à une éventuelle
+ * sélection existante en dehors du filtre courant.
+ */
+function toggleSelectAllFiltered() {
+  const filteredIds = new Set(filteredPayees.value.map(p => p.id))
+  selectedIds.value = allFilteredSelected.value
+    ? selectedIds.value.filter(id => !filteredIds.has(id))
+    : [...new Set([...selectedIds.value, ...filteredIds])]
 }
 
 /* --- Fusion --- */

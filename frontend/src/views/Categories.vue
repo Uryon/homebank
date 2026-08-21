@@ -28,6 +28,12 @@
       <!-- Colonne Dépenses -->
       <div class="card column-card">
         <div class="column-title">
+          <input
+            type="checkbox"
+            :checked="allExpenseFilteredSelected"
+            title="Sélectionner / désélectionner toutes les catégories de dépenses actuellement affichées"
+            @change="toggleSelectAllExpense"
+          />
           <span class="column-dot expense"></span> Dépenses
         </div>
 
@@ -109,6 +115,12 @@
       <!-- Colonne Revenus -->
       <div class="card column-card">
         <div class="column-title">
+          <input
+            type="checkbox"
+            :checked="allIncomeFilteredSelected"
+            title="Sélectionner / désélectionner toutes les catégories de revenus actuellement affichées"
+            @change="toggleSelectAllIncome"
+          />
           <span class="column-dot income"></span> Revenus
         </div>
 
@@ -323,6 +335,49 @@ function filteredChildren(rootId) {
   const root = roots.value.find(r => r.id === rootId)
   if (root && normalizeSearch(root.name).includes(q)) return kids
   return kids.filter(child => normalizeSearch(child.name).includes(q))
+}
+
+/**
+ * Ids des catégories (racines + enfants) actuellement affichées dans une
+ * colonne (Dépenses ou Revenus), selon le filtre de recherche.
+ */
+function visibleIds(roots) {
+  const ids = new Set()
+  for (const root of roots) {
+    ids.add(root.id)
+    for (const child of filteredChildren(root.id)) ids.add(child.id)
+  }
+  return [...ids]
+}
+
+const visibleExpenseIds = computed(() => visibleIds(expenseRoots.value))
+const visibleIncomeIds = computed(() => visibleIds(incomeRoots.value))
+
+const allExpenseFilteredSelected = computed(() =>
+  visibleExpenseIds.value.length > 0 && visibleExpenseIds.value.every(id => selectedIds.value.includes(id))
+)
+const allIncomeFilteredSelected = computed(() =>
+  visibleIncomeIds.value.length > 0 && visibleIncomeIds.value.every(id => selectedIds.value.includes(id))
+)
+
+/**
+ * Sélectionne, ou désélectionne, toutes les catégories actuellement
+ * affichées dans une colonne, sans toucher à une éventuelle sélection
+ * existante en dehors (autre colonne, ou filtre précédent).
+ */
+function toggleSelectAllIn(visibleIdList, allSelected) {
+  const idSet = new Set(visibleIdList)
+  selectedIds.value = allSelected
+    ? selectedIds.value.filter(id => !idSet.has(id))
+    : [...new Set([...selectedIds.value, ...idSet])]
+}
+
+function toggleSelectAllExpense() {
+  toggleSelectAllIn(visibleExpenseIds.value, allExpenseFilteredSelected.value)
+}
+
+function toggleSelectAllIncome() {
+  toggleSelectAllIn(visibleIncomeIds.value, allIncomeFilteredSelected.value)
 }
 
 function typeLabel(type) {

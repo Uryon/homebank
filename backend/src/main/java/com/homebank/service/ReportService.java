@@ -117,12 +117,15 @@ public class ReportService {
     }
 
     /**
-     * Solde mensuel sur 12 mois historiques (deja termines) + le mois en
-     * cours (point "present") + une projection sur 12 mois futurs
-     * ("previsionnel"), basee sur la variation mensuelle moyenne observee
-     * sur les 12 derniers mois. Chaque point precise son "type"
-     * (historique | present | previsionnel) pour permettre au frontend de
-     * les distinguer visuellement.
+     * Solde mensuel sur 12 mois historiques (deja termines) + une projection
+     * sur 12 mois a partir du mois en cours inclus ("previsionnel", fin de
+     * mois projetee des le mois en cours), basee sur la variation mensuelle
+     * moyenne observee sur les 12 derniers mois. Pas de point separe pour
+     * "aujourd'hui" : le mois en cours n'etant pas termine, il releve deja
+     * entierement du previsionnel (voir balanceAsOf pour le solde de
+     * reference utilise comme point de depart de la projection). Chaque
+     * point precise son "type" (historique | previsionnel) pour permettre au
+     * frontend de les distinguer visuellement.
      */
     public List<Map<String, Object>> balanceForecast(Long accountId) {
         List<Map<String, Object>> result = new ArrayList<>();
@@ -141,9 +144,6 @@ public class ReportService {
             result.add(point(monthEnd, balance, "historique"));
         }
 
-        BigDecimal presentBalance = balanceAsOf(today, accounts);
-        result.add(point(today, presentBalance, "present"));
-
         BigDecimal avgMonthlyNet = BigDecimal.ZERO;
         if (historicalBalances.size() >= 2) {
             BigDecimal totalChange = historicalBalances.get(historicalBalances.size() - 1)
@@ -152,10 +152,17 @@ public class ReportService {
                     BigDecimal.valueOf(historicalBalances.size() - 1), 2, RoundingMode.HALF_UP);
         }
 
-        BigDecimal projected = presentBalance;
-        for (int i = 1; i <= 12; i++) {
+        // Meme regle pour tous les mois previsionnels, mois en cours inclus :
+        // chaque point = le precedent + la variation mensuelle moyenne, en
+        // partant du dernier solde reel connu (dernier point historique, fin
+        // du mois precedent). Ne part jamais du solde partiel d'aujourd'hui :
+        // sinon le mois en cours melangerait donnees reelles partielles et
+        // moyenne, avec un point previsionnel incoherent par rapport aux
+        // mois suivants (ex : en baisse alors que la tendance moyenne monte).
+        BigDecimal projected = historicalBalances.get(historicalBalances.size() - 1);
+        for (int i = 0; i < 12; i++) {
             projected = projected.add(avgMonthlyNet);
-            LocalDate futureMonthEnd = firstOfCurrentMonth.plusMonths(i).plusMonths(1).minusDays(1);
+            LocalDate futureMonthEnd = firstOfCurrentMonth.plusMonths(i + 1).minusDays(1);
             result.add(point(futureMonthEnd, projected, "previsionnel"));
         }
 
@@ -174,7 +181,7 @@ public class ReportService {
 
         Map<String, Transaction> latestByPayee = new LinkedHashMap<>();
         for (Transaction t : flagged) {
-            String key = (t.getPayee() != null ? t.getPayee().toLowerCase(Locale.ROOT) : "id-" + t.getId());
+            String key = (t.getPayee() != null ? t.getPayee().getName().toLowerCase(Locale.ROOT) : "id-" + t.getId());
             latestByPayee.putIfAbsent(key, t);
         }
 
@@ -182,7 +189,7 @@ public class ReportService {
         BigDecimal total = BigDecimal.ZERO;
         for (Transaction t : latestByPayee.values()) {
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("payee", t.getPayee());
+            item.put("payee", t.getPayee() != null ? t.getPayee().getName() : null);
             item.put("amount", t.getAmount().abs());
             items.add(item);
             total = total.add(t.getAmount().abs());

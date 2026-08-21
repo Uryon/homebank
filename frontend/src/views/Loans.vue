@@ -112,7 +112,7 @@
           </div>
           <div class="form-field">
             <label>Capital emprunté</label>
-            <input v-model.number="form.principal" type="number" step="0.01" min="0" />
+            <AmountInput v-model="form.principal" />
           </div>
           <div class="form-field">
             <label>Taux annuel (%)</label>
@@ -128,11 +128,11 @@
           </div>
           <div class="form-field">
             <label>Mensualité (hors assurance)</label>
-            <input v-model.number="form.monthlyPayment" type="number" step="0.01" min="0" />
+            <AmountInput v-model="form.monthlyPayment" />
           </div>
           <div class="form-field">
             <label>Assurance mensuelle (optionnel)</label>
-            <input v-model.number="form.monthlyInsurance" type="number" step="0.01" min="0" />
+            <AmountInput v-model="form.monthlyInsurance" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label>Notes</label>
@@ -153,6 +153,7 @@ import { ref, onMounted, computed, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
 import { LoansAPI } from '../services/api'
 import { formatAmount } from '../services/format'
+import AmountInput from '../components/AmountInput.vue'
 
 const loans = ref([])
 const selectedId = ref(null)

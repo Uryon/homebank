@@ -2,6 +2,7 @@ package com.homebank.mapper;
 
 import com.homebank.dto.TransactionDTO;
 import com.homebank.model.Transaction;
+import com.homebank.utils.PaymentMode;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -15,13 +16,13 @@ public class TransactionMapper {
                         : null)
                 .date(transaction.getDate())
                 .amount(transaction.getAmount())
-                .payee(transaction.getPayee())
+                .payee(payeeLabel(transaction))
+                .payeeId(transaction.getPayee() != null ? transaction.getPayee().getId() : null)
                 .memo(transaction.getMemo())
                 .categoryId(transaction.getCategory() != null
                         ? transaction.getCategory().getId()
                         : null)
                 .paymentMode(transaction.getPaymentMode())
-                .status(transaction.getStatus())
                 .tags(transaction.getTags())
                 .transferTransactionId(transaction.getTransferTransaction() != null
                         ? transaction.getTransferTransaction().getId()
@@ -30,5 +31,27 @@ public class TransactionMapper {
                 .periodicExpense(transaction.isPeriodicExpense())
                 .externalId(transaction.getExternalId())
                 .build();
+    }
+
+    /**
+     * Libelle affiche pour le "tiers" : le nom du Payee lie, lu en direct
+     * (jamais recopie), ou pour un virement interne (jamais lie a un vrai
+     * tiers) un libelle recalcule a partir du compte de destination/origine,
+     * pour qu'il reste a jour meme si ce compte est renomme plus tard.
+     */
+    private String payeeLabel(Transaction transaction) {
+        if (transaction.getPayee() != null) {
+            return transaction.getPayee().getName();
+        }
+        if (transaction.getPaymentMode() == PaymentMode.TRANSFER && transaction.getTransferTransaction() != null) {
+            String counterpartAccount = transaction.getTransferTransaction().getAccount() != null
+                    ? transaction.getTransferTransaction().getAccount().getName()
+                    : "";
+            String direction = transaction.getAmount() != null && transaction.getAmount().signum() < 0
+                    ? "Virement vers "
+                    : "Virement depuis ";
+            return direction + counterpartAccount;
+        }
+        return null;
     }
 }

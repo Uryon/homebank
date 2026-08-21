@@ -1,6 +1,7 @@
 package com.homebank.repository;
 
 import com.homebank.model.Category;
+import com.homebank.model.Payee;
 import com.homebank.model.Transaction;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -41,31 +42,22 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     BigDecimal sumAmountByAccountIdAsOf(@Param("accountId") Long accountId, @Param("asOf") LocalDate asOf);
 
     /**
-     * Renvoie chaque paire (texte du tiers, montant) presente dans les
-     * transactions existantes. Utilise pour l'initialisation des tiers,
-     * qui distingue desormais les tiers par nom ET par montant.
+     * Vrai si au moins une transaction est encore liee a ce tiers. Utilise
+     * pour detecter un tiers auto-cree devenu orphelin (voir
+     * PayeeService#pruneIfOrphan) sans avoir a charger les transactions.
      */
-    @Query("select t.payee, t.amount from Transaction t where t.payee is not null and t.payee <> ''")
-    List<Object[]> findAllPayeeAmountPairs();
+    boolean existsByPayee(Payee payee);
 
     /**
-     * Sous-ensemble de findAllPayeeAmountPairs(), filtre sur les transactions
-     * dont le tiers contient (insensible a la casse) le texte donne. Utilise
-     * pour verifier l'orphelinage d'UN tiers auto-cree (voir
-     * PayeeService#pruneIfOrphan) sans charger toutes les transactions de la
-     * base a chaque edition/suppression de transaction.
-     */
-    @Query("select t.payee, t.amount from Transaction t where t.payee is not null and lower(t.payee) like lower(concat('%', :text, '%'))")
-    List<Object[]> findPayeeAmountPairsContaining(@Param("text") String text);
-
-    /**
-     * Renomme en masse toutes les transactions dont le tiers correspond
-     * exactement (insensible a la casse) a oldName, vers newName.
-     * Utilise lors de la fusion de deux tiers.
+     * Reaffecte en masse toutes les transactions d'un tiers vers un autre.
+     * Utilise lors de la fusion de deux tiers : la relation etant une vraie
+     * cle etrangere (Transaction#payee), un renommage simple du tiers cible
+     * se repercute deja automatiquement sans avoir besoin de toucher aux
+     * transactions elles-memes.
      */
     @Modifying
-    @Query("update Transaction t set t.payee = :newName where lower(t.payee) = lower(:oldName)")
-    void renamePayeeText(@Param("oldName") String oldName, @Param("newName") String newName);
+    @Query("update Transaction t set t.payee = :target where t.payee = :source")
+    void reassignPayee(@Param("source") Payee source, @Param("target") Payee target);
 
     /**
      * Reaffecte en masse toutes les transactions d'une categorie vers une autre.
@@ -86,25 +78,6 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
      * la detection de doublons.
      */
     Optional<Transaction> findByAccountIdAndExternalId(Long accountId, String externalId);
-
-    /**
-     * Recherche une transaction "manifestement identique" sur un meme compte :
-     * meme date, meme montant, meme tiers (insensible a la casse) et meme
-     * mode de paiement. Utilise comme repli pour la detection de doublons
-     * quand aucun identifiant externe n'est disponible.
-     */
-    @Query("""
-            select t from Transaction t
-            where t.account.id = :accountId
-              and t.date = :date
-              and t.amount = :amount
-              and lower(coalesce(t.payee, '')) = lower(coalesce(:payee, ''))
-            """)
-    List<Transaction> findPossibleDuplicates(@Param("accountId") Long accountId,
-                                              @Param("date") LocalDate date,
-                                              @Param("amount") BigDecimal amount,
-                                              @Param("payee") String payee);
-
 
     /**
      * Agrégation mensuelle par catégorie pour les rapports financiers.
@@ -131,5 +104,35 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
             @Param("from") LocalDate from,
             @Param("to") LocalDate to,
             @Param("accountId") Long accountId);
+
+    /**
+     * Vrai si l'ancienne colonne texte "transactions.payee" existe encore en
+     * base (schema pas encore passe a la relation payee_id, ou schema fraichement
+     * cree par Hibernate sans elle, ex : H2 en profil "test"). Verifie avant
+     * findLegacyPayeeTextForMigration(), qui echouerait sinon sur un schema
+     * qui n'a jamais connu cette colonne.
+     */
+    @Query(value = """
+            select count(*) from information_schema.columns
+            where lower(table_name) = 'transactions' and lower(column_name) = 'payee'
+            """, nativeQuery = true)
+    long countLegacyPayeeColumn();
+
+    /**
+     * Lecture "brute" (SQL natif, colonne texte "payee" desormais orpheline)
+     * des transactions pas encore reliees a un tiers via payee_id, pour la
+     * migration unique vers la relation Transaction#payee (voir
+     * config.PayeeRelationMigration). Necessaire car cette ancienne colonne
+     * n'est plus mappee par l'entite JPA une fois la relation en place.
+     * Exclut les virements, qui n'ont jamais ete un vrai tiers (voir
+     * TransactionMapper#payeeLabel : leur libelle est recalcule a l'affichage).
+     * N'appeler que si countLegacyPayeeColumn() > 0.
+     */
+    @Query(value = """
+            select id, payee from transactions
+            where payee_id is null and payee is not null and trim(payee) <> ''
+              and payment_mode <> 'TRANSFER'
+            """, nativeQuery = true)
+    List<Object[]> findLegacyPayeeTextForMigration();
 
 }

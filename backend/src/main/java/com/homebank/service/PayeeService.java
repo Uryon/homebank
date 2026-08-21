@@ -9,9 +9,7 @@ import com.homebank.repository.TransactionRepository;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -51,6 +49,11 @@ public class PayeeService {
         return payeeMapper.toDTO(payeeRepository.save(p));
     }
 
+    /**
+     * Renomme un tiers : comme les transactions liees pointent vers ce tiers
+     * par une vraie relation (Transaction#payee), et non plus par une copie
+     * de son nom, elles affichent deja le nouveau nom sans etape a part.
+     */
     public PayeeDTO update(Long id, PayeeDTO payload) {
         Payee existing = findEntityById(id);
         applyPayload(existing, payload);
@@ -254,57 +257,15 @@ public class PayeeService {
         return saved;
     }
 
-    /** Charge tous les tiers, pour etre reutilise a travers tout un lot (import, initialisation...). */
+    /** Charge tous les tiers, pour etre reutilise a travers tout un lot (import, migration...). */
     List<Payee> findAllForMatching() {
         return payeeRepository.findAll();
     }
 
     /**
-     * Parcourt toutes les paires (tiers, montant) deja presentes dans les
-     * transactions existantes et cree automatiquement un tiers (Payee) pour
-     * chacune de celles qui ne sont pas encore connues. Utile pour "amorcer"
-     * la liste des tiers apres avoir deja importe des transactions avant
-     * l'ajout de cette fonctionnalite. Renvoie un resume (nombre crees / deja connus).
-     */
-    public Map<String, Integer> initializeFromExistingTransactions() {
-        int created = 0;
-        int alreadyKnown = 0;
-        // Charge tous les tiers une seule fois pour tout le balayage, plutot
-        // que de refaire un findAll() a chaque paire (tiers, montant) — voir
-        // resolveOrCreate(String, BigDecimal, List).
-        List<Payee> knownPayees = findAllForMatching();
-
-        for (Object[] row : transactionRepository.findAllPayeeAmountPairs()) {
-            String rawText = (String) row[0];
-            BigDecimal amount = (BigDecimal) row[1];
-            if (rawText == null || rawText.isBlank()) continue;
-
-            String trimmed = rawText.trim();
-            BigDecimal normalizedAmount = amount != null ? amount.abs() : null;
-
-            boolean existedBefore = matchPayee(trimmed, normalizedAmount, knownPayees).isPresent()
-                    || knownPayees.stream().anyMatch(p ->
-                            p.getName() != null && p.getName().equalsIgnoreCase(trimmed) && sameAmount(p.getAmount(), normalizedAmount));
-
-            resolveOrCreate(trimmed, normalizedAmount, knownPayees);
-
-            if (existedBefore) {
-                alreadyKnown++;
-            } else {
-                created++;
-            }
-        }
-
-        Map<String, Integer> summary = new LinkedHashMap<>();
-        summary.put("created", created);
-        summary.put("alreadyKnown", alreadyKnown);
-        return summary;
-    }
-
-    /**
      * A appeler apres la modification (ou suppression) d'une transaction :
-     * si le tiers ou le montant a change, verifie si l'ANCIEN tiers devient
-     * orphelin (plus aucune transaction ne le matche) et le supprime le cas
+     * si le tiers lie a change, verifie si l'ANCIEN tiers devient orphelin
+     * (plus aucune transaction ne pointe vers lui) et le supprime le cas
      * echeant. Evite d'accumuler des tiers "fantomes" a chaque fois qu'on
      * modifie le tiers d'une transaction a la main.
      *
@@ -314,17 +275,9 @@ public class PayeeService {
      * (page Tiers, fusion...) n'est jamais supprime automatiquement.
      */
     @org.springframework.transaction.annotation.Transactional
-    public void cleanupIfPayeeChanged(String previousPayeeText, BigDecimal previousAmount,
-                                       String newPayeeText, BigDecimal newAmount) {
-        if (previousPayeeText == null || previousPayeeText.isBlank()) return;
-
-        BigDecimal prevAbs = previousAmount != null ? previousAmount.abs() : null;
-        BigDecimal newAbs = newAmount != null ? newAmount.abs() : null;
-        boolean unchanged = previousPayeeText.equalsIgnoreCase(newPayeeText)
-                && ((prevAbs == null && newAbs == null) || (prevAbs != null && newAbs != null && prevAbs.compareTo(newAbs) == 0));
-        if (unchanged) return;
-
-        matchPayee(previousPayeeText, prevAbs).ifPresent(this::pruneIfOrphan);
+    public void cleanupIfPayeeChanged(Payee previousPayee, Payee newPayee) {
+        if (previousPayee == null || previousPayee.equals(newPayee)) return;
+        pruneIfOrphan(previousPayee);
     }
 
     private void pruneIfOrphan(Payee payee) {
@@ -333,29 +286,18 @@ public class PayeeService {
         // touche jamais a un tiers dans lequel l'utilisateur a investi du travail.
         if (!payee.getPattern().equals(defaultPattern(payee.getName()))) return;
 
-        // Filtre large fait en base (le tiers doit au moins contenir le nom du
-        // tiers auto-cree) avant d'appliquer matches() pour la correspondance
-        // exacte : evite de charger toutes les transactions de la base a
-        // chaque edition/suppression, alors que seul CE tiers nous interesse.
-        boolean stillUsed = transactionRepository.findPayeeAmountPairsContaining(payee.getName()).stream()
-                .anyMatch(row -> matches(payee, (String) row[0], (BigDecimal) row[1]));
-
-        if (!stillUsed) {
+        // La relation Transaction#payee est une vraie cle etrangere : une
+        // simple verification d'existence suffit, plus besoin de rescanner
+        // les transactions par texte/montant.
+        if (!transactionRepository.existsByPayee(payee)) {
             payeeRepository.delete(payee);
         }
     }
 
-    private boolean matches(Payee payee, String text, BigDecimal amount) {
-        if (!matchesPatternField(payee.getPattern(), text != null ? text.trim() : null)) return false;
-        if (payee.getAmount() == null) return true;
-        return amount != null && payee.getAmount().compareTo(amount.abs()) == 0;
-    }
-
     /**
      * Fusionne plusieurs tiers (sourceIds) dans un tiers cible (targetId) :
-     * - toutes les transactions dont le tiers correspondait a une source
-     *   (texte exact, insensible a la casse) sont renommees vers le nom
-     *   du tiers cible ;
+     * - toutes les transactions liees a une source sont reaffectees au tiers
+     *   cible (vraie cle etrangere, voir Transaction#payee) ;
      * - les motifs des tiers source sont combines a celui de la cible
      *   (separes par ";") pour que les futurs imports reconnaissant l'un ou
      *   l'autre texte continuent d'aboutir au tiers fusionne ;
@@ -372,7 +314,7 @@ public class PayeeService {
             if (sourceId == null || sourceId.equals(targetId)) continue;
             Payee source = findEntityById(sourceId);
 
-            transactionRepository.renamePayeeText(source.getName(), target.getName());
+            transactionRepository.reassignPayee(source, target);
 
             target.setPattern(target.getPattern() + ";" + source.getPattern());
 
@@ -384,5 +326,42 @@ public class PayeeService {
         }
 
         return payeeMapper.toDTO(payeeRepository.save(target));
+    }
+
+    /**
+     * Migration unique : relie chaque transaction pas encore rattachee a un
+     * tiers (payee_id) au Payee correspondant a son ANCIEN texte libre
+     * (colonne "payee" desormais orpheline, lue en SQL natif — voir
+     * TransactionRepository#findLegacyPayeeTextForMigration), en reutilisant
+     * exactement la meme reconnaissance par motif qu'a l'import (matchPayee),
+     * pour que le passage a la relation ne perde aucune information et
+     * "repare" au passage les tiers restes orphelins (texte ne correspondant
+     * qu'a une fusion/suppression passee mal repercutee).
+     * Appelee au demarrage par config.PayeeRelationMigration ; idempotente
+     * (ne touche que les transactions dont payee_id est encore NULL).
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public int migrateLegacyTransactionPayees() {
+        if (transactionRepository.countLegacyPayeeColumn() == 0) return 0;
+
+        List<Object[]> legacyRows = transactionRepository.findLegacyPayeeTextForMigration();
+        if (legacyRows.isEmpty()) return 0;
+
+        List<Payee> knownPayees = findAllForMatching();
+        int migrated = 0;
+        for (Object[] row : legacyRows) {
+            Long transactionId = ((Number) row[0]).longValue();
+            String rawText = (String) row[1];
+
+            transactionRepository.findById(transactionId).ifPresent(t -> {
+                Payee resolved = resolveOrCreate(rawText, t.getAmount(), knownPayees);
+                if (resolved != null) {
+                    t.setPayee(resolved);
+                    transactionRepository.save(t);
+                }
+            });
+            migrated++;
+        }
+        return migrated;
     }
 }

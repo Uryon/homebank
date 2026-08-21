@@ -10,7 +10,6 @@ import com.homebank.model.Payee;
 import com.homebank.model.Transaction;
 import com.homebank.repository.TransactionRepository;
 import com.homebank.utils.PaymentMode;
-import com.homebank.utils.TransactionStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -116,8 +115,7 @@ public class TransactionService {
 
     public TransactionDTO update(Long id, TransactionDTO payload) {
         Transaction existing = findEntityById(id);
-        String previousPayeeText = existing.getPayee();
-        BigDecimal previousAmount = existing.getAmount();
+        Payee previousPayee = existing.getPayee();
 
         applyPayload(existing, payload);
         Transaction saved = transactionRepository.save(existing);
@@ -126,7 +124,7 @@ public class TransactionService {
         // echouer la sauvegarde de la transaction elle-meme (deja actee a ce
         // stade), meme en cas de probleme inattendu sur ce nettoyage annexe.
         try {
-            payeeService.cleanupIfPayeeChanged(previousPayeeText, previousAmount, saved.getPayee(), saved.getAmount());
+            payeeService.cleanupIfPayeeChanged(previousPayee, saved.getPayee());
         } catch (Exception e) {
             log.warn("Echec du nettoyage de l'ancien tiers apres modification de la transaction {} : {}", id, e.getMessage(), e);
         }
@@ -136,13 +134,12 @@ public class TransactionService {
 
     public void delete(Long id) {
         Transaction existing = findEntityById(id);
-        String payeeText = existing.getPayee();
-        BigDecimal amount = existing.getAmount();
+        Payee previousPayee = existing.getPayee();
 
         transactionRepository.deleteById(id);
 
         try {
-            payeeService.cleanupIfPayeeChanged(payeeText, amount, null, null);
+            payeeService.cleanupIfPayeeChanged(previousPayee, null);
         } catch (Exception e) {
             log.warn("Echec du nettoyage de l'ancien tiers apres suppression de la transaction {} : {}", id, e.getMessage(), e);
         }
@@ -189,11 +186,11 @@ public class TransactionService {
         List<Transaction> candidates = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
                 .filter(t -> !t.isPeriodicExpense())
                 .filter(t -> t.getPaymentMode() != PaymentMode.TRANSFER)
-                .filter(t -> t.getPayee() != null && !t.getPayee().isBlank())
+                .filter(t -> t.getPayee() != null)
                 .toList();
 
-        Map<String, List<Transaction>> byPayee = candidates.stream()
-                .collect(Collectors.groupingBy(t -> t.getPayee().trim().toLowerCase()));
+        Map<Long, List<Transaction>> byPayee = candidates.stream()
+                .collect(Collectors.groupingBy(t -> t.getPayee().getId()));
 
         List<PeriodicSuggestionDTO> suggestions = new ArrayList<>();
         for (List<Transaction> group : byPayee.values()) {
@@ -264,7 +261,7 @@ public class TransactionService {
                 .divide(BigDecimal.valueOf(sorted.size()), 2, RoundingMode.HALF_UP);
 
         return PeriodicSuggestionDTO.builder()
-                .payee(sorted.get(sorted.size() - 1).getPayee())
+                .payee(sorted.get(sorted.size() - 1).getPayee().getName())
                 .count(sorted.size())
                 .averageAmount(averageAmount)
                 .averageIntervalDays(averageIntervalDays)
@@ -299,20 +296,16 @@ public class TransactionService {
         debit.setAccount(from);
         debit.setDate(date);
         debit.setAmount(amount.negate());
-        debit.setPayee("Virement vers " + to.getName());
         debit.setMemo(request.getMemo());
         debit.setPaymentMode(PaymentMode.TRANSFER);
-        debit.setStatus(TransactionStatus.NONE);
         debit.setValidated(true);
 
         Transaction credit = new Transaction();
         credit.setAccount(to);
         credit.setDate(date);
         credit.setAmount(amount);
-        credit.setPayee("Virement depuis " + from.getName());
         credit.setMemo(request.getMemo());
         credit.setPaymentMode(PaymentMode.TRANSFER);
-        credit.setStatus(TransactionStatus.NONE);
         credit.setValidated(true);
 
         Transaction savedDebit = transactionRepository.save(debit);
@@ -343,17 +336,13 @@ public class TransactionService {
         // que l'onglet "Tiers" reste toujours a jour avec les tiers realement
         // utilises sur les transactions, meme lors d'une saisie manuelle.
         String payeeText = payload.getPayee();
-        Payee resolvedPayee = null;
-        if (payeeText != null && !payeeText.isBlank()) {
-            resolvedPayee = payeeService.resolveOrCreate(payeeText, payload.getAmount());
-            transaction.setPayee(resolvedPayee != null ? resolvedPayee.getName() : payeeText);
-        } else {
-            transaction.setPayee(payeeText);
-        }
+        Payee resolvedPayee = (payeeText != null && !payeeText.isBlank())
+                ? payeeService.resolveOrCreate(payeeText, payload.getAmount())
+                : null;
+        transaction.setPayee(resolvedPayee);
 
         transaction.setMemo(sanitizeMemo(payload.getMemo()));
         transaction.setPaymentMode(payload.getPaymentMode());
-        transaction.setStatus(payload.getStatus());
         transaction.setTags(payload.getTags());
         transaction.setPeriodicExpense(payload.isPeriodicExpense());
         transaction.setExternalId(payload.getExternalId());

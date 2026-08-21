@@ -18,17 +18,15 @@
         <tr>
           <th>Nom</th>
           <th>Type</th>
-          <th class="num">Solde initial</th>
           <th class="num">Solde courant</th>
           <th>Devise</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
-        <tr v-for="a in accounts" :key="a.id">
+        <tr v-for="a in sortedAccounts" :key="a.id">
           <td>{{ a.name }}</td>
           <td><span class="badge" :class="a.type.toLowerCase()">{{ typeLabel(a.type) }}</span></td>
-          <td class="num amount">{{ formatAmount(a.initialBalance) }}</td>
           <td class="num amount" :class="(balances[a.id] ?? 0) >= 0 ? 'positive' : 'negative'">
             {{ formatAmount(balances[a.id] ?? 0) }}
           </td>
@@ -66,7 +64,7 @@
           </div>
           <div class="form-field">
             <label>Solde initial</label>
-            <input v-model.number="form.initialBalance" type="number" step="0.01" />
+            <AmountInput v-model="form.initialBalance" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label>Notes</label>
@@ -110,7 +108,7 @@
           </div>
           <div class="form-field">
             <label>Montant</label>
-            <input v-model.number="transferForm.amount" type="number" step="0.01" min="0" />
+            <AmountInput v-model="transferForm.amount" />
           </div>
           <div class="form-field">
             <label>Date</label>
@@ -133,9 +131,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { AccountsAPI, TransactionsAPI } from '../services/api'
 import { formatAmount } from '../services/format'
+import AmountInput from '../components/AmountInput.vue'
 
 const accounts = ref([])
 const balances = ref({})
@@ -160,6 +159,11 @@ function emptyTransferForm() {
     memo: ''
   }
 }
+
+/** Comptes courants toujours en tête de liste, le reste dans l'ordre reçu de l'API. */
+const sortedAccounts = computed(() =>
+  [...accounts.value].sort((a, b) => (a.type === 'CHECKING' ? 0 : 1) - (b.type === 'CHECKING' ? 0 : 1))
+)
 
 function typeLabel(type) {
   const labels = { CHECKING: 'Courant', SAVINGS: 'Épargne', CASH: 'Espèces', CREDIT_CARD: 'Carte', INVESTMENT: 'Placement' }

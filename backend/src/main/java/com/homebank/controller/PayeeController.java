@@ -7,7 +7,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/payees")
@@ -38,15 +37,6 @@ public class PayeeController {
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         payeeService.delete(id);
         return ResponseEntity.noContent().build();
-    }
-
-    /**
-     * Cree automatiquement un tiers pour chaque tiers deja present dans les
-     * transactions existantes mais pas encore enregistre dans la liste des tiers.
-     */
-    @PostMapping("/initialize")
-    public Map<String, Integer> initializeFromExistingTransactions() {
-        return payeeService.initializeFromExistingTransactions();
     }
 
     /**
