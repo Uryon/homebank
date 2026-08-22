@@ -42,10 +42,12 @@ public class ControleurTiers {
     /**
      * Fusionne plusieurs tiers dans un tiers cible : toutes les transactions
      * des tiers source sont renommees vers la cible, puis les tiers source
-     * sont supprimes. Operation atomique.
+     * sont supprimes. Le motif final de la cible est celui fourni dans la
+     * requete (choisi par l'utilisateur), inchange si absent. Operation
+     * atomique.
      */
     @PostMapping("/merge")
     public TiersDTO merge(@RequestBody DemandeFusionDTO request) {
-        return payeeService.merge(request.getSourceIds(), request.getTargetId());
+        return payeeService.merge(request.getSourceIds(), request.getTargetId(), request.getPattern());
     }
 }

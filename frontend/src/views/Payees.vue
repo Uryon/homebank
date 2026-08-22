@@ -160,6 +160,26 @@
             </option>
           </select>
         </div>
+
+        <div class="form-field">
+          <label>Motifs actuels des tiers sélectionnés</label>
+          <ul class="merge-patterns-list">
+            <li v-for="p in selectedPayeeObjects" :key="p.id">
+              <strong>{{ p.name }}</strong> : <code>{{ p.pattern }}</code>
+            </li>
+          </ul>
+        </div>
+
+        <div class="form-field">
+          <label>Motif de reconnaissance final</label>
+          <input v-model="mergePattern" placeholder="Ex : Carrefour" />
+          <div class="text-hint">
+            Pré-rempli avec le motif du tiers conservé, ci-dessus pour référence.
+            Modifiez-le comme vous le souhaitez : les motifs des tiers fusionnés ne
+            sont plus ajoutés automatiquement.
+          </div>
+        </div>
+
         <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
           <button class="btn secondary" @click="showMergeModal = false">Annuler</button>
           <button class="btn" :disabled="merging" @click="confirmMerge">
@@ -172,7 +192,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { PayeesAPI, CategoriesAPI } from '../services/api'
 import { normalizeSearch } from '../services/search'
@@ -196,6 +216,7 @@ const firstEditField = ref(null)
 const selectedIds = ref([])
 const showMergeModal = ref(false)
 const mergeTargetId = ref(null)
+const mergePattern = ref('')
 const merging = ref(false)
 
 function emptyForm() {
@@ -314,15 +335,27 @@ const selectedPayeeObjects = computed(() =>
 
 function openMergeModal() {
   mergeTargetId.value = selectedIds.value[0]
+  mergePattern.value = selectedPayeeObjects.value.find(p => p.id === mergeTargetId.value)?.pattern || ''
   showMergeModal.value = true
 }
 
+// Motif pré-rempli avec celui du tiers conservé à chaque changement de
+// cible, pour que l'utilisateur parte d'une base cohérente qu'il peut
+// ensuite librement modifier (voir motifs affichés au-dessus pour référence).
+watch(mergeTargetId, (id) => {
+  mergePattern.value = selectedPayeeObjects.value.find(p => p.id === id)?.pattern || ''
+})
+
 async function confirmMerge() {
   if (!mergeTargetId.value) return
+  if (!mergePattern.value.trim()) {
+    alert('Le motif de reconnaissance final est obligatoire.')
+    return
+  }
   merging.value = true
   try {
     const sourceIds = selectedIds.value.filter(id => id !== mergeTargetId.value)
-    await PayeesAPI.merge(sourceIds, mergeTargetId.value)
+    await PayeesAPI.merge(sourceIds, mergeTargetId.value, mergePattern.value.trim())
     showMergeModal.value = false
     selectedIds.value = []
     await load()
@@ -430,6 +463,22 @@ onMounted(async () => {
   line-height: 1.4;
 }
 .text-hint code {
+  background: var(--ink-800);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+.merge-patterns-list {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 160px;
+  overflow-y: auto;
+  font-size: 13px;
+}
+.merge-patterns-list li {
+  margin: 2px 0;
+}
+.merge-patterns-list code {
   background: var(--ink-800);
   padding: 1px 5px;
   border-radius: 4px;

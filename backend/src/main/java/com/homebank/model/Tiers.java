@@ -32,7 +32,7 @@ public class Tiers {
      * pour la logique complete.
      */
     @NotBlank
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "text")
     private String pattern;
 
     /**

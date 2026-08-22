@@ -305,16 +305,16 @@ public class ServiceTiers {
      * Fusionne plusieurs tiers (sourceIds) dans un tiers cible (targetId) :
      * - toutes les transactions liees a une source sont reaffectees au tiers
      *   cible (vraie cle etrangere, voir Transaction#payee) ;
-     * - les motifs des tiers source sont combines a celui de la cible
-     *   (separes par ";") pour que les futurs imports reconnaissant l'un ou
-     *   l'autre texte continuent d'aboutir au tiers fusionne ;
+     * - le motif de la cible n'est PAS modifie automatiquement (les motifs
+     *   des tiers source ne sont plus concatenes) : l'utilisateur choisit
+     *   lui-meme le motif final via le parametre pattern, optionnel ;
      * - la categorie de la cible est completee avec celle d'une source si
      *   la cible n'en avait pas encore ;
      * - les tiers source sont supprimes.
      * Operation atomique : tout est annule en cas d'erreur.
      */
     @org.springframework.transaction.annotation.Transactional
-    public TiersDTO merge(List<Long> sourceIds, Long targetId) {
+    public TiersDTO merge(List<Long> sourceIds, Long targetId, String pattern) {
         Tiers target = findEntityById(targetId);
 
         for (Long sourceId : sourceIds) {
@@ -323,13 +323,15 @@ public class ServiceTiers {
 
             transactionRepository.reassignPayee(source, target);
 
-            target.setPattern(target.getPattern() + ";" + source.getPattern());
-
             if (target.getCategory() == null && source.getCategory() != null) {
                 target.setCategory(source.getCategory());
             }
 
             payeeRepository.delete(source);
+        }
+
+        if (pattern != null && !pattern.isBlank()) {
+            target.setPattern(pattern.trim());
         }
 
         return payeeMapper.toDTO(payeeRepository.save(target));

@@ -14,4 +14,13 @@ public class DemandeFusionDTO {
 
     /** Identifiant de la ligne qui recevra toutes les operations des sources et qui sera conservee */
     private Long targetId;
+
+    /**
+     * Motif de reconnaissance final a appliquer au tiers cible (uniquement
+     * pertinent pour la fusion de tiers, ignore pour les categories).
+     * Optionnel : si absent ou vide, le motif du tiers cible n'est pas
+     * modifie (les motifs des tiers sources ne sont plus concatenes
+     * automatiquement, voir ServiceTiers#merge).
+     */
+    private String pattern;
 }

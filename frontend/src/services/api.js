@@ -47,7 +47,7 @@ export const PayeesAPI = {
     create: (payload) => api.post('/payees', payload).then(r => r.data),
     update: (id, payload) => api.put(`/payees/${id}`, payload).then(r => r.data),
     remove: (id) => api.delete(`/payees/${id}`),
-    merge: (sourceIds, targetId) => api.post('/payees/merge', { sourceIds, targetId }).then(r => r.data)
+    merge: (sourceIds, targetId, pattern) => api.post('/payees/merge', { sourceIds, targetId, pattern }).then(r => r.data)
 }
 
 export const LoansAPI = {
