@@ -5,6 +5,8 @@ import com.homebank.repository.*;
 import com.homebank.service.ServiceTiers;
 import com.homebank.utils.TypeCompte;
 import com.homebank.utils.ModePaiement;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -26,6 +28,8 @@ import java.time.LocalDate;
 @Component
 @Profile("test")
 public class TestDataSeeder implements CommandLineRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(TestDataSeeder.class);
 
     private final DepotCompte accountRepository;
     private final DepotCategorie categoryRepository;
@@ -50,7 +54,7 @@ public class TestDataSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        System.out.println(">>> Profil 'test' actif : chargement des donnees de demonstration (H2 en memoire)...");
+        log.info("Profil 'test' actif : chargement des donnees de demonstration (H2 en memoire)...");
 
         // --- Comptes ---
         Compte courant = account("Compte courant", TypeCompte.CHECKING, new BigDecimal("1500.00"));
@@ -161,12 +165,9 @@ public class TestDataSeeder implements CommandLineRunner {
         loan.setNotes("Donnée de démonstration (profil test)");
         loanRepository.save(loan);
 
-        System.out.println(">>> Données de démonstration chargées : "
-                + accountRepository.count() + " comptes, "
-                + categoryRepository.count() + " catégories, "
-                + payeeRepository.count() + " tiers, "
-                + transactionRepository.count() + " transactions, "
-                + loanRepository.count() + " prêt(s).");
+        log.info("Données de démonstration chargées : {} comptes, {} catégories, {} tiers, {} transactions, {} prêt(s).",
+                accountRepository.count(), categoryRepository.count(), payeeRepository.count(),
+                transactionRepository.count(), loanRepository.count());
     }
 
     private Compte account(String name, TypeCompte type, BigDecimal initialBalance) {

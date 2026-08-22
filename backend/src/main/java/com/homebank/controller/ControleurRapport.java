@@ -1,5 +1,6 @@
 package com.homebank.controller;
 
+import com.homebank.dto.TransactionDTO;
 import com.homebank.service.ServiceRapport;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
@@ -59,5 +60,22 @@ public class ControleurRapport {
     @GetMapping("/periodic-expenses")
     public Map<String, Object> periodicExpenses() {
         return reportService.periodicExpensesSummary();
+    }
+
+    /**
+     * Detail des transactions individuelles derriere une cellule d'un tableau
+     * du tableau de bord (survol), calcule avec exactement les memes regles
+     * que les agregats correspondants (voir ServiceRapport#cellTransactions).
+     */
+    @GetMapping("/cell-transactions")
+    public List<TransactionDTO> cellTransactions(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @RequestParam(required = false) Long accountId,
+            @RequestParam(required = false) String flow,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long rootCategoryId,
+            @RequestParam(required = false, defaultValue = "false") boolean uncategorized) {
+        return reportService.cellTransactions(from, to, accountId, flow, categoryId, rootCategoryId, uncategorized);
     }
 }

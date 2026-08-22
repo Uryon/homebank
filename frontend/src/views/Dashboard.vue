@@ -51,24 +51,62 @@
 
       <div class="card">
         <div class="stat-label" style="margin-bottom: 16px;">Dépenses périodiques</div>
-        <div v-if="periodicExpenses.items.length">
+        <div v-if="periodicExpenses.expenses.items.length">
           <table class="plain-table">
             <tbody>
-              <tr v-for="item in periodicExpenses.items" :key="item.payee">
+              <tr v-for="item in periodicExpenses.expenses.items" :key="item.payee">
                 <td>{{ item.payee || 'Sans nom' }}</td>
-                <td class="num amount negative">{{ formatAmount(item.amount) }}</td>
+                <td class="num amount negative"
+                    @mouseenter="scheduleHover($event, item.payee || 'Sans nom', () => periodicItemRows(item, -1))"
+                    @mouseleave="onCellLeave">
+                  {{ formatAmount(item.amount) }}
+                </td>
               </tr>
             </tbody>
           </table>
           <div class="periodic-total">
             <span>Total</span>
-            <span class="amount negative">{{ formatAmount(periodicExpenses.total) }}</span>
+            <span class="amount negative"
+                  @mouseenter="scheduleHover($event, 'Dépenses périodiques', () => periodicGroupRows(periodicExpenses.expenses, -1))"
+                  @mouseleave="onCellLeave">
+              {{ formatAmount(periodicExpenses.expenses.total) }}
+            </span>
           </div>
         </div>
         <div v-else class="empty-state">
           Aucune dépense périodique marquée. Coche "Périodique" sur une transaction récurrente
           (loyer, abonnement...) dans l'onglet Transactions, ou regarde l'onglet "Périodiques"
           pour des suggestions automatiques.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="stat-label" style="margin-bottom: 16px;">Revenus périodiques</div>
+        <div v-if="periodicExpenses.revenues.items.length">
+          <table class="plain-table">
+            <tbody>
+              <tr v-for="item in periodicExpenses.revenues.items" :key="item.payee">
+                <td>{{ item.payee || 'Sans nom' }}</td>
+                <td class="num amount positive"
+                    @mouseenter="scheduleHover($event, item.payee || 'Sans nom', () => periodicItemRows(item, 1))"
+                    @mouseleave="onCellLeave">
+                  {{ formatAmount(item.amount) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="periodic-total">
+            <span>Total</span>
+            <span class="amount positive"
+                  @mouseenter="scheduleHover($event, 'Revenus périodiques', () => periodicGroupRows(periodicExpenses.revenues, 1))"
+                  @mouseleave="onCellLeave">
+              {{ formatAmount(periodicExpenses.revenues.total) }}
+            </span>
+          </div>
+        </div>
+        <div v-else class="empty-state">
+          Aucun revenu périodique marqué. Coche "Périodique" sur une transaction récurrente
+          (salaire, remboursement régulier...) dans l'onglet Transactions.
         </div>
       </div>
     </div>
@@ -101,7 +139,11 @@
                   <span class="legend-dot" :style="{ background: PALETTE[i % PALETTE.length] }"></span>
                   {{ row.category }}
                 </td>
-                <td class="num amount negative">{{ formatAmount(row.total) }}</td>
+                <td class="num amount negative"
+                    @mouseenter="scheduleHover($event, row.category + ' — 12 derniers mois', () => fetchCellTransactions(whereMoneyRange.from, whereMoneyRange.to, 'expense', row.uncategorized ? { uncategorized: true } : { categoryId: row.categoryId }))"
+                    @mouseleave="onCellLeave">
+                  {{ formatAmount(row.total) }}
+                </td>
                 <td class="num where-pct">{{ row.percentage }}%</td>
               </tr>
             </tbody>
@@ -139,25 +181,41 @@
           <tbody>
             <tr>
               <td class="category-sticky summary-label">Revenus</td>
-              <td v-for="month in monthlyAnalysis.summary" :key="'summary-income-' + month.key" class="num">
+              <td v-for="month in monthlyAnalysis.summary" :key="'summary-income-' + month.key" class="num"
+                  @mouseenter="scheduleHover($event, 'Revenus — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income'))"
+                  @mouseleave="onCellLeave">
                 {{ formatAmount(month.income) }}
               </td>
-              <td class="num summary-col">{{ formatAmount(monthlyAnalysis.incomeTotal.total) }}</td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Revenus — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income'))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(monthlyAnalysis.incomeTotal.total) }}
+              </td>
             </tr>
             <tr>
               <td class="category-sticky summary-label">Dépenses</td>
-              <td v-for="month in monthlyAnalysis.summary" :key="'summary-expense-' + month.key" class="num">
+              <td v-for="month in monthlyAnalysis.summary" :key="'summary-expense-' + month.key" class="num"
+                  @mouseenter="scheduleHover($event, 'Dépenses — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense'))"
+                  @mouseleave="onCellLeave">
                 {{ formatAmount(month.expenses) }}
               </td>
-              <td class="num summary-col">{{ formatAmount(monthlyAnalysis.expenseTotal.total) }}</td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Dépenses — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense'))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(monthlyAnalysis.expenseTotal.total) }}
+              </td>
             </tr>
             <tr class="monthly-balance-row">
               <td class="category-sticky summary-label"><strong>Solde du mois</strong></td>
               <td v-for="month in monthlyAnalysis.summary" :key="'summary-net-' + month.key"
-                  class="num" :class="Number(month.net) >= 0 ? 'positive' : 'negative'">
+                  class="num" :class="Number(month.net) >= 0 ? 'positive' : 'negative'"
+                  @mouseenter="scheduleHover($event, 'Solde — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, null))"
+                  @mouseleave="onCellLeave">
                 <strong>{{ formatAmount(month.net) }}</strong>
               </td>
-              <td class="num summary-col">
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Solde — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, null))"
+                  @mouseleave="onCellLeave">
                 <strong>{{ formatAmount(Number(monthlyAnalysis.incomeTotal.total) - Number(monthlyAnalysis.expenseTotal.total)) }}</strong>
               </td>
             </tr>
@@ -198,11 +256,21 @@
                   <span v-else class="collapse-placeholder"></span>
                   <strong>{{ group.name }}</strong>
                 </td>
-                <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num">
+                <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                    @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', groupCategoryFilter(group)))"
+                    @mouseleave="onCellLeave">
                   {{ formatAmount(group.values[month.key]) }}
                 </td>
-                <td class="num summary-col">{{ formatAmount(group.average) }}</td>
-                <td class="num summary-col">{{ formatAmount(group.total) }}</td>
+                <td class="num summary-col"
+                    @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', groupCategoryFilter(group)))"
+                    @mouseleave="onCellLeave">
+                  {{ formatAmount(group.average) }}
+                </td>
+                <td class="num summary-col"
+                    @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', groupCategoryFilter(group)))"
+                    @mouseleave="onCellLeave">
+                  {{ formatAmount(group.total) }}
+                </td>
               </tr>
 
               <template v-if="!isMonthlyGroupCollapsed('income', group.key)">
@@ -211,22 +279,42 @@
                   <td class="category-sticky category-name subcategory-name">
                     └ {{ child.name }}
                   </td>
-                  <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num">
+                  <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                      @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', childCategoryFilter(child)))"
+                      @mouseleave="onCellLeave">
                     {{ formatAmount(child.values[month.key]) }}
                   </td>
-                  <td class="num summary-col">{{ formatAmount(child.average) }}</td>
-                  <td class="num summary-col">{{ formatAmount(child.total) }}</td>
+                  <td class="num summary-col"
+                      @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', childCategoryFilter(child)))"
+                      @mouseleave="onCellLeave">
+                    {{ formatAmount(child.average) }}
+                  </td>
+                  <td class="num summary-col"
+                      @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', childCategoryFilter(child)))"
+                      @mouseleave="onCellLeave">
+                    {{ formatAmount(child.total) }}
+                  </td>
                 </tr>
               </template>
             </template>
 
             <tr class="total-row income-total-row">
               <td class="category-sticky"><strong>{{ monthlyAnalysis.incomeTotal.name }}</strong></td>
-              <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num">
+              <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                  @mouseenter="scheduleHover($event, 'Total revenus — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income'))"
+                  @mouseleave="onCellLeave">
                 <strong>{{ formatAmount(monthlyAnalysis.incomeTotal.values[month.key]) }}</strong>
               </td>
-              <td class="num summary-col"><strong>{{ formatAmount(monthlyAnalysis.incomeTotal.average) }}</strong></td>
-              <td class="num summary-col"><strong>{{ formatAmount(monthlyAnalysis.incomeTotal.total) }}</strong></td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Total revenus — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income'))"
+                  @mouseleave="onCellLeave">
+                <strong>{{ formatAmount(monthlyAnalysis.incomeTotal.average) }}</strong>
+              </td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Total revenus — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income'))"
+                  @mouseleave="onCellLeave">
+                <strong>{{ formatAmount(monthlyAnalysis.incomeTotal.total) }}</strong>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -265,11 +353,21 @@
                   <span v-else class="collapse-placeholder"></span>
                   <strong>{{ group.name }}</strong>
                 </td>
-                <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num">
+                <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                    @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', groupCategoryFilter(group)))"
+                    @mouseleave="onCellLeave">
                   {{ formatAmount(group.values[month.key]) }}
                 </td>
-                <td class="num summary-col">{{ formatAmount(group.average) }}</td>
-                <td class="num summary-col">{{ formatAmount(group.total) }}</td>
+                <td class="num summary-col"
+                    @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', groupCategoryFilter(group)))"
+                    @mouseleave="onCellLeave">
+                  {{ formatAmount(group.average) }}
+                </td>
+                <td class="num summary-col"
+                    @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', groupCategoryFilter(group)))"
+                    @mouseleave="onCellLeave">
+                  {{ formatAmount(group.total) }}
+                </td>
               </tr>
 
               <template v-if="!isMonthlyGroupCollapsed('expense', group.key)">
@@ -278,28 +376,60 @@
                   <td class="category-sticky category-name subcategory-name">
                     └ {{ child.name }}
                   </td>
-                  <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num">
+                  <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                      @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', childCategoryFilter(child)))"
+                      @mouseleave="onCellLeave">
                     {{ formatAmount(child.values[month.key]) }}
                   </td>
-                  <td class="num summary-col">{{ formatAmount(child.average) }}</td>
-                  <td class="num summary-col">{{ formatAmount(child.total) }}</td>
+                  <td class="num summary-col"
+                      @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', childCategoryFilter(child)))"
+                      @mouseleave="onCellLeave">
+                    {{ formatAmount(child.average) }}
+                  </td>
+                  <td class="num summary-col"
+                      @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', childCategoryFilter(child)))"
+                      @mouseleave="onCellLeave">
+                    {{ formatAmount(child.total) }}
+                  </td>
                 </tr>
               </template>
             </template>
 
             <tr class="total-row expense-total-row">
               <td class="category-sticky"><strong>{{ monthlyAnalysis.expenseTotal.name }}</strong></td>
-              <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num">
+              <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                  @mouseenter="scheduleHover($event, 'Total dépenses — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense'))"
+                  @mouseleave="onCellLeave">
                 <strong>{{ formatAmount(monthlyAnalysis.expenseTotal.values[month.key]) }}</strong>
               </td>
-              <td class="num summary-col"><strong>{{ formatAmount(monthlyAnalysis.expenseTotal.average) }}</strong></td>
-              <td class="num summary-col"><strong>{{ formatAmount(monthlyAnalysis.expenseTotal.total) }}</strong></td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Total dépenses — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense'))"
+                  @mouseleave="onCellLeave">
+                <strong>{{ formatAmount(monthlyAnalysis.expenseTotal.average) }}</strong>
+              </td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Total dépenses — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense'))"
+                  @mouseleave="onCellLeave">
+                <strong>{{ formatAmount(monthlyAnalysis.expenseTotal.total) }}</strong>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
       <div v-else class="empty-state">Chargement de l'analyse mensuelle…</div>
     </div>
+
+    <CellTransactionsPopover
+      :visible="hover.visible"
+      :loading="hover.loading"
+      :x="hover.x"
+      :y="hover.y"
+      :title="hover.title"
+      :rows="hover.rows"
+      :total="hover.total"
+      @stay="cancelHideTimer"
+      @leave="scheduleHide"
+    />
   </div>
 </template>
 
@@ -307,13 +437,14 @@
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { AccountsAPI, ReportsAPI } from '../services/api'
 import { formatAmount } from '../services/format'
+import CellTransactionsPopover from '../components/CellTransactionsPopover.vue'
 import Chart from 'chart.js/auto'
 
 const accounts = ref([])
 const balances = ref({})
 const summary = ref({ income: 0, expenses: 0, net: 0 })
 const monthLabel = ref('')
-const periodicExpenses = ref({ items: [], total: 0 })
+const periodicExpenses = ref({ expenses: { items: [], total: 0 }, revenues: { items: [], total: 0 } })
 
 const forecastChart = ref(null)
 const savingsChart = ref(null)
@@ -324,10 +455,119 @@ let savingsChartInstance = null
 // desormais integres au tableau de bord). Portee sur l'ensemble des comptes,
 // sans filtre (le tableau de bord n'a jamais eu de selecteur de compte).
 const whereMoneyData = ref([])
+const whereMoneyRange = ref({ from: '', to: '' })
 const monthlyAnalysis = ref(null)
 const collapsedMonthlyGroups = ref({ income: {}, expense: {} })
 const whereMoneyCanvas = ref(null)
 let whereMoneyChart = null
+
+/**
+ * Popover unique (voir CellTransactionsPopover.vue) affichant le detail des
+ * transactions derriere une cellule survolee. Un seul etat/instance partagee
+ * pour tous les tableaux du tableau de bord plutot qu'un popover par cellule :
+ * evite de multiplier les composants pour une interaction qui n'est jamais
+ * active qu'a un seul endroit a la fois.
+ */
+const HOVER_DELAY_MS = 2000
+const HIDE_GRACE_MS = 150
+const POPOVER_WIDTH = 320
+
+const hover = ref({ visible: false, loading: false, x: 0, y: 0, title: '', rows: [], total: 0 })
+let showTimer = null
+let hideTimer = null
+let requestToken = 0
+
+function positionFromEvent(event) {
+  const rect = event.currentTarget.getBoundingClientRect()
+  const x = Math.max(8, Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - 12))
+  return { x, y: rect.bottom + 6 }
+}
+
+/**
+ * Declenche l'affichage du popover apres HOVER_DELAY_MS de survol continu de
+ * la cellule (pour eviter l'apparition intempestive au simple passage de la
+ * souris). `loadRows` doit renvoyer un tableau de { id, date, payee, amount }
+ * — les memes transactions individuelles qui composent le montant affiche
+ * dans la cellule.
+ */
+function scheduleHover(event, title, loadRows) {
+  cancelHideTimer()
+  clearTimeout(showTimer)
+  const { x, y } = positionFromEvent(event)
+  const token = ++requestToken
+  showTimer = setTimeout(async () => {
+    hover.value = { visible: true, loading: true, x, y, title, rows: [], total: 0 }
+    try {
+      const rows = await loadRows()
+      if (token !== requestToken) return
+      const total = rows.reduce((sum, r) => sum + Number(r.amount || 0), 0)
+      hover.value = { visible: true, loading: false, x, y, title, rows, total }
+    } catch {
+      if (token !== requestToken) return
+      hover.value = { ...hover.value, loading: false }
+    }
+  }, HOVER_DELAY_MS)
+}
+
+function scheduleHide() {
+  cancelHideTimer()
+  hideTimer = setTimeout(() => { hover.value.visible = false }, HIDE_GRACE_MS)
+}
+
+function cancelHideTimer() {
+  clearTimeout(hideTimer)
+  hideTimer = null
+}
+
+/** Quitte la cellule survolee : annule un affichage pas encore declenche, ou programme la fermeture. */
+function onCellLeave() {
+  clearTimeout(showTimer)
+  requestToken++ // invalide une reponse deja en vol
+  scheduleHide()
+}
+
+/** Decoupe une cle de mois "YYYY-MM-01" en plage [debut, fin] de ce mois (calcul en local, sans passer par Date(string) qui parse en UTC). */
+function monthRange(monthKey) {
+  const [year, month] = monthKey.split('-').map(Number)
+  const lastDay = new Date(year, month, 0)
+  const to = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`
+  return { from: monthKey, to }
+}
+
+function fetchCellTransactions(from, to, flow, filters = {}) {
+  return ReportsAPI.cellTransactions({ from, to, flow: flow || undefined, ...filters })
+}
+
+function fetchMonthCellTransactions(monthKey, flow, filters = {}) {
+  const { from, to } = monthRange(monthKey)
+  return fetchCellTransactions(from, to, flow, filters)
+}
+
+/** Filtre catégorie à passer à cellTransactions pour une ligne "groupe" (racine) d'un tableau d'analyse mensuelle par catégorie. */
+function groupCategoryFilter(group) {
+  return group.uncategorized ? { uncategorized: true } : { rootCategoryId: group.categoryId }
+}
+
+/** Filtre catégorie pour une ligne "sous-catégorie" (toujours une feuille exacte). */
+function childCategoryFilter(child) {
+  return { categoryId: child.categoryId }
+}
+
+/**
+ * Lignes du popover pour l'encart "Dépenses/Revenus périodiques" : les
+ * données (dernière occurrence par tiers) sont déjà chargées côté client,
+ * pas besoin d'appel réseau. `sign` remet le signe (les montants du groupe
+ * sont stockés en valeur absolue côté backend, voir ServiceRapport#summarizePeriodicGroup).
+ */
+function periodicItemRow(item, sign) {
+  return { id: item.transactionId, date: item.date, payee: item.payee, amount: sign * Number(item.amount) }
+}
+function periodicItemRows(item, sign) {
+  return Promise.resolve([periodicItemRow(item, sign)])
+}
+function periodicGroupRows(group, sign) {
+  return Promise.resolve(group.items.map(item => periodicItemRow(item, sign)))
+}
 
 const PALETTE = ['#1F9D6C', '#D64545', '#3B6FE0', '#C98A1B', '#8B6FE0', '#2CA8C9', '#D6559A', '#6FAF2C']
 
@@ -399,6 +639,11 @@ function analysisGroup(rows) {
       group = {
         key: rootKey,
         name: row.parentId != null ? row.parentName : row.name,
+        // Categorie racine (elle-meme, ou celle dont ce groupe reunit les
+        // sous-categories) pour retrouver au survol les transactions de tout
+        // le groupe via rootCategoryId (voir groupCategoryFilter/ServiceRapport#cellTransactions).
+        categoryId: row.parentId != null ? row.parentId : row.categoryId,
+        uncategorized: row.parentId == null && row.categoryId == null,
         values: zeroValues(),
         total: 0,
         average: 0,
@@ -426,6 +671,13 @@ function analysisGroup(rows) {
 const incomeGroups = computed(() => analysisGroup(monthlyAnalysis.value?.income || []))
 const expenseGroups = computed(() => analysisGroup(monthlyAnalysis.value?.expenses || []))
 
+const monthLabelByKey = computed(() =>
+  new Map((monthlyAnalysis.value?.months || []).map(m => [m.key, m.label]))
+)
+function monthLabelFor(key) {
+  return monthLabelByKey.value.get(key) || key
+}
+
 function toggleMonthlyGroup(type, key) {
   collapsedMonthlyGroups.value[type][key] = !collapsedMonthlyGroups.value[type][key]
 }
@@ -443,10 +695,11 @@ async function loadDashboard() {
 
   periodicExpenses.value = await ReportsAPI.periodicExpenses()
 
+  whereMoneyRange.value = last12MonthsIso()
   const [forecast, savings, whereMoney, monthly] = await Promise.all([
     ReportsAPI.balanceForecast({}),
     ReportsAPI.monthlySavings({ months: 12 }),
-    ReportsAPI.expensesByCategory(last12MonthsIso()),
+    ReportsAPI.expensesByCategory(whereMoneyRange.value),
     ReportsAPI.monthlyCategoryAnalysis({})
   ])
   whereMoneyData.value = whereMoney
@@ -608,7 +861,7 @@ onMounted(loadDashboard)
 
 .dashboard-grid {
   display: grid;
-  grid-template-columns: 1.3fr 1fr;
+  grid-template-columns: 1.3fr 1fr 1fr;
   gap: 20px;
   margin-bottom: 28px;
 }

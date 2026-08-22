@@ -178,11 +178,32 @@ public class ServiceTransaction {
     private static final BigDecimal PERIODIC_AMOUNT_TOLERANCE = new BigDecimal("1.10");
 
     /**
+     * Frequences reconnues pour la regularite des intervalles entre
+     * occurrences : {cible en jours, tolerance en jours}. Une serie n'est
+     * retenue que si TOUS ses intervalles tombent dans la tolerance d'une
+     * seule et meme frequence (le prelevement reel peut varier de quelques
+     * jours autour de la date "ideale" : weekend, jour ferie, mois plus
+     * court...). Mensuel/trimestriel/annuel sont les frequences demandees ;
+     * une serie a intervalles quelconques (ex : plusieurs achats du meme
+     * montant a des dates sans rapport) ne matche aucune d'elles et est donc
+     * ecartee.
+     */
+    private static final int[][] PERIODIC_FREQUENCIES_DAYS = {
+            {30, 7},    // mensuel
+            {91, 10},   // trimestriel
+            {365, 20},  // annuel
+    };
+
+    /**
      * Suggere des groupes de transactions qui semblent periodiques : meme
-     * tiers, montant proche (tolerance +/-10%), avec au moins
-     * PERIODIC_MIN_OCCURRENCES occurrences. Ignore les transactions deja
-     * marquees periodiques (deja acceptees) et les virements internes (jamais
-     * une depense/revenu periodique au sens metier).
+     * tiers, montant proche (tolerance +/-10%), au moins
+     * PERIODIC_MIN_OCCURRENCES occurrences, ET dates reparties a intervalle
+     * regulier (mensuel/trimestriel/annuel a tolerance pres) — sans quoi une
+     * simple coincidence de montant (ex : plusieurs achats ponctuels du meme
+     * montant) serait a tort suggeree comme periodique. Ignore les
+     * transactions deja marquees periodiques (deja acceptees) et les
+     * virements internes (jamais une depense/revenu periodique au sens
+     * metier).
      */
     public List<SuggestionPeriodiqueDTO> findPeriodicSuggestions() {
         List<Transaction> candidates = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
@@ -198,7 +219,7 @@ public class ServiceTransaction {
         for (List<Transaction> group : byPayee.values()) {
             if (group.size() < PERIODIC_MIN_OCCURRENCES) continue;
             for (List<Transaction> amountGroup : groupByToleranteAmount(group)) {
-                if (amountGroup.size() >= PERIODIC_MIN_OCCURRENCES) {
+                if (amountGroup.size() >= PERIODIC_MIN_OCCURRENCES && hasRegularInterval(amountGroup)) {
                     suggestions.add(buildPeriodicSuggestion(amountGroup));
                 }
             }
@@ -206,6 +227,33 @@ public class ServiceTransaction {
 
         suggestions.sort((a, b) -> b.getCount() - a.getCount());
         return suggestions;
+    }
+
+    /**
+     * Vrai si les dates du groupe (deja rapproche par tiers + montant) se
+     * repetent selon un intervalle globalement regulier : il existe une
+     * frequence (voir PERIODIC_FREQUENCIES_DAYS) dont TOUS les intervalles
+     * consecutifs (dates triees) sont proches, a sa tolerance pres.
+     */
+    private boolean hasRegularInterval(List<Transaction> transactions) {
+        List<LocalDate> dates = transactions.stream()
+                .map(Transaction::getDate)
+                .sorted()
+                .toList();
+
+        List<Long> intervals = new ArrayList<>();
+        for (int i = 1; i < dates.size(); i++) {
+            intervals.add(ChronoUnit.DAYS.between(dates.get(i - 1), dates.get(i)));
+        }
+
+        for (int[] frequency : PERIODIC_FREQUENCIES_DAYS) {
+            int target = frequency[0];
+            int tolerance = frequency[1];
+            if (intervals.stream().allMatch(days -> Math.abs(days - target) <= tolerance)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

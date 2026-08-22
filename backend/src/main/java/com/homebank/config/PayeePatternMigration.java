@@ -2,6 +2,8 @@ package com.homebank.config;
 
 import com.homebank.model.Tiers;
 import com.homebank.repository.DepotTiers;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
@@ -30,6 +32,8 @@ import java.util.List;
 @Order(20)
 public class PayeePatternMigration implements ApplicationRunner {
 
+    private static final Logger log = LoggerFactory.getLogger(PayeePatternMigration.class);
+
     private final DepotTiers payeeRepository;
 
     public PayeePatternMigration(DepotTiers payeeRepository) {
@@ -54,8 +58,7 @@ public class PayeePatternMigration implements ApplicationRunner {
 
         if (!toFix.isEmpty()) {
             payeeRepository.saveAll(toFix);
-            System.out.println(">>> Tiers : " + toFix.size()
-                    + " motif(s) migre(s) vers le nouveau format simplifie (texte simple, sans etoile).");
+            log.info("Tiers : {} motif(s) migre(s) vers le nouveau format simplifie (texte simple, sans etoile).", toFix.size());
         }
     }
 

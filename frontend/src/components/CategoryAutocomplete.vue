@@ -27,7 +27,7 @@
     </div>
 
     <div v-if="open" class="cat-autocomplete-dropdown">
-      <div v-if="!flatVisibleOptions.length" class="cat-autocomplete-empty">
+      <div v-if="!flatAllVisibleOptions.length" class="cat-autocomplete-empty">
         Aucune catégorie ne correspond à « {{ query }} ».
       </div>
       <template v-for="group in groupedOptions" :key="group.key">
@@ -38,9 +38,13 @@
           v-for="option in group.options"
           :key="group.key + '-' + option.id"
           class="cat-autocomplete-option"
-          :class="{ highlighted: isHighlighted(group.key, option.id) }"
-          @mousedown.prevent="selectOption(option)"
-          @mouseenter="highlightedKey = group.key + '-' + option.id"
+          :class="{
+            highlighted: isHighlighted(group.key, option.id),
+            'parent-only': !option.selectable
+          }"
+          :title="option.selectable ? undefined : 'Catégorie parente : choisissez une sous-catégorie ci-dessous'"
+          @mousedown.prevent="option.selectable && selectOption(option)"
+          @mouseenter="option.selectable && (highlightedKey = group.key + '-' + option.id)"
         >
           {{ option.label }}
         </div>
@@ -55,11 +59,20 @@ import { normalizeSearch } from '../services/search'
 
 const props = defineProps({
   modelValue: { type: Number, default: null },
-  // Liste des catégories existantes, sous la forme { id, label, type }.
+  // Liste des catégories existantes, sous la forme { id, label, type, selectable }.
   // "type" est celui deja porte par le modele existant (Category#type :
   // INCOME / EXPENSE / BOTH), jamais recalcule ici a partir du nom.
+  // "selectable" (voir services/categories.js) distingue les sous-categories
+  // (toujours selectionnables) des categories racine qui ont des enfants
+  // (affichees pour le contexte de la hierarchie, jamais selectionnables).
   categories: { type: Array, required: true },
-  placeholder: { type: String, default: 'Rechercher une catégorie…' }
+  placeholder: { type: String, default: 'Rechercher une catégorie…' },
+  // 'EXPENSE' | 'INCOME' | null : quand fourni, ne montre que les categories
+  // du type correspondant (+ celles marquees BOTH), pour ne jamais pouvoir
+  // affecter une categorie de revenu a une depense ou inversement. Laisser
+  // null quand la direction n'a pas de sens (ex : categorie par defaut d'un
+  // tiers, qui peut s'appliquer aux deux).
+  transactionType: { type: String, default: null }
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -100,19 +113,34 @@ const groupedOptions = computed(() => {
   const q = normalizeSearch(query.value)
   const matches = (c) => !q || c.normalizedLabel.includes(q)
 
-  const expense = normalizedCategories.value.filter(c => (c.type === 'EXPENSE' || c.type === 'BOTH') && matches(c))
-  const income = normalizedCategories.value.filter(c => (c.type === 'INCOME' || c.type === 'BOTH') && matches(c))
-
-  return [
-    { key: 'expense', title: 'Dépenses', options: expense },
-    { key: 'income', title: 'Revenus', options: income }
-  ]
+  const groups = []
+  if (props.transactionType !== 'INCOME') {
+    groups.push({
+      key: 'expense',
+      title: 'Dépenses',
+      options: normalizedCategories.value.filter(c => (c.type === 'EXPENSE' || c.type === 'BOTH') && matches(c))
+    })
+  }
+  if (props.transactionType !== 'EXPENSE') {
+    groups.push({
+      key: 'income',
+      title: 'Revenus',
+      options: normalizedCategories.value.filter(c => (c.type === 'INCOME' || c.type === 'BOTH') && matches(c))
+    })
+  }
+  return groups
 })
 
-// Liste a plat, dans l'ordre d'affichage, utilisee pour la navigation au
-// clavier (haut/bas) et pour savoir si le dropdown est vide au global.
-const flatVisibleOptions = computed(() =>
+// Deux vues a plat sur les options visibles :
+// - flatAllVisibleOptions (categories racine "affichage seul" comprises)
+//   sert uniquement a savoir si le dropdown a quelque chose a montrer ;
+// - flatSelectableOptions (uniquement les sous-categories/racines sans
+//   enfant) sert a la navigation clavier et a la selection.
+const flatAllVisibleOptions = computed(() =>
   groupedOptions.value.flatMap(g => g.options.map(o => ({ groupKey: g.key, option: o })))
+)
+const flatVisibleOptions = computed(() =>
+  flatAllVisibleOptions.value.filter(e => e.option.selectable)
 )
 
 function isHighlighted(groupKey, optionId) {
@@ -187,7 +215,7 @@ function reconcileTypedText() {
     if (props.modelValue !== null) emit('update:modelValue', null)
     return
   }
-  const exact = props.categories.find(c => c.label.toLowerCase() === trimmed)
+  const exact = props.categories.find(c => c.selectable && c.label.toLowerCase() === trimmed)
   if (exact) {
     if (exact.id !== props.modelValue) emit('update:modelValue', exact.id)
     query.value = exact.label
@@ -244,7 +272,12 @@ defineExpose({ focus: () => inputEl.value?.focus() })
   z-index: 30;
   top: calc(100% + 4px);
   left: 0;
-  right: 0;
+  /* Largeur au moins egale au champ, mais qui s'elargit jusqu'a 380px pour
+     eviter de tronquer les libelles longs ("Parent : Sous-categorie"),
+     notamment dans les colonnes etroites du tableau des transactions. */
+  min-width: 100%;
+  width: max-content;
+  max-width: 380px;
   max-height: 280px;
   overflow-y: auto;
   background: var(--ink-900);
@@ -275,6 +308,21 @@ defineExpose({ focus: () => inputEl.value?.focus() })
 .cat-autocomplete-option:hover {
   background: var(--azure-dim);
   color: var(--azure);
+}
+/*
+ * Categorie racine avec sous-categories : affichee pour le contexte de la
+ * hierarchie uniquement, jamais selectionnable (voir services/categories.js).
+ * En gras + curseur par defaut, et le survol/surlignage normal est
+ * desactive juste au-dessus (le handler ignore deja le mousedown/mouseenter).
+ */
+.cat-autocomplete-option.parent-only {
+  font-weight: 700;
+  cursor: default;
+  padding-left: 12px;
+}
+.cat-autocomplete-option.parent-only:hover {
+  background: transparent;
+  color: var(--text-primary);
 }
 .cat-autocomplete-empty {
   padding: 10px 12px;

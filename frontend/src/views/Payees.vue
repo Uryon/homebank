@@ -144,50 +144,37 @@
     </div>
 
     <!-- Modal fusion -->
-    <div v-if="showMergeModal" class="modal-overlay" @click.self="showMergeModal = false">
-      <div class="modal">
-        <h2>Fusionner {{ selectedIds.length }} tiers</h2>
-        <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 16px;">
-          Choisissez le tiers à conserver. Toutes les transactions des autres tiers
-          sélectionnés lui seront réaffectées (elles porteront désormais son nom),
-          puis les tiers fusionnés seront supprimés. Cette action est irréversible.
-        </p>
-        <div class="form-field">
-          <label>Tiers à conserver</label>
-          <select v-model.number="mergeTargetId">
-            <option v-for="p in selectedPayeeObjects" :key="p.id" :value="p.id">
-              {{ p.name }}{{ p.amount != null ? ' — ' + formatAmount(p.amount) : '' }}
-            </option>
-          </select>
-        </div>
+    <MergeModal
+      v-if="showMergeModal"
+      :title="`Fusionner ${selectedIds.length} tiers`"
+      description="Choisissez le tiers à conserver. Toutes les transactions des autres tiers sélectionnés lui seront réaffectées (elles porteront désormais son nom), puis les tiers fusionnés seront supprimés. Cette action est irréversible."
+      target-label="Tiers à conserver"
+      :items="selectedPayeeObjects"
+      :option-label="payeeOptionLabel"
+      v-model="mergeTargetId"
+      :confirming="merging"
+      @confirm="confirmMerge"
+      @cancel="showMergeModal = false"
+    >
+      <div class="form-field">
+        <label>Motifs actuels des tiers sélectionnés</label>
+        <ul class="merge-patterns-list">
+          <li v-for="p in selectedPayeeObjects" :key="p.id">
+            <strong>{{ p.name }}</strong> : <code>{{ p.pattern }}</code>
+          </li>
+        </ul>
+      </div>
 
-        <div class="form-field">
-          <label>Motifs actuels des tiers sélectionnés</label>
-          <ul class="merge-patterns-list">
-            <li v-for="p in selectedPayeeObjects" :key="p.id">
-              <strong>{{ p.name }}</strong> : <code>{{ p.pattern }}</code>
-            </li>
-          </ul>
-        </div>
-
-        <div class="form-field">
-          <label>Motif de reconnaissance final</label>
-          <input v-model="mergePattern" placeholder="Ex : Carrefour" />
-          <div class="text-hint">
-            Pré-rempli avec le motif du tiers conservé, ci-dessus pour référence.
-            Modifiez-le comme vous le souhaitez : les motifs des tiers fusionnés ne
-            sont plus ajoutés automatiquement.
-          </div>
-        </div>
-
-        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
-          <button class="btn secondary" @click="showMergeModal = false">Annuler</button>
-          <button class="btn" :disabled="merging" @click="confirmMerge">
-            {{ merging ? 'Fusion en cours…' : 'Confirmer la fusion' }}
-          </button>
+      <div class="form-field">
+        <label>Motif de reconnaissance final</label>
+        <input v-model="mergePattern" placeholder="Ex : Carrefour" />
+        <div class="text-hint">
+          Pré-rempli avec le motif du tiers conservé, ci-dessus pour référence.
+          Modifiez-le comme vous le souhaitez : les motifs des tiers fusionnés ne
+          sont plus ajoutés automatiquement.
         </div>
       </div>
-    </div>
+    </MergeModal>
   </div>
 </template>
 
@@ -200,6 +187,7 @@ import { flattenCategories } from '../services/categories'
 import { formatAmount } from '../services/format'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import AmountInput from '../components/AmountInput.vue'
+import MergeModal from '../components/MergeModal.vue'
 
 const route = useRoute()
 
@@ -332,6 +320,10 @@ function toggleSelectAllFiltered() {
 const selectedPayeeObjects = computed(() =>
   payees.value.filter(p => selectedIds.value.includes(p.id))
 )
+
+function payeeOptionLabel(p) {
+  return p.name + (p.amount != null ? ' — ' + formatAmount(p.amount) : '')
+}
 
 function openMergeModal() {
   mergeTargetId.value = selectedIds.value[0]

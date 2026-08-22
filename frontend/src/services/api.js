@@ -39,7 +39,8 @@ export const ReportsAPI = {
     monthlyCategoryAnalysis: (params) => api.get('/reports/monthly-category-analysis', { params }).then(r => r.data),
     monthlySavings: (params) => api.get('/reports/monthly-savings', { params }).then(r => r.data),
     balanceForecast: (params) => api.get('/reports/balance-forecast', { params }).then(r => r.data),
-    periodicExpenses: () => api.get('/reports/periodic-expenses').then(r => r.data)
+    periodicExpenses: () => api.get('/reports/periodic-expenses').then(r => r.data),
+    cellTransactions: (params) => api.get('/reports/cell-transactions', { params }).then(r => r.data)
 }
 
 export const PayeesAPI = {

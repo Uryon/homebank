@@ -4,8 +4,15 @@
  * et TransactionRow.vue.
  */
 
+// Instance creee une seule fois (et non a chaque appel de formatAmount) :
+// construire un Intl.NumberFormat est couteux, et formatAmount est appele
+// pour chaque transaction a chaque frappe dans la recherche (Transactions.vue)
+// en plus de chaque rendu de ligne — recreer l'instance a chaque fois ralentit
+// nettement la saisie sur un historique de plusieurs milliers de transactions.
+const amountFormatter = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' })
+
 export function formatAmount(value) {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(value || 0)
+  return amountFormatter.format(value || 0)
 }
 
 export function formatDate(iso) {

@@ -22,6 +22,22 @@
         </select>
       </div>
 
+      <div class="form-field">
+        <label>Mois</label>
+        <select v-model="filterMonth">
+          <option :value="null">Tous</option>
+          <option v-for="m in MONTHS" :key="m.value" :value="m.value">{{ m.label }}</option>
+        </select>
+      </div>
+
+      <div class="form-field">
+        <label>Année</label>
+        <select v-model="filterYear">
+          <option :value="null">Toutes</option>
+          <option v-for="y in availableYears" :key="y" :value="y">{{ y }}</option>
+        </select>
+      </div>
+
       <div class="form-field" style="align-self: flex-end;">
         <button
           class="btn"
@@ -84,7 +100,7 @@
 
         <tbody>
           <TransactionRow
-            v-for="t in filteredTransactions"
+            v-for="t in pagedTransactions"
             :key="t.id"
             :transaction="t"
             :is-editing="editingId === t.id"
@@ -104,6 +120,16 @@
           />
         </tbody>
       </table>
+    </div>
+
+    <div v-if="filteredTransactions.length" class="pagination">
+      <span class="text-hint">
+        {{ filteredTransactions.length }} transaction(s) — page {{ currentPage }} / {{ totalPages }}
+      </span>
+      <div class="pagination-buttons">
+        <button class="btn secondary" :disabled="currentPage <= 1" @click="currentPage--">‹ Précédent</button>
+        <button class="btn secondary" :disabled="currentPage >= totalPages" @click="currentPage++">Suivant ›</button>
+      </div>
     </div>
 
     <div v-else class="empty-state">
@@ -146,7 +172,12 @@
 
           <div class="form-field">
             <label>Catégorie</label>
-            <CategoryAutocomplete v-model="form.categoryId" :categories="flatCategories" placeholder="Tapez pour rechercher, ou laissez vide" />
+            <CategoryAutocomplete
+              v-model="form.categoryId"
+              :categories="flatCategories"
+              :transaction-type="formAmountType"
+              placeholder="Tapez pour rechercher, ou laissez vide"
+            />
           </div>
 
           <div class="form-field">
@@ -206,8 +237,25 @@ import { formatAmount } from '../services/format'
 const route = useRoute()
 
 const filterAccount = ref(null)
+const filterMonth = ref(null)
+const filterYear = ref(null)
 const pendingOnly = ref(false)
 const searchQuery = ref('')
+
+const MONTHS = [
+  { value: 1, label: 'Janvier' },
+  { value: 2, label: 'Février' },
+  { value: 3, label: 'Mars' },
+  { value: 4, label: 'Avril' },
+  { value: 5, label: 'Mai' },
+  { value: 6, label: 'Juin' },
+  { value: 7, label: 'Juillet' },
+  { value: 8, label: 'Août' },
+  { value: 9, label: 'Septembre' },
+  { value: 10, label: 'Octobre' },
+  { value: 11, label: 'Novembre' },
+  { value: 12, label: 'Décembre' }
+]
 
 // Donnees issues du cache partage (deja precharge au demarrage de l'app,
 // voir App.vue / dataStore.js) : s'affichent instantanement sans attendre
@@ -223,6 +271,15 @@ const filteredByAccount = ref(null)
 const transactions = computed(() =>
   filterAccount.value !== null ? (filteredByAccount.value ?? []) : dataStore.state.transactions
 )
+
+/** Années distinctes présentes dans la liste courante (compte filtré ou non), pour peupler le filtre Année. Recalculé uniquement quand la liste change, pas à chaque frappe. */
+const availableYears = computed(() => {
+  const years = new Set()
+  for (const t of transactions.value) {
+    if (t.date) years.add(Number(t.date.slice(0, 4)))
+  }
+  return Array.from(years).sort((a, b) => b - a)
+})
 
 const showModal = ref(false)
 const form = ref(emptyForm())
@@ -264,7 +321,36 @@ const pendingCount = computed(() =>
   transactions.value.filter(t => !t.validated).length
 )
 
-const filteredTransactions = computed(() => {
+/**
+ * Champs de recherche normalises (tiers, montant formate) par transaction,
+ * precalcules en Map une seule fois quand la liste de transactions change
+ * (chargement, changement de filtre compte...), et non recalcules a chaque
+ * frappe dans la recherche : formatAmount + normalizeSearch sur plusieurs
+ * milliers de transactions a chaque caractere tape est ce qui avait deja
+ * rendu la recherche lente une premiere fois sur ce projet (voir CLAUDE.md).
+ * filteredTransactions ci-dessous ne fait plus que des comparaisons de
+ * chaines deja normalisees.
+ */
+const searchIndexById = computed(() => {
+  const index = new Map()
+  for (const t of transactions.value) {
+    index.set(t.id, {
+      payeeNormalized: normalizeSearch(t.payee),
+      rawAmount: String(t.amount ?? '').toLowerCase(),
+      absAmount: String(Math.abs(t.amount ?? 0)),
+      amountFormattedNormalized: normalizeSearch(formatAmount(t.amount))
+    })
+  }
+  return index
+})
+
+/**
+ * Statut + mois/année : etape memoisee separee de filteredTransactions
+ * ci-dessous, pour ne pas repasser sur toute la liste a chaque frappe dans
+ * la recherche (elle ne depend que du statut/mois/annee/compte, jamais de
+ * searchQuery — meme principe que searchIndexById plus haut).
+ */
+const statusAndDateFiltered = computed(() => {
   const baseTransactions = amountQuery.value
     ? (amountSearchResults.value ?? [])
     : transactions.value
@@ -273,25 +359,56 @@ const filteredTransactions = computed(() => {
     ? baseTransactions.filter(t => !t.validated)
     : baseTransactions
 
-  const q = normalizeSearch(searchQuery.value)
-  if (!q || amountQuery.value) return statusFiltered
-
-  const normalizedQuery = q.replace(',', '.')
+  if (filterMonth.value == null && filterYear.value == null) return statusFiltered
 
   return statusFiltered.filter(t => {
-    const payeeMatch = normalizeSearch(t.payee).includes(q)
+    if (!t.date) return false
+    if (filterYear.value != null && Number(t.date.slice(0, 4)) !== filterYear.value) return false
+    if (filterMonth.value != null && Number(t.date.slice(5, 7)) !== filterMonth.value) return false
+    return true
+  })
+})
 
-    const rawAmount = String(t.amount ?? '').toLowerCase()
-    const absAmount = String(Math.abs(t.amount ?? 0))
-    const formatted = normalizeSearch(formatAmount(t.amount))
+const filteredTransactions = computed(() => {
+  const q = normalizeSearch(searchQuery.value)
+  if (!q || amountQuery.value) return statusAndDateFiltered.value
+
+  const normalizedQuery = q.replace(',', '.')
+  const index = searchIndexById.value
+
+  return statusAndDateFiltered.value.filter(t => {
+    const idx = index.get(t.id)
+    if (!idx) return false
+
+    const payeeMatch = idx.payeeNormalized.includes(q)
 
     const amountMatch =
-      rawAmount.includes(normalizedQuery) ||
-      absAmount.includes(normalizedQuery) ||
-      formatted.includes(q)
+      idx.rawAmount.includes(normalizedQuery) ||
+      idx.absAmount.includes(normalizedQuery) ||
+      idx.amountFormattedNormalized.includes(q)
 
     return payeeMatch || amountMatch
   })
+})
+
+/**
+ * Pagination cote client : avec un historique de plusieurs milliers de
+ * transactions, rendre TOUTES les lignes filtrees dans le DOM a chaque
+ * frappe (un composant TransactionRow par ligne) rend la recherche
+ * inutilisable (reconciliation de milliers de composants a chaque
+ * caractere). On ne rend donc jamais plus de PAGE_SIZE lignes a la fois,
+ * quelle que soit la taille de filteredTransactions.
+ */
+const PAGE_SIZE = 100
+const currentPage = ref(1)
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(filteredTransactions.value.length / PAGE_SIZE))
+)
+
+const pagedTransactions = computed(() => {
+  const start = (currentPage.value - 1) * PAGE_SIZE
+  return filteredTransactions.value.slice(start, start + PAGE_SIZE)
 })
 
 /**
@@ -304,6 +421,12 @@ const amountQuery = computed(() => parseAmountQuery(searchQuery.value))
 const amountSearchResults = ref(null)
 const amountSearchLoading = ref(false)
 let amountSearchTimer = null
+
+// Revenir en page 1 des qu'un filtre change le resultat, pour ne jamais
+// rester bloque sur une page devenue vide ou hors bornes.
+watch([searchQuery, filterAccount, filterMonth, filterYear, pendingOnly, amountSearchResults], () => {
+  currentPage.value = 1
+})
 
 watch([amountQuery, filterAccount], ([query, accountId]) => {
   clearTimeout(amountSearchTimer)
@@ -327,6 +450,14 @@ watch([amountQuery, filterAccount], ([query, accountId]) => {
 })
 
 const flatCategories = computed(() => flattenCategories(categories.value))
+
+// Meme logique que TransactionRow.vue : ne proposer dans CategoryAutocomplete
+// que des categories du type correspondant au signe du montant saisi.
+const formAmountType = computed(() => {
+  const amount = form.value.amount
+  if (amount == null || amount === 0 || amount === '') return null
+  return amount < 0 ? 'EXPENSE' : 'INCOME'
+})
 
 // Index Map (id -> objet) pour accounts/categories, precalcules une seule
 // fois quand ces listes changent (rarement), et passes en prop a chaque
@@ -571,5 +702,16 @@ onMounted(async () => {
   color: var(--text-faint);
   margin-top: 4px;
   line-height: 1.4;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+.pagination-buttons {
+  display: flex;
+  gap: 8px;
 }
 </style>

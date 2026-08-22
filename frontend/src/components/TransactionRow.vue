@@ -26,7 +26,12 @@
         <PayeeAutocomplete v-model="editForm.payee" :payees="payees" />
       </td>
       <td @click.stop>
-        <CategoryAutocomplete v-model="editForm.categoryId" :categories="flatCategories" placeholder="Aucune" />
+        <CategoryAutocomplete
+          v-model="editForm.categoryId"
+          :categories="flatCategories"
+          :transaction-type="editAmountType"
+          placeholder="Aucune"
+        />
       </td>
       <td @click.stop>
         <input v-model="editForm.memo" placeholder="Note libre" />
@@ -98,7 +103,7 @@
  * ne sont meme pas revisitees par Vue tant que leurs props (transaction,
  * isEditing) ne changent pas reellement.
  */
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import PayeeAutocomplete from './PayeeAutocomplete.vue'
 import CategoryAutocomplete from './CategoryAutocomplete.vue'
 import AmountInput from './AmountInput.vue'
@@ -157,6 +162,16 @@ watch(() => props.isEditing, (editing) => {
     editForm.value = null
   }
 }, { immediate: true })
+
+// Type ('EXPENSE'/'INCOME') deduit du signe du montant en cours d'edition,
+// pour ne proposer dans CategoryAutocomplete que des categories du bon sens
+// (jamais une categorie de revenu sur une depense ou l'inverse). Null tant
+// que le montant est vide/nul : les deux groupes restent alors visibles.
+const editAmountType = computed(() => {
+  const amount = editForm.value?.amount
+  if (amount == null || amount === 0 || amount === '') return null
+  return amount < 0 ? 'EXPENSE' : 'INCOME'
+})
 
 function findPayeeByName(name) {
   if (!name || !name.trim()) return null

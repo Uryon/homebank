@@ -91,7 +91,7 @@
                     <option v-for="r in roots" :key="r.id" :value="r.id">{{ r.name }}</option>
                   </select>
                   <span class="text-muted" style="font-size: 12px;">
-                    {{ typeLabel(roots.find(r => r.id === editForm.parentId)?.type) }} (hérité du parent)
+                    {{ typeLabel(rootTypeById.get(editForm.parentId)) }} (hérité du parent)
                   </span>
                   <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
                   <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
@@ -178,7 +178,7 @@
                     <option v-for="r in roots" :key="r.id" :value="r.id">{{ r.name }}</option>
                   </select>
                   <span class="text-muted" style="font-size: 12px;">
-                    {{ typeLabel(roots.find(r => r.id === editForm.parentId)?.type) }} (hérité du parent)
+                    {{ typeLabel(rootTypeById.get(editForm.parentId)) }} (hérité du parent)
                   </span>
                   <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
                   <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
@@ -230,7 +230,7 @@
           <div class="form-field" v-else>
             <label>Type</label>
             <div class="text-muted" style="padding-top: 8px; font-size: 13px;">
-              {{ typeLabel(roots.find(r => r.id === form.parentId)?.type) }} (hérité de la catégorie parente)
+              {{ typeLabel(rootTypeById.get(form.parentId)) }} (hérité de la catégorie parente)
             </div>
           </div>
         </div>
@@ -242,30 +242,18 @@
     </div>
 
     <!-- Modal fusion -->
-    <div v-if="showMergeModal" class="modal-overlay" @click.self="showMergeModal = false">
-      <div class="modal">
-        <h2>Fusionner {{ selectedIds.length }} catégories</h2>
-        <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 16px;">
-          Choisissez la catégorie à conserver. Toutes les transactions et sous-catégories
-          des autres catégories sélectionnées lui seront réaffectées, puis les catégories
-          fusionnées seront supprimées. Cette action est irréversible.
-        </p>
-        <div class="form-field">
-          <label>Catégorie à conserver</label>
-          <select v-model.number="mergeTargetId">
-            <option v-for="c in selectedCategoryObjects" :key="c.id" :value="c.id">
-              {{ categoryFullLabel(c) }}
-            </option>
-          </select>
-        </div>
-        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
-          <button class="btn secondary" @click="showMergeModal = false">Annuler</button>
-          <button class="btn" :disabled="merging" @click="confirmMerge">
-            {{ merging ? 'Fusion en cours…' : 'Confirmer la fusion' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <MergeModal
+      v-if="showMergeModal"
+      :title="`Fusionner ${selectedIds.length} catégories`"
+      description="Choisissez la catégorie à conserver. Toutes les transactions et sous-catégories des autres catégories sélectionnées lui seront réaffectées, puis les catégories fusionnées seront supprimées. Cette action est irréversible."
+      target-label="Catégorie à conserver"
+      :items="selectedCategoryObjects"
+      :option-label="categoryFullLabel"
+      v-model="mergeTargetId"
+      :confirming="merging"
+      @confirm="confirmMerge"
+      @cancel="showMergeModal = false"
+    />
   </div>
 </template>
 
@@ -273,6 +261,7 @@
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { CategoriesAPI } from '../services/api'
 import { normalizeSearch } from '../services/search'
+import MergeModal from '../components/MergeModal.vue'
 
 const categories = ref([])
 const roots = ref([])
@@ -383,6 +372,10 @@ function toggleSelectAllIncome() {
 function typeLabel(type) {
   return { EXPENSE: 'Dépense', INCOME: 'Revenu', BOTH: 'Les deux' }[type] || type
 }
+
+// Index Map (id racine -> type), pour resoudre le type herite d'une
+// categorie parente sans logique metier (.find()) dans le template.
+const rootTypeById = computed(() => new Map(roots.value.map(r => [r.id, r.type])))
 
 function typeBadgeStyle(type) {
   const colors = { EXPENSE: 'var(--coral)', INCOME: 'var(--mint)', BOTH: 'var(--azure)' }

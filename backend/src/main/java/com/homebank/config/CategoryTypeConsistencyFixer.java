@@ -2,6 +2,8 @@ package com.homebank.config;
 
 import com.homebank.model.Categorie;
 import com.homebank.repository.DepotCategorie;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
@@ -20,6 +22,8 @@ import java.util.List;
 @Component
 @Order(10)
 public class CategoryTypeConsistencyFixer implements ApplicationRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(CategoryTypeConsistencyFixer.class);
 
     private final DepotCategorie categoryRepository;
 
@@ -43,8 +47,7 @@ public class CategoryTypeConsistencyFixer implements ApplicationRunner {
 
         if (!toFix.isEmpty()) {
             categoryRepository.saveAll(toFix);
-            System.out.println(">>> Coherence categories : " + toFix.size()
-                    + " sous-categorie(s) realignee(s) sur le type de leur parent.");
+            log.info("Coherence categories : {} sous-categorie(s) realignee(s) sur le type de leur parent.", toFix.size());
         }
     }
 }

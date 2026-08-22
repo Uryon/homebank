@@ -95,10 +95,8 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
             WHERE t.date BETWEEN :from AND :to
               AND t.payment_mode <> 'TRANSFER'
               AND (:accountId IS NULL OR t.account_id = :accountId)
-            GROUP BY c.id, c.name, p.id, p.name, c.type,
-                     EXTRACT(YEAR FROM t.date), EXTRACT(MONTH FROM t.date)
-            ORDER BY p.name ASC, c.name ASC,
-                     EXTRACT(YEAR FROM t.date) ASC, EXTRACT(MONTH FROM t.date) ASC
+            GROUP BY 1, 2, 3, 4, 5, 6, 7
+            ORDER BY 4, 2, 6, 7
             """, nativeQuery = true)
     List<Object[]> aggregateMonthlyByCategory(
             @Param("from") LocalDate from,

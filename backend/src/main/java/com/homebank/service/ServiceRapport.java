@@ -1,5 +1,7 @@
 package com.homebank.service;
 
+import com.homebank.dto.TransactionDTO;
+import com.homebank.mapper.MappeurTransaction;
 import com.homebank.model.Compte;
 import com.homebank.model.Categorie;
 import com.homebank.model.Transaction;
@@ -21,10 +23,12 @@ public class ServiceRapport {
 
     private final DepotTransaction transactionRepository;
     private final DepotCompte accountRepository;
+    private final MappeurTransaction transactionMapper;
 
-    public ServiceRapport(DepotTransaction transactionRepository, DepotCompte accountRepository) {
+    public ServiceRapport(DepotTransaction transactionRepository, DepotCompte accountRepository, MappeurTransaction transactionMapper) {
         this.transactionRepository = transactionRepository;
         this.accountRepository = accountRepository;
+        this.transactionMapper = transactionMapper;
     }
 
     private List<Transaction> loadTransactions(LocalDate from, LocalDate to, Long accountId) {
@@ -51,10 +55,20 @@ public class ServiceRapport {
         List<Transaction> transactions = loadTransactions(from, to, accountId);
 
         Map<String, BigDecimal> totals = new LinkedHashMap<>();
+        // Categorie (id, ou absence = "non categorise") representative de chaque
+        // libelle, memorisee au passage pour permettre au frontend de retrouver
+        // ensuite les transactions exactes d'une ligne (voir cellTransactions).
+        Map<String, Long> categoryIdByLabel = new LinkedHashMap<>();
+        Set<String> uncategorizedLabels = new HashSet<>();
         for (Transaction t : transactions) {
             if (t.getAmount().signum() >= 0) continue; // on ne garde que les depenses
             String label = categoryLabel(t.getCategory());
             totals.merge(label, t.getAmount().abs(), BigDecimal::add);
+            if (t.getCategory() != null) {
+                categoryIdByLabel.putIfAbsent(label, t.getCategory().getId());
+            } else {
+                uncategorizedLabels.add(label);
+            }
         }
 
         BigDecimal grandTotal = totals.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -64,6 +78,8 @@ public class ServiceRapport {
                 .map(e -> {
                     Map<String, Object> row = new LinkedHashMap<>();
                     row.put("category", e.getKey());
+                    row.put("categoryId", categoryIdByLabel.get(e.getKey()));
+                    row.put("uncategorized", uncategorizedLabels.contains(e.getKey()));
                     row.put("total", e.getValue());
                     row.put("percentage", grandTotal.signum() == 0
                             ? BigDecimal.ZERO
@@ -72,6 +88,53 @@ public class ServiceRapport {
                     return row;
                 })
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Transactions individuelles derriere une cellule d'un tableau du tableau
+     * de bord, calculees avec exactement les memes regles que les agregats
+     * (loadTransactions : virements exclus, transactions futures exclues) —
+     * pour que le detail affiche au survol corresponde toujours au montant
+     * affiche dans la cellule. Filtres tous optionnels et combinables :
+     * - flow ("income"/"expense") : signe du montant ;
+     * - categoryId : categorie exacte (sous-categorie, ou racine sans enfant) ;
+     * - rootCategoryId : categorie racine ELLE-MEME ou une de ses
+     *   sous-categories (regroupement utilise par les tableaux "par categorie") ;
+     * - uncategorized : transactions sans categorie.
+     * Sans aucun filtre categorie, toutes les categories sont incluses (ex :
+     * ligne "Total" d'un tableau mensuel).
+     */
+    public List<TransactionDTO> cellTransactions(
+            LocalDate from, LocalDate to, Long accountId,
+            String flow, Long categoryId, Long rootCategoryId, boolean uncategorized) {
+
+        List<Transaction> transactions = loadTransactions(from, to, accountId);
+
+        return transactions.stream()
+                .filter(t -> matchesFlow(t, flow))
+                .filter(t -> matchesCategory(t, categoryId, rootCategoryId, uncategorized))
+                .sorted(Comparator.comparing(Transaction::getDate).reversed())
+                .map(transactionMapper::toDTO)
+                .toList();
+    }
+
+    private boolean matchesFlow(Transaction t, String flow) {
+        if (flow == null) return true;
+        return "income".equals(flow) ? t.getAmount().signum() > 0 : t.getAmount().signum() < 0;
+    }
+
+    private boolean matchesCategory(Transaction t, Long categoryId, Long rootCategoryId, boolean uncategorized) {
+        if (uncategorized) return t.getCategory() == null;
+        if (categoryId != null) {
+            return t.getCategory() != null && categoryId.equals(t.getCategory().getId());
+        }
+        if (rootCategoryId != null) {
+            Categorie category = t.getCategory();
+            if (category == null) return false;
+            if (rootCategoryId.equals(category.getId())) return true;
+            return category.getParent() != null && rootCategoryId.equals(category.getParent().getId());
+        }
+        return true;
     }
 
     /** Resume global : revenus, depenses et net sur la periode. Les virements sont exclus. */
@@ -169,7 +232,15 @@ public class ServiceRapport {
         return result;
     }
 
-    /** Somme des transactions marquees "depense periodique" (une ligne par tiers, la plus recente). */
+    /**
+     * Transactions marquees "periodique", regroupees en deux ensembles
+     * distincts (une ligne par tiers, la plus recente occurrence connue) :
+     * "expenses" pour les depenses (montant negatif) et "revenues" pour les
+     * revenus (montant positif) — la case a cocher "Periodique" ne distingue
+     * pas les deux sur une transaction (loyer/abonnement comme salaire/CPAM
+     * peuvent tous deux etre recurrents), il ne faut donc pas les melanger
+     * dans un seul total affiche comme "Depenses periodiques".
+     */
     public Map<String, Object> periodicExpensesSummary() {
         LocalDate today = LocalDate.now();
         List<Transaction> flagged = transactionRepository.findByPeriodicExpenseTrueOrderByDateDescIdDesc()
@@ -179,8 +250,19 @@ public class ServiceRapport {
                 .filter(t -> !t.getDate().isAfter(today))
                 .toList();
 
+        List<Transaction> expenses = flagged.stream().filter(t -> t.getAmount().signum() < 0).toList();
+        List<Transaction> revenues = flagged.stream().filter(t -> t.getAmount().signum() >= 0).toList();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("expenses", summarizePeriodicGroup(expenses));
+        result.put("revenues", summarizePeriodicGroup(revenues));
+        return result;
+    }
+
+    /** Une ligne par tiers (la plus recente occurrence) + le total, pour un groupe de transactions periodiques deja filtre par signe. */
+    private Map<String, Object> summarizePeriodicGroup(List<Transaction> transactions) {
         Map<String, Transaction> latestByPayee = new LinkedHashMap<>();
-        for (Transaction t : flagged) {
+        for (Transaction t : transactions) {
             String key = (t.getPayee() != null ? t.getPayee().getName().toLowerCase(Locale.ROOT) : "id-" + t.getId());
             latestByPayee.putIfAbsent(key, t);
         }
@@ -189,17 +271,19 @@ public class ServiceRapport {
         BigDecimal total = BigDecimal.ZERO;
         for (Transaction t : latestByPayee.values()) {
             Map<String, Object> item = new LinkedHashMap<>();
+            item.put("transactionId", t.getId());
             item.put("payee", t.getPayee() != null ? t.getPayee().getName() : null);
+            item.put("date", t.getDate());
             item.put("amount", t.getAmount().abs());
             items.add(item);
             total = total.add(t.getAmount().abs());
         }
         items.sort((a, b) -> ((BigDecimal) b.get("amount")).compareTo((BigDecimal) a.get("amount")));
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("items", items);
-        result.put("total", total);
-        return result;
+        Map<String, Object> group = new LinkedHashMap<>();
+        group.put("items", items);
+        group.put("total", total);
+        return group;
     }
 
     private BigDecimal balanceAsOf(LocalDate date, List<Compte> accounts) {
