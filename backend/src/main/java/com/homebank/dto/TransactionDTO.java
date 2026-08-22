@@ -1,7 +1,7 @@
 package com.homebank.dto;
 
 
-import com.homebank.utils.PaymentMode;
+import com.homebank.utils.ModePaiement;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
@@ -23,7 +23,7 @@ public class TransactionDTO {
     private Long payeeId;
     private String memo;
     private Long categoryId;
-    private PaymentMode paymentMode;
+    private ModePaiement paymentMode;
     private String tags;
     private Long transferTransactionId;
     private boolean validated;

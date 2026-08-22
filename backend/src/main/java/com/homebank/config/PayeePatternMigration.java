@@ -1,7 +1,7 @@
 package com.homebank.config;
 
-import com.homebank.model.Payee;
-import com.homebank.repository.PayeeRepository;
+import com.homebank.model.Tiers;
+import com.homebank.repository.DepotTiers;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
@@ -21,7 +21,7 @@ import java.util.List;
  * - convertit les alternatives regex "a|b" en motifs joker combines "a;b" ;
  * - retire les etoiles de tete/queue superflues ("*Carrefour*" -> "Carrefour") :
  *   le champ stocke desormais du texte simple, les etoiles ne sont ajoutees
- *   qu'au moment du traitement (voir PayeeService.matchesPatternField), pas
+ *   qu'au moment du traitement (voir ServiceTiers.matchesPatternField), pas
  *   dans les donnees ni dans l'interface. Un motif avance avec une etoile
  *   AILLEURS qu'en tete/queue (ex : "Carrefour*Paris") n'est pas modifie.
  * Idempotent : sans effet une fois les motifs deja au nouveau format.
@@ -30,17 +30,17 @@ import java.util.List;
 @Order(20)
 public class PayeePatternMigration implements ApplicationRunner {
 
-    private final PayeeRepository payeeRepository;
+    private final DepotTiers payeeRepository;
 
-    public PayeePatternMigration(PayeeRepository payeeRepository) {
+    public PayeePatternMigration(DepotTiers payeeRepository) {
         this.payeeRepository = payeeRepository;
     }
 
     @Override
     public void run(ApplicationArguments args) {
-        List<Payee> toFix = new ArrayList<>();
+        List<Tiers> toFix = new ArrayList<>();
 
-        for (Payee payee : payeeRepository.findAll()) {
+        for (Tiers payee : payeeRepository.findAll()) {
             String original = payee.getPattern();
             if (original == null) continue;
 

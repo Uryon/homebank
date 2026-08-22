@@ -154,6 +154,51 @@ input[type="checkbox"] {
     background: currentColor; opacity: 0.7;
 }
 
+/* --- Sidebar : liste des comptes (style YNAB), sous la navigation --- */
+.sidebar-accounts {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid var(--sidebar-border);
+}
+.sidebar-accounts-header {
+    padding: 0 12px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--sidebar-text);
+    opacity: 0.7;
+}
+.sidebar-account {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    color: var(--sidebar-text);
+    font-family: var(--font-ui);
+    text-align: left;
+    margin-bottom: 1px;
+    transition: background 0.15s, color 0.15s;
+}
+.sidebar-account:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-active); }
+.sidebar-account-name {
+    font-size: 13px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.sidebar-account-balance {
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
 /* --- Contenu principal : clair et aéré --- */
 .main-content {
     padding: 32px 40px 60px;

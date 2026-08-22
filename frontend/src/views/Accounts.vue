@@ -40,43 +40,13 @@
     </table>
     <div v-else class="empty-state">Aucun compte. Créez-en un pour commencer à suivre vos transactions.</div>
 
-    <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
-      <div class="modal">
-        <h2>{{ editing ? 'Modifier le compte' : 'Nouveau compte' }}</h2>
-        <div class="form-grid">
-          <div class="form-field" style="grid-column: span 2;">
-            <label>Nom</label>
-            <input v-model="form.name" placeholder="Ex : Compte courant" />
-          </div>
-          <div class="form-field">
-            <label>Type</label>
-            <select v-model="form.type">
-              <option value="CHECKING">Compte courant</option>
-              <option value="SAVINGS">Épargne</option>
-              <option value="CASH">Espèces</option>
-              <option value="CREDIT_CARD">Carte de crédit</option>
-              <option value="INVESTMENT">Placement</option>
-            </select>
-          </div>
-          <div class="form-field">
-            <label>Devise</label>
-            <input v-model="form.currency" placeholder="EUR" maxlength="3" />
-          </div>
-          <div class="form-field">
-            <label>Solde initial</label>
-            <AmountInput v-model="form.initialBalance" />
-          </div>
-          <div class="form-field" style="grid-column: span 2;">
-            <label>Notes</label>
-            <textarea v-model="form.notes" rows="2"></textarea>
-          </div>
-        </div>
-        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
-          <button class="btn secondary" @click="showModal = false">Annuler</button>
-          <button class="btn" @click="save">Enregistrer</button>
-        </div>
-      </div>
-    </div>
+    <AccountModal
+      v-if="showModal"
+      :account="editing"
+      @close="showModal = false"
+      @saved="onSaved"
+      @deleted="onDeleted"
+    />
 
     <!-- Modal : virement entre comptes -->
     <div v-if="showTransferModal" class="modal-overlay" @click.self="showTransferModal = false">
@@ -134,21 +104,21 @@
 import { ref, computed, onMounted } from 'vue'
 import { AccountsAPI, TransactionsAPI } from '../services/api'
 import { formatAmount } from '../services/format'
+import { dataStore } from '../services/dataStore'
 import AmountInput from '../components/AmountInput.vue'
+import AccountModal from '../components/AccountModal.vue'
 
-const accounts = ref([])
-const balances = ref({})
+// Comptes et soldes partagés avec la sidebar (voir App.vue / dataStore.js) :
+// une modification ici (création, édition, suppression, virement) se
+// répercute automatiquement dans la sidebar sans code supplémentaire.
+const accounts = computed(() => dataStore.state.accounts)
+const balances = computed(() => dataStore.state.balances)
 const showModal = ref(false)
 const editing = ref(null)
-const form = ref(emptyForm())
 
 const showTransferModal = ref(false)
 const transferring = ref(false)
 const transferForm = ref(emptyTransferForm())
-
-function emptyForm() {
-  return { name: '', type: 'CHECKING', currency: 'EUR', initialBalance: 0, notes: '' }
-}
 
 function emptyTransferForm() {
   return {
@@ -170,41 +140,31 @@ function typeLabel(type) {
   return labels[type] || type
 }
 
-async function load() {
-  accounts.value = await AccountsAPI.list()
-  balances.value = await AccountsAPI.balances()
-}
-
 function openCreate() {
   editing.value = null
-  form.value = emptyForm()
   showModal.value = true
 }
 
 function openEdit(account) {
   editing.value = account
-  form.value = { ...account }
   showModal.value = true
 }
 
-async function save() {
-  if (!form.value.name.trim()) {
-    alert('Le nom du compte est obligatoire.')
-    return
-  }
-  if (editing.value) {
-    await AccountsAPI.update(editing.value.id, form.value)
-  } else {
-    await AccountsAPI.create(form.value)
-  }
+async function onSaved() {
   showModal.value = false
-  await load()
+  await dataStore.refreshAccounts()
 }
 
+async function onDeleted() {
+  showModal.value = false
+  await dataStore.refreshAccounts()
+}
+
+/** Suppression directe depuis la ligne du tableau (raccourci sans passer par la modale). */
 async function remove(account) {
   if (!confirm(`Supprimer le compte "${account.name}" et toutes ses transactions ?`)) return
   await AccountsAPI.remove(account.id)
-  await load()
+  await dataStore.refreshAccounts()
 }
 
 /* --- Virement entre comptes --- */
@@ -242,7 +202,9 @@ async function submitTransfer() {
       memo: f.memo
     })
     showTransferModal.value = false
-    await load()
+    // Un virement crée deux transactions : rafraîchit aussi la liste des
+    // transactions du cache partagé, pas seulement les soldes.
+    await dataStore.refreshTransactions()
   } catch (e) {
     alert('Erreur lors du transfert : ' + (e.response?.data?.error || e.message))
   } finally {
@@ -250,5 +212,5 @@ async function submitTransfer() {
   }
 }
 
-onMounted(load)
+onMounted(dataStore.ensureLoaded)
 </script>

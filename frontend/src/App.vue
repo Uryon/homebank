@@ -25,16 +25,45 @@
           <span class="dot"></span> Import CSV/QIF
         </RouterLink>
       </nav>
+
+      <div v-if="sortedAccounts.length" class="sidebar-accounts">
+        <div class="sidebar-accounts-header">Comptes</div>
+        <button
+          v-for="a in sortedAccounts"
+          :key="a.id"
+          type="button"
+          class="sidebar-account"
+          @click="openAccount(a)"
+        >
+          <span class="sidebar-account-name">{{ a.name }}</span>
+          <span
+            class="sidebar-account-balance amount"
+            :class="(balances[a.id] ?? 0) >= 0 ? 'positive' : 'negative'"
+          >
+            {{ formatAmount(balances[a.id] ?? 0) }}
+          </span>
+        </button>
+      </div>
     </aside>
     <main class="main-content">
       <RouterView />
     </main>
+
+    <AccountModal
+      v-if="editingAccount"
+      :account="editingAccount"
+      @close="editingAccount = null"
+      @saved="onAccountSaved"
+      @deleted="onAccountSaved"
+    />
   </div>
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { dataStore } from './services/dataStore'
+import { formatAmount } from './services/format'
+import AccountModal from './components/AccountModal.vue'
 
 // Precharge comptes, categories, tiers et transactions des le demarrage de
 // l'app, en arriere-plan, pour que la page Transactions (et les autres)
@@ -42,4 +71,22 @@ import { dataStore } from './services/dataStore'
 onMounted(() => {
   dataStore.prefetch()
 })
+
+const balances = computed(() => dataStore.state.balances)
+
+/** Comptes courants toujours en tête de liste, comme sur la page Comptes. */
+const sortedAccounts = computed(() =>
+  [...dataStore.state.accounts].sort((a, b) => (a.type === 'CHECKING' ? 0 : 1) - (b.type === 'CHECKING' ? 0 : 1))
+)
+
+const editingAccount = ref(null)
+
+function openAccount(account) {
+  editingAccount.value = account
+}
+
+async function onAccountSaved() {
+  editingAccount.value = null
+  await dataStore.refreshAccounts()
+}
 </script>

@@ -355,8 +355,15 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/*
+ * Volontairement pas d'overflow-x ici : un position:sticky sur le thead
+ * (ci-dessous) ne colle au scroll de la PAGE que si aucun ancêtre entre lui
+ * et le viewport n'a d'overflow non-visible (même overflow-x seul suffit à
+ * casser la stickiness, voir memoire du projet). Si le tableau est trop
+ * large pour l'ecran, c'est donc toute la page qui scrolle horizontalement
+ * plutot qu'un scroll confine au tableau.
+ */
 .table-scroll {
-  overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
 }
@@ -388,6 +395,11 @@ onMounted(async () => {
   background: var(--azure-dim);
 }
 
+.payees-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+}
 .payees-table th:last-child,
 .payees-table td:last-child {
   position: sticky;
@@ -395,9 +407,15 @@ onMounted(async () => {
   background: var(--ink-900);
   box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
 }
+/*
+ * z-index plus eleve que le thead sticky "simple" ci-dessus car cette
+ * cellule cumule top:0 ET right:0 (coin haut-droit), et doit rester
+ * au-dessus de tr.row-editing (z-index: 5) et des td sticky (right:0) du
+ * corps du tableau pendant le scroll.
+ */
 .payees-table thead th:last-child {
   background: var(--ink-800);
-  z-index: 2;
+  z-index: 7;
 }
 .payees-table tbody tr:hover td:last-child {
   background: var(--ink-800);

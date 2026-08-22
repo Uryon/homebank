@@ -52,10 +52,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { AccountsAPI, ImportAPI } from '../services/api'
+import { computed, onMounted, ref } from 'vue'
+import { ImportAPI } from '../services/api'
+import { dataStore } from '../services/dataStore'
 
-const accounts = ref([])
+const accounts = computed(() => dataStore.state.accounts)
 const accountId = ref(null)
 const format = ref('csv')
 const file = ref(null)
@@ -73,6 +74,9 @@ async function doImport() {
     result.value = format.value === 'csv'
         ? await ImportAPI.csv(file.value, accountId.value)
         : await ImportAPI.qif(file.value, accountId.value)
+    // Les transactions importées changent le solde du compte : rafraîchit le
+    // cache partagé (sidebar, page Comptes, page Transactions...).
+    await dataStore.refreshTransactions()
   } catch (e) {
     alert("Erreur lors de l'import : " + (e.response?.data?.error || e.message))
   } finally {
@@ -81,7 +85,7 @@ async function doImport() {
 }
 
 onMounted(async () => {
-  accounts.value = await AccountsAPI.list()
+  await dataStore.ensureLoaded()
   if (accounts.value.length) accountId.value = accounts.value[0].id
 })
 </script>

@@ -15,6 +15,7 @@ import { AccountsAPI, CategoriesAPI, PayeesAPI, TransactionsAPI } from './api'
 
 const state = reactive({
   accounts: [],
+  balances: {},
   categories: [],
   payees: [],
   transactions: [],
@@ -28,8 +29,12 @@ const state = reactive({
 
 let prefetchPromise = null
 
+/** Comptes et soldes toujours rechargés ensemble : la sidebar (App.vue) et
+ * la page Comptes affichent les deux côte à côte. */
 async function loadAccounts() {
-  state.accounts = await AccountsAPI.list()
+  const [accounts, balances] = await Promise.all([AccountsAPI.list(), AccountsAPI.balances()])
+  state.accounts = accounts
+  state.balances = balances
   state.loaded.accounts = true
 }
 
@@ -46,6 +51,18 @@ async function loadPayees() {
 async function loadTransactions() {
   state.transactions = await TransactionsAPI.list()
   state.loaded.transactions = true
+}
+
+/**
+ * Recharge transactions ET soldes ensemble : toute création/modification/
+ * suppression de transaction (page Transactions, doublons, suggestions
+ * périodiques, virement, import CSV/QIF...) change potentiellement le solde
+ * des comptes affiché dans la sidebar et sur la page Comptes. Exportée sous
+ * le nom `refreshTransactions` pour que tous les appelants existants
+ * profitent du rafraîchissement des soldes sans modification supplémentaire.
+ */
+async function loadTransactionsAndBalances() {
+  await Promise.all([loadTransactions(), loadAccounts()])
 }
 
 /**
@@ -94,5 +111,5 @@ export const dataStore = {
   refreshAccounts: loadAccounts,
   refreshCategories: loadCategories,
   refreshPayees: loadPayees,
-  refreshTransactions: loadTransactions
+  refreshTransactions: loadTransactionsAndBalances
 }

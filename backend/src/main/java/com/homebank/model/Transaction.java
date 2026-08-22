@@ -1,6 +1,6 @@
 package com.homebank.model;
 
-import com.homebank.utils.PaymentMode;
+import com.homebank.utils.ModePaiement;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
@@ -24,7 +24,7 @@ public class Transaction {
     @NotNull
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "account_id", nullable = false)
-    private Account account;
+    private Compte account;
 
     @NotNull
     @Column(nullable = false)
@@ -38,25 +38,25 @@ public class Transaction {
     /**
      * Tiers de la transaction : vraie relation (et non plus un texte
      * denormalise recopie sur chaque transaction), pour que le nom affiche
-     * soit toujours lu en direct depuis Payee#name. Un renommage ou une
-     * fusion de tiers (voir PayeeService) se repercute donc automatiquement
+     * soit toujours lu en direct depuis Tiers#name. Un renommage ou une
+     * fusion de tiers (voir ServiceTiers) se repercute donc automatiquement
      * sur toutes les transactions liees, sans etape de synchronisation a
      * part qui pourrait etre oubliee. Null pour une transaction sans tiers
      * (ex : virement interne, dont le libelle est recalcule a l'affichage).
      */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "payee_id")
-    private Payee payee;
+    private Tiers payee;
 
     private String memo;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
-    private Category category;
+    private Categorie category;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private PaymentMode paymentMode = PaymentMode.NONE;
+    private ModePaiement paymentMode = ModePaiement.NONE;
 
     /** Tags libres separes par des espaces, comme dans HomeBank */
     private String tags;
@@ -77,7 +77,7 @@ public class Transaction {
 
     /**
      * Coche par l'utilisateur (ou acceptee depuis une suggestion automatique,
-     * voir TransactionService#findPeriodicSuggestions) pour indiquer une
+     * voir ServiceTransaction#findPeriodicSuggestions) pour indiquer une
      * depense/revenu periodique recurrent (loyer, abonnements, assurances,
      * salaire...), utilise pour l'encart "Depenses periodiques" du tableau de
      * bord. Le nom de colonne reste "monthly_expense" en base (ancien nom) :

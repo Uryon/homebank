@@ -6,6 +6,9 @@
     <RouterLink to="/transactions/periodiques" class="subnav-item" :class="{ active: $route.name === 'transactions-periodic-suggestions' }">
       Périodiques
     </RouterLink>
+    <RouterLink to="/transactions/doublons" class="subnav-item" :class="{ active: $route.name === 'transactions-duplicates' }">
+      Doublons
+    </RouterLink>
   </div>
 </template>
 

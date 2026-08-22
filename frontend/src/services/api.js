@@ -29,6 +29,7 @@ export const TransactionsAPI = {
     toggleValidated: (id) => api.post(`/transactions/${id}/toggle-validated`).then(r => r.data),
     togglePeriodicExpense: (id) => api.post(`/transactions/${id}/toggle-periodic-expense`).then(r => r.data),
     periodicSuggestions: () => api.get('/transactions/periodic-suggestions').then(r => r.data),
+    duplicates: () => api.get('/transactions/duplicates').then(r => r.data),
     transfer: (payload) => api.post('/transactions/transfer', payload).then(r => r.data)
 }
 

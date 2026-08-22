@@ -346,9 +346,14 @@ const todayIso = new Date().toISOString().slice(0, 10)
 async function load() {
   if (filterAccount.value !== null) {
     filteredByAccount.value = await TransactionsAPI.list({ accountId: filterAccount.value })
+    // Solde(s) affiché(s) dans la sidebar et sur la page Comptes : à
+    // rafraîchir même quand la liste filtrée par compte ne passe pas par le
+    // cache partagé ci-dessus.
+    await dataStore.refreshAccounts()
   } else {
     // Revalide le cache partage en arriere-plan (l'affichage courant du
     // cache reste visible pendant ce temps, aucun blocage / clignotement).
+    // Rafraîchit aussi les soldes des comptes (voir dataStore.js).
     await dataStore.refreshTransactions()
   }
 }
@@ -504,8 +509,15 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/*
+ * Volontairement pas d'overflow-x ici : un position:sticky sur le thead
+ * (ci-dessous) ne colle au scroll de la PAGE que si aucun ancêtre entre lui
+ * et le viewport n'a d'overflow non-visible (même overflow-x seul suffit à
+ * casser la stickiness, voir memoire du projet). Si le tableau est trop
+ * large pour l'ecran, c'est donc toute la page qui scrolle horizontalement
+ * plutot qu'un scroll confine au tableau.
+ */
 .table-scroll {
-  overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
 }
@@ -530,18 +542,27 @@ onMounted(async () => {
   text-overflow: ellipsis;
 }
 
+.transactions-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+}
+
 /*
  * La colonne Actions reste toujours visible même si le tableau déborde
  * horizontalement (beaucoup de colonnes) : on la fixe à droite plutôt que
  * de forcer l'utilisateur à scroller jusqu'au bout pour supprimer/valider
  * une ligne. Le style des cellules (td) correspondantes vit desormais dans
- * TransactionRow.vue, qui gere sa propre ligne.
+ * TransactionRow.vue, qui gere sa propre ligne. z-index plus eleve que le
+ * thead sticky "simple" ci-dessus car cette cellule cumule top:0 ET right:0
+ * (coin haut-droit) et doit rester au-dessus des td sticky (right:0) du
+ * corps du tableau pendant le scroll.
  */
 .transactions-table th:last-child {
   position: sticky;
   right: 0;
   background: var(--ink-800);
-  z-index: 2;
+  z-index: 7;
   box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
 }
 

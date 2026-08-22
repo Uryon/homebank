@@ -2,9 +2,9 @@ package com.homebank.config;
 
 import com.homebank.model.*;
 import com.homebank.repository.*;
-import com.homebank.service.PayeeService;
-import com.homebank.utils.AccountType;
-import com.homebank.utils.PaymentMode;
+import com.homebank.service.ServiceTiers;
+import com.homebank.utils.TypeCompte;
+import com.homebank.utils.ModePaiement;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -27,19 +27,19 @@ import java.time.LocalDate;
 @Profile("test")
 public class TestDataSeeder implements CommandLineRunner {
 
-    private final AccountRepository accountRepository;
-    private final CategoryRepository categoryRepository;
-    private final PayeeRepository payeeRepository;
-    private final TransactionRepository transactionRepository;
-    private final LoanRepository loanRepository;
-    private final PayeeService payeeService;
+    private final DepotCompte accountRepository;
+    private final DepotCategorie categoryRepository;
+    private final DepotTiers payeeRepository;
+    private final DepotTransaction transactionRepository;
+    private final DepotPret loanRepository;
+    private final ServiceTiers payeeService;
 
-    public TestDataSeeder(AccountRepository accountRepository,
-                           CategoryRepository categoryRepository,
-                           PayeeRepository payeeRepository,
-                           TransactionRepository transactionRepository,
-                           LoanRepository loanRepository,
-                           PayeeService payeeService) {
+    public TestDataSeeder(DepotCompte accountRepository,
+                           DepotCategorie categoryRepository,
+                           DepotTiers payeeRepository,
+                           DepotTransaction transactionRepository,
+                           DepotPret loanRepository,
+                           ServiceTiers payeeService) {
         this.accountRepository = accountRepository;
         this.categoryRepository = categoryRepository;
         this.payeeRepository = payeeRepository;
@@ -53,25 +53,25 @@ public class TestDataSeeder implements CommandLineRunner {
         System.out.println(">>> Profil 'test' actif : chargement des donnees de demonstration (H2 en memoire)...");
 
         // --- Comptes ---
-        Account courant = account("Compte courant", AccountType.CHECKING, new BigDecimal("1500.00"));
-        Account epargne = account("Livret A", AccountType.SAVINGS, new BigDecimal("8000.00"));
-        Account carte = account("Carte de crédit", AccountType.CREDIT_CARD, BigDecimal.ZERO);
+        Compte courant = account("Compte courant", TypeCompte.CHECKING, new BigDecimal("1500.00"));
+        Compte epargne = account("Livret A", TypeCompte.SAVINGS, new BigDecimal("8000.00"));
+        Compte carte = account("Carte de crédit", TypeCompte.CREDIT_CARD, BigDecimal.ZERO);
 
         // --- Categories ---
-        Category alimentation = rootCategory("Alimentation", Category.CategoryType.EXPENSE);
-        Category supermarche = childCategory("Supermarché", alimentation);
-        Category restaurant = childCategory("Restaurant", alimentation);
+        Categorie alimentation = rootCategory("Alimentation", Categorie.TypeCategorie.EXPENSE);
+        Categorie supermarche = childCategory("Supermarché", alimentation);
+        Categorie restaurant = childCategory("Restaurant", alimentation);
 
-        Category logement = rootCategory("Logement", Category.CategoryType.EXPENSE);
-        Category loyer = childCategory("Loyer", logement);
-        Category energie = childCategory("Énergie", logement);
+        Categorie logement = rootCategory("Logement", Categorie.TypeCategorie.EXPENSE);
+        Categorie loyer = childCategory("Loyer", logement);
+        Categorie energie = childCategory("Énergie", logement);
 
-        Category loisirs = rootCategory("Loisirs", Category.CategoryType.EXPENSE);
-        Category abonnements = childCategory("Abonnements", loisirs);
+        Categorie loisirs = rootCategory("Loisirs", Categorie.TypeCategorie.EXPENSE);
+        Categorie abonnements = childCategory("Abonnements", loisirs);
 
-        Category transport = rootCategory("Transport", Category.CategoryType.EXPENSE);
+        Categorie transport = rootCategory("Transport", Categorie.TypeCategorie.EXPENSE);
 
-        Category salaire = rootCategory("Salaire", Category.CategoryType.INCOME);
+        Categorie salaire = rootCategory("Salaire", Categorie.TypeCategorie.INCOME);
 
         // --- Tiers (auto-catégorisation) ---
         payee("Carrefour", "Carrefour", null, supermarche);
@@ -87,44 +87,44 @@ public class TestDataSeeder implements CommandLineRunner {
 
             // Salaire, le dernier jour "raisonnable" du mois (le 28)
             transaction(courant, monthStart.withDayOfMonth(28), new BigDecimal("2400.00"),
-                    "Employeur", "Virement salaire", salaire, PaymentMode.TRANSFER, true, false);
+                    "Employeur", "Virement salaire", salaire, ModePaiement.TRANSFER, true, false);
 
             // Loyer, prelevement du 3
             Transaction loyerTx = transaction(courant, monthStart.plusDays(2), new BigDecimal("-850.00"),
-                    "Bailleur", "Loyer mensuel", loyer, PaymentMode.DIRECT_DEBIT, true, true);
+                    "Bailleur", "Loyer mensuel", loyer, ModePaiement.DIRECT_DEBIT, true, true);
 
             // Courses, plusieurs fois dans le mois
             transaction(courant, monthStart.plusDays(5), new BigDecimal("-64.30"),
-                    "Carrefour", "Courses de la semaine", supermarche, PaymentMode.CARD, true, false);
+                    "Carrefour", "Courses de la semaine", supermarche, ModePaiement.CARD, true, false);
             transaction(courant, monthStart.plusDays(14), new BigDecimal("-48.90"),
-                    "Carrefour", "Courses de la semaine", supermarche, PaymentMode.CARD, true, false);
+                    "Carrefour", "Courses de la semaine", supermarche, ModePaiement.CARD, true, false);
             transaction(courant, monthStart.plusDays(21), new BigDecimal("-52.10"),
-                    "Carrefour", "Courses de la semaine", supermarche, PaymentMode.CARD, true, false);
+                    "Carrefour", "Courses de la semaine", supermarche, ModePaiement.CARD, true, false);
 
             // Restaurant, occasionnel
             transaction(courant, monthStart.plusDays(9), new BigDecimal("-38.50"),
-                    "Le Bistrot", "Déjeuner", restaurant, PaymentMode.CARD, true, false);
+                    "Le Bistrot", "Déjeuner", restaurant, ModePaiement.CARD, true, false);
 
             // Netflix, abonnement mensuel recurrent
             transaction(carte, monthStart.plusDays(1), new BigDecimal("-15.00"),
-                    "Netflix", "Abonnement", abonnements, PaymentMode.DIRECT_DEBIT, true, true);
+                    "Netflix", "Abonnement", abonnements, ModePaiement.DIRECT_DEBIT, true, true);
 
             // Energie
             transaction(courant, monthStart.plusDays(10), new BigDecimal("-72.40"),
-                    "Fournisseur énergie", "Facture électricité/gaz", energie, PaymentMode.DIRECT_DEBIT, true, true);
+                    "Fournisseur énergie", "Facture électricité/gaz", energie, ModePaiement.DIRECT_DEBIT, true, true);
 
             // Transport
             transaction(courant, monthStart.plusDays(3), new BigDecimal("-45.00"),
-                    "Réseau transport", "Pass mensuel", transport, PaymentMode.CARD, true, false);
+                    "Réseau transport", "Pass mensuel", transport, ModePaiement.CARD, true, false);
 
             // Sur le mois en cours uniquement : quelques transactions "en attente"
             // (comme si elles venaient d'etre importees), pour illustrer le
             // rapprochement bancaire.
             if (isCurrentMonth) {
                 transaction(courant, today.minusDays(1), new BigDecimal("-19.90"),
-                        "Boulangerie du coin", null, alimentation, PaymentMode.CARD, false, false);
+                        "Boulangerie du coin", null, alimentation, ModePaiement.CARD, false, false);
                 transaction(courant, today, new BigDecimal("-9.50"),
-                        "Station essence", null, transport, PaymentMode.CARD, false, false);
+                        "Station essence", null, transport, ModePaiement.CARD, false, false);
             }
         }
 
@@ -134,7 +134,7 @@ public class TestDataSeeder implements CommandLineRunner {
         debit.setAccount(courant);
         debit.setDate(transferDate);
         debit.setAmount(new BigDecimal("-200.00"));
-        debit.setPaymentMode(PaymentMode.TRANSFER);
+        debit.setPaymentMode(ModePaiement.TRANSFER);
         debit.setValidated(true);
         Transaction savedDebit = transactionRepository.save(debit);
 
@@ -142,7 +142,7 @@ public class TestDataSeeder implements CommandLineRunner {
         credit.setAccount(epargne);
         credit.setDate(transferDate);
         credit.setAmount(new BigDecimal("200.00"));
-        credit.setPaymentMode(PaymentMode.TRANSFER);
+        credit.setPaymentMode(ModePaiement.TRANSFER);
         credit.setValidated(true);
         credit.setTransferTransaction(savedDebit);
         Transaction savedCredit = transactionRepository.save(credit);
@@ -150,7 +150,7 @@ public class TestDataSeeder implements CommandLineRunner {
         transactionRepository.save(savedDebit);
 
         // --- Un pret immobilier de demonstration ---
-        Loan loan = new Loan();
+        Pret loan = new Pret();
         loan.setName("Prêt immobilier - Résidence principale");
         loan.setPrincipal(new BigDecimal("220000.00"));
         loan.setAnnualRate(new BigDecimal("3.250"));
@@ -169,8 +169,8 @@ public class TestDataSeeder implements CommandLineRunner {
                 + loanRepository.count() + " prêt(s).");
     }
 
-    private Account account(String name, AccountType type, BigDecimal initialBalance) {
-        Account a = new Account();
+    private Compte account(String name, TypeCompte type, BigDecimal initialBalance) {
+        Compte a = new Compte();
         a.setName(name);
         a.setType(type);
         a.setInitialBalance(initialBalance);
@@ -178,23 +178,23 @@ public class TestDataSeeder implements CommandLineRunner {
         return accountRepository.save(a);
     }
 
-    private Category rootCategory(String name, Category.CategoryType type) {
-        Category c = new Category();
+    private Categorie rootCategory(String name, Categorie.TypeCategorie type) {
+        Categorie c = new Categorie();
         c.setName(name);
         c.setType(type);
         return categoryRepository.save(c);
     }
 
-    private Category childCategory(String name, Category parent) {
-        Category c = new Category();
+    private Categorie childCategory(String name, Categorie parent) {
+        Categorie c = new Categorie();
         c.setName(name);
         c.setType(parent.getType());
         c.setParent(parent);
         return categoryRepository.save(c);
     }
 
-    private void payee(String name, String pattern, BigDecimal amount, Category category) {
-        Payee p = new Payee();
+    private void payee(String name, String pattern, BigDecimal amount, Categorie category) {
+        Tiers p = new Tiers();
         p.setName(name);
         p.setPattern(pattern);
         p.setAmount(amount);
@@ -204,13 +204,13 @@ public class TestDataSeeder implements CommandLineRunner {
 
     /**
      * `payeeName` passe par la meme reconnaissance/creation automatique que
-     * l'import ou la saisie manuelle (voir PayeeService#resolveOrCreate),
+     * l'import ou la saisie manuelle (voir ServiceTiers#resolveOrCreate),
      * pour que les donnees de demo utilisent exactement le meme chemin que
      * du code reel : un nom deja enregistre via payee(...) rejoint le meme
      * tiers, un nom inconnu (ex : "Le Bistrot") en cree un a la volee.
      */
-    private Transaction transaction(Account account, LocalDate date, BigDecimal amount, String payeeName,
-                                     String memo, Category category, PaymentMode mode,
+    private Transaction transaction(Compte account, LocalDate date, BigDecimal amount, String payeeName,
+                                     String memo, Categorie category, ModePaiement mode,
                                      boolean validated, boolean periodicExpense) {
         Transaction t = new Transaction();
         t.setAccount(account);
