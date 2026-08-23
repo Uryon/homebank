@@ -653,15 +653,15 @@ onMounted(async () => {
   border-radius: var(--radius-lg);
 }
 .transactions-table {
-  min-width: 920px;
+  min-width: 1100px;
   width: 100%;
   table-layout: fixed;
 }
 .col-date { width: 145px; }
 .col-status { width: 60px; }
 .col-account { width: 130px; }
-.col-payee { width: auto; }
-.col-category { width: 190px; }
+.col-payee { width: 130px; }
+.col-category { width: auto; }
 .col-memo { width: 170px; }
 .col-amount { width: 120px; }
 .col-monthly { width: 90px; }

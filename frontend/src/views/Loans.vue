@@ -304,7 +304,18 @@ function renderChart() {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (ctx) => `${ctx.dataset.label} : ${formatAmount(ctx.parsed.y)}`
+            label: (ctx) => `${ctx.dataset.label} : ${formatAmount(ctx.parsed.y)}`,
+            // Meme stat que l'encart "vous appartiennent aujourd'hui" en
+            // haut du graphique, mais recalculee au point survole (et non
+            // figee sur le solde actuel) : capital = deja rembourse a cette
+            // echeance = principal - solde restant du a cette echeance.
+            afterBody: (items) => {
+              if (!items.length || !selectedLoan.value) return ''
+              const row = schedule.value[items[0].dataIndex]
+              if (!row) return ''
+              const owned = (selectedLoan.value.principal || 0) - row.remainingBalance
+              return `Vous appartient à cette échéance : ${formatAmount(owned)}`
+            }
           }
         }
       },

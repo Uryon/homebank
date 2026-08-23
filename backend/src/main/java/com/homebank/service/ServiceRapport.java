@@ -243,11 +243,16 @@ public class ServiceRapport {
      */
     public Map<String, Object> periodicExpensesSummary() {
         LocalDate today = LocalDate.now();
+        LocalDate threeMonthsAgo = today.minusMonths(3);
         List<Transaction> flagged = transactionRepository.findByPeriodicExpenseTrueOrderByDateDescIdDesc()
                 .stream()
                 // Une occurrence future n'a pas encore reellement eu lieu : on ne la
                 // retient pas comme "derniere" occurrence connue de la depense.
                 .filter(t -> !t.getDate().isAfter(today))
+                // Une depense periodique dont la derniere occurrence connue remonte a
+                // plus de 3 mois est probablement obsolete (abonnement resilie, etc.) :
+                // on ne l'affiche plus dans le tableau de bord.
+                .filter(t -> !t.getDate().isBefore(threeMonthsAgo))
                 .toList();
 
         List<Transaction> expenses = flagged.stream().filter(t -> t.getAmount().signum() < 0).toList();

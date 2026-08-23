@@ -468,7 +468,7 @@ let whereMoneyChart = null
  * evite de multiplier les composants pour une interaction qui n'est jamais
  * active qu'a un seul endroit a la fois.
  */
-const HOVER_DELAY_MS = 2000
+const HOVER_DELAY_MS = 1000
 const HIDE_GRACE_MS = 150
 const POPOVER_WIDTH = 320
 
