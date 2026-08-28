@@ -12,7 +12,12 @@
           title="Mois précédent"
           aria-label="Mois précédent"
         >‹</button>
-        <span class="month-nav-label">{{ monthLabel }}</span>
+        <button
+          class="month-nav-label month-nav-label-btn"
+          :disabled="isCurrentMonth"
+          @click="goToCurrentMonth"
+          title="Revenir au mois actuel"
+        >{{ monthLabel }}</button>
         <button
           class="month-nav-btn"
           :disabled="!canGoToNextMonth"
@@ -649,6 +654,16 @@ function goToNextMonth() {
   loadMonthlyReports()
 }
 
+/** Vrai quand le mois affiché est déjà le dernier mois calendaire terminé (clic sur le libellé alors sans effet). */
+const isCurrentMonth = computed(() => viewedMonthStart.value.getTime() === lastCompletedMonthStart.getTime())
+
+/** Clic sur le libellé du mois (entre les flèches) : revient directement au dernier mois calendaire terminé. */
+function goToCurrentMonth() {
+  if (isCurrentMonth.value) return
+  viewedMonthStart.value = lastCompletedMonthStart
+  loadMonthlyReports()
+}
+
 /** 12 mois pleins se terminant a monthStart inclus, utilise par "Où va mon argent ?" (aligne sur le meme mois que le reste du tableau de bord, plutot qu'une fenetre glissante figee sur aujourd'hui). */
 function last12MonthsRange(monthStart) {
   const from = new Date(monthStart.getFullYear(), monthStart.getMonth() - 11, 1)
@@ -1024,6 +1039,20 @@ onMounted(loadDashboard)
   font-weight: 700;
   font-size: 14px;
   color: var(--text-primary);
+}
+.month-nav-label-btn {
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  padding: 4px 0;
+}
+.month-nav-label-btn:hover:not(:disabled) {
+  background: var(--ink-800);
+}
+.month-nav-label-btn:disabled {
+  cursor: default;
 }
 
 .dashboard-grid {
