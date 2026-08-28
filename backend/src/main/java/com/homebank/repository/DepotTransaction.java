@@ -38,6 +38,16 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
 
     List<Transaction> findByPeriodicExpenseTrueOrderByDateDescIdDesc();
 
+    /**
+     * Transactions marquees "annualisee" (lissees sur 12 mois dans les
+     * rapports, voir Transaction#annualized / ServiceRapport#attributedTransactions).
+     * Chargees a part de findByDateBetween : une annualisee doit compter
+     * dans un rapport meme sur un mois different de sa date reelle de
+     * paiement, tant que ce mois appartient a la fenetre glissante de 12
+     * mois qui demarre a son propre mois de paiement.
+     */
+    List<Transaction> findByAnnualizedTrue();
+
     @Query("select coalesce(sum(t.amount), 0) from Transaction t where t.account.id = :accountId and t.date <= :asOf")
     BigDecimal sumAmountByAccountIdAsOf(@Param("accountId") Long accountId, @Param("asOf") LocalDate asOf);
 
@@ -78,30 +88,6 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
      * la detection de doublons.
      */
     Optional<Transaction> findByAccountIdAndExternalId(Long accountId, String externalId);
-
-    /**
-     * Agrégation mensuelle par catégorie pour les rapports financiers.
-     * Le regroupement est effectué en base afin d'éviter de charger toutes les
-     * transactions côté application pour construire le tableau des 12 derniers mois.
-     */
-    @Query(value = """
-            SELECT c.id, c.name, p.id, p.name, c.type,
-                   EXTRACT(YEAR FROM t.date)::integer,
-                   EXTRACT(MONTH FROM t.date)::integer,
-                   SUM(t.amount)
-            FROM transactions t
-            LEFT JOIN categories c ON t.category_id = c.id
-            LEFT JOIN categories p ON c.parent_id = p.id
-            WHERE t.date BETWEEN :from AND :to
-              AND t.payment_mode <> 'TRANSFER'
-              AND (:accountId IS NULL OR t.account_id = :accountId)
-            GROUP BY 1, 2, 3, 4, 5, 6, 7
-            ORDER BY 4, 2, 6, 7
-            """, nativeQuery = true)
-    List<Object[]> aggregateMonthlyByCategory(
-            @Param("from") LocalDate from,
-            @Param("to") LocalDate to,
-            @Param("accountId") Long accountId);
 
     /**
      * Vrai si l'ancienne colonne texte "transactions.payee" existe encore en

@@ -3,7 +3,8 @@
     :class="{
       'row-editing': isEditing,
       'row-pending': !isEditing && !transaction.validated,
-      'row-future': !isEditing && isFuture(transaction.date)
+      'row-future': !isEditing && isFuture(transaction.date),
+      'row-selected': !isEditing && selected
     }"
     @click="!isEditing && $emit('start-edit')"
     @keydown.esc="$emit('cancel-edit')"
@@ -11,6 +12,9 @@
   >
     <!-- Mode édition -->
     <template v-if="isEditing && editForm">
+      <td class="num" @click.stop>
+        <input type="checkbox" :checked="selected" title="Sélectionner cette transaction" @change="$emit('toggle-select', transaction)" />
+      </td>
       <td class="num" @click.stop>
         <input type="checkbox" v-model="editForm.validated" title="Transaction validée (rapprochement bancaire)" />
       </td>
@@ -42,6 +46,9 @@
       <td class="num" @click.stop>
         <input type="checkbox" v-model="editForm.periodicExpense" title="Dépense périodique récurrente" />
       </td>
+      <td class="num" @click.stop>
+        <input type="checkbox" v-model="editForm.annualized" title="Lisser sur les 12 mois suivant le paiement, dans les rapports (ex : taxe foncière)" />
+      </td>
       <td @click.stop class="row-actions">
         <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
         <button class="btn secondary" style="padding: 6px 10px;" @click="$emit('cancel-edit')">✕</button>
@@ -50,6 +57,9 @@
 
     <!-- Mode lecture -->
     <template v-else>
+      <td class="num" @click.stop>
+        <input type="checkbox" :checked="selected" title="Sélectionner cette transaction" @change="$emit('toggle-select', transaction)" />
+      </td>
       <td class="num" @click.stop>
         <span
           class="status-dot"
@@ -76,6 +86,14 @@
           :checked="transaction.periodicExpense"
           title="Dépense périodique récurrente"
           @change="$emit('toggle-periodic', transaction)"
+        />
+      </td>
+      <td class="num" @click.stop>
+        <input
+          type="checkbox"
+          :checked="transaction.annualized"
+          title="Lisser sur les 12 mois suivant le paiement, dans les rapports (ex : taxe foncière)"
+          @change="$emit('toggle-annualized', transaction)"
         />
       </td>
       <td class="row-actions" @click.stop>
@@ -123,7 +141,8 @@ const props = defineProps({
   // Map (nom de tiers normalise -> tiers), pour la categorisation
   // automatique par tiers pendant l'edition.
   payeeIndex: { type: Map, required: true },
-  todayIso: { type: String, required: true }
+  todayIso: { type: String, required: true },
+  selected: { type: Boolean, default: false }
 })
 
 const emit = defineEmits([
@@ -132,6 +151,8 @@ const emit = defineEmits([
   'confirm-edit',
   'toggle-validated',
   'toggle-periodic',
+  'toggle-annualized',
+  'toggle-select',
   'remove'
 ])
 
@@ -150,6 +171,7 @@ function buildEditForm(t) {
     tags: t.tags || '',
     transferTransactionId: t.transferTransactionId ?? null,
     periodicExpense: !!t.periodicExpense,
+    annualized: !!t.annualized,
     validated: !!t.validated
   }
 }
@@ -223,6 +245,7 @@ function confirmEdit() {
     tags: editForm.value.tags,
     transferTransactionId: editForm.value.transferTransactionId,
     periodicExpense: editForm.value.periodicExpense,
+    annualized: editForm.value.annualized,
     validated: editForm.value.validated
   })
 }
@@ -239,6 +262,12 @@ tr.row-editing {
 }
 tr.row-pending {
   box-shadow: inset 3px 0 0 var(--amber);
+}
+tr.row-selected td {
+  background: var(--azure-dim);
+}
+tr.row-selected:hover td {
+  background: var(--azure-dim);
 }
 tr.row-editing td {
   overflow: visible;

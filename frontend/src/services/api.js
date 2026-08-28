@@ -17,7 +17,8 @@ export const CategoriesAPI = {
     create: (payload) => api.post('/categories', payload).then(r => r.data),
     update: (id, payload) => api.put(`/categories/${id}`, payload).then(r => r.data),
     remove: (id) => api.delete(`/categories/${id}`),
-    merge: (sourceIds, targetId) => api.post('/categories/merge', { sourceIds, targetId }).then(r => r.data)
+    merge: (sourceIds, targetId) => api.post('/categories/merge', { sourceIds, targetId }).then(r => r.data),
+    toggleHidden: (id) => api.post(`/categories/${id}/toggle-hidden`).then(r => r.data)
 }
 
 export const TransactionsAPI = {
@@ -28,6 +29,8 @@ export const TransactionsAPI = {
     validateAll: () => api.post('/transactions/validate-all').then(r => r.data),
     toggleValidated: (id) => api.post(`/transactions/${id}/toggle-validated`).then(r => r.data),
     togglePeriodicExpense: (id) => api.post(`/transactions/${id}/toggle-periodic-expense`).then(r => r.data),
+    toggleAnnualized: (id) => api.post(`/transactions/${id}/toggle-annualized`).then(r => r.data),
+    bulkUpdate: (payload) => api.put('/transactions/bulk', payload).then(r => r.data),
     periodicSuggestions: () => api.get('/transactions/periodic-suggestions').then(r => r.data),
     duplicates: () => api.get('/transactions/duplicates').then(r => r.data),
     transfer: (payload) => api.post('/transactions/transfer', payload).then(r => r.data)

@@ -61,13 +61,15 @@
                 </div>
               </template>
               <template v-else>
-                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;" :class="{ 'cat-hidden': root.hidden }">
                   <input type="checkbox" :value="root.id" v-model="selectedIds" @click.stop />
                   <strong>{{ root.name }}</strong>
                   <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
+                  <span v-if="root.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
                 </div>
                 <div @click.stop>
                   <button class="btn secondary" style="margin-right:6px;" @click="openCreate(root)">+ Sous-catégorie</button>
+                  <button class="btn secondary" style="margin-right:6px;" @click="toggleHidden(root)">{{ root.hidden ? 'Réafficher' : 'Masquer' }}</button>
                   <button class="btn danger" @click="remove(root)">Supprimer</button>
                 </div>
               </template>
@@ -98,11 +100,13 @@
                 </div>
               </template>
               <template v-else>
-                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);">
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);" :class="{ 'cat-hidden': child.hidden }">
                   <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
                   <span>{{ child.name }}</span>
+                  <span v-if="child.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
                 </div>
                 <div @click.stop>
+                  <button class="btn secondary" style="margin-right:6px;" @click="toggleHidden(child)">{{ child.hidden ? 'Réafficher' : 'Masquer' }}</button>
                   <button class="btn danger" @click="remove(child)">Supprimer</button>
                 </div>
               </template>
@@ -148,13 +152,15 @@
                 </div>
               </template>
               <template v-else>
-                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;" :class="{ 'cat-hidden': root.hidden }">
                   <input type="checkbox" :value="root.id" v-model="selectedIds" @click.stop />
                   <strong>{{ root.name }}</strong>
                   <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
+                  <span v-if="root.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
                 </div>
                 <div @click.stop>
                   <button class="btn secondary" style="margin-right:6px;" @click="openCreate(root)">+ Sous-catégorie</button>
+                  <button class="btn secondary" style="margin-right:6px;" @click="toggleHidden(root)">{{ root.hidden ? 'Réafficher' : 'Masquer' }}</button>
                   <button class="btn danger" @click="remove(root)">Supprimer</button>
                 </div>
               </template>
@@ -185,11 +191,13 @@
                 </div>
               </template>
               <template v-else>
-                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);">
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);" :class="{ 'cat-hidden': child.hidden }">
                   <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
                   <span>{{ child.name }}</span>
+                  <span v-if="child.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
                 </div>
                 <div @click.stop>
+                  <button class="btn secondary" style="margin-right:6px;" @click="toggleHidden(child)">{{ child.hidden ? 'Réafficher' : 'Masquer' }}</button>
                   <button class="btn danger" @click="remove(child)">Supprimer</button>
                 </div>
               </template>
@@ -422,6 +430,16 @@ async function remove(category) {
   await load()
 }
 
+/**
+ * Masque/réaffiche une catégorie qui n'est plus utilisée : elle disparaît
+ * des suggestions d'autocomplete (transactions, tiers) mais reste visible
+ * ici et sur les transactions/tiers qui l'utilisent déjà.
+ */
+async function toggleHidden(category) {
+  await CategoriesAPI.toggleHidden(category.id)
+  await load()
+}
+
 /* --- Édition inline --- */
 
 function startEdit(category) {
@@ -551,5 +569,8 @@ onMounted(load)
 }
 .text-muted {
   color: var(--text-muted);
+}
+.cat-hidden {
+  opacity: 0.55;
 }
 </style>

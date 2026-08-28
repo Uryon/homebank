@@ -39,6 +39,10 @@ public class Categorie {
     @Column(nullable = false)
     private TypeCategorie type = TypeCategorie.EXPENSE;
 
+    /** Categorie masquee (plus utilisee) : exclue des autocompletes, mais conservee pour l'historique */
+    @Column(nullable = false, columnDefinition = "boolean not null default false")
+    private boolean hidden = false;
+
     public enum TypeCategorie {
         INCOME, EXPENSE, BOTH
     }

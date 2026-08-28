@@ -83,6 +83,13 @@ public class ServiceCategorie {
         categoryRepository.deleteById(id);
     }
 
+    /** Bascule le statut masque/visible d'une categorie (ne touche a rien d'autre) */
+    public Categorie toggleHidden(Long id) {
+        Categorie existing = findById(id);
+        existing.setHidden(!existing.isHidden());
+        return categoryRepository.save(existing);
+    }
+
     /**
      * Fusionne plusieurs categories (sourceIds) dans une categorie cible (targetId) :
      * - toutes les transactions des categories source sont reaffectees a la cible ;

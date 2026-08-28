@@ -49,6 +49,11 @@ public class ControleurCategorie {
         return ResponseEntity.noContent().build();
     }
 
+    @PostMapping("/{id}/toggle-hidden")
+    public CategorieDTO toggleHidden(@PathVariable Long id) {
+        return categoryMapper.toDTO(categoryService.toggleHidden(id));
+    }
+
     /**
      * Fusionne plusieurs categories dans une categorie cible : toutes les
      * transactions et sous-categories des categories source sont reaffectees

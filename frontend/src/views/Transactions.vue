@@ -69,9 +69,16 @@
       </div>
     </div>
 
+    <div v-if="selectedIds.size" class="bulk-bar">
+      <span>{{ selectedIds.size }} transaction(s) sélectionnée(s)</span>
+      <button class="btn" @click="openBulkEdit">Modifier en masse</button>
+      <button class="btn secondary" @click="clearSelection">Désélectionner tout</button>
+    </div>
+
     <div class="table-scroll" v-if="filteredTransactions.length">
       <table class="transactions-table">
         <colgroup>
+          <col class="col-select" />
           <col class="col-status" />
           <col class="col-date" />
           <col class="col-account" />
@@ -81,10 +88,19 @@
           <col class="col-amount" />
           <col class="col-amount" />
           <col class="col-monthly" />
+          <col class="col-monthly" />
           <col class="col-actions" />
         </colgroup>
         <thead>
           <tr>
+            <th class="num">
+              <input
+                type="checkbox"
+                :checked="allPagedSelected"
+                title="Sélectionner/désélectionner toute la page"
+                @change="toggleSelectAllPaged"
+              />
+            </th>
             <th title="Statut de validation (rapprochement bancaire)">Statut</th>
             <th>Date</th>
             <th>Compte</th>
@@ -94,6 +110,7 @@
             <th class="num">Dépense</th>
             <th class="num">Revenu</th>
             <th class="num" title="Dépense périodique récurrente">Périodique</th>
+            <th class="num" title="Lisser sur les 12 mois suivant le paiement, dans les rapports (ex : taxe foncière)">Annualisée</th>
             <th></th>
           </tr>
         </thead>
@@ -111,11 +128,14 @@
             :categories-by-id="categoriesById"
             :payee-index="payeeByNormalizedName"
             :today-iso="todayIso"
+            :selected="selectedIds.has(t.id)"
             @start-edit="startEdit(t)"
             @cancel-edit="cancelEdit"
             @confirm-edit="confirmEdit"
             @toggle-validated="toggleValidated"
             @toggle-periodic="togglePeriodic"
+            @toggle-annualized="toggleAnnualized"
+            @toggle-select="toggleSelect"
             @remove="remove"
           />
         </tbody>
@@ -207,11 +227,102 @@
             <input type="checkbox" v-model="form.periodicExpense" id="new-periodic-expense" style="width: auto;" />
             <label for="new-periodic-expense" style="margin: 0;">Dépense périodique récurrente (loyer, abonnement...)</label>
           </div>
+
+          <div class="form-field" style="grid-column: span 2; flex-direction: row; align-items: center; gap: 8px;">
+            <input type="checkbox" v-model="form.annualized" id="new-annualized" style="width: auto;" />
+            <label for="new-annualized" style="margin: 0;">Lisser sur les 12 mois suivant le paiement, dans les rapports (ex : taxe foncière)</label>
+          </div>
         </div>
 
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
           <button class="btn secondary" @click="showModal = false">Annuler</button>
           <button class="btn" @click="save">Enregistrer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal : édition en masse des transactions sélectionnées -->
+    <div v-if="showBulkEditModal" class="modal-overlay" @click.self="showBulkEditModal = false">
+      <div class="modal">
+        <h2>Modifier {{ selectedIds.size }} transaction(s)</h2>
+        <div class="text-hint" style="margin-bottom: 16px;">
+          Cochez uniquement les champs à modifier : les autres resteront inchangés sur chaque transaction.
+        </div>
+
+        <div class="bulk-field">
+          <label class="bulk-field-toggle">
+            <input type="checkbox" v-model="bulkForm.categoryEnabled" />
+            Catégorie
+          </label>
+          <CategoryAutocomplete
+            v-model="bulkForm.categoryId"
+            :categories="flatCategories"
+            placeholder="Aucune"
+          />
+        </div>
+
+        <div class="bulk-field">
+          <label class="bulk-field-toggle">
+            <input type="checkbox" v-model="bulkForm.payeeEnabled" />
+            Tiers
+          </label>
+          <PayeeAutocomplete v-model="bulkForm.payee" :payees="payees" placeholder="Ex : Supermarché" />
+        </div>
+
+        <div class="bulk-field">
+          <label class="bulk-field-toggle">
+            <input type="checkbox" v-model="bulkForm.paymentModeEnabled" />
+            Mode de paiement
+          </label>
+          <select v-model="bulkForm.paymentMode">
+            <option value="NONE">Aucun</option>
+            <option value="CASH">Espèces</option>
+            <option value="CHEQUE">Chèque</option>
+            <option value="TRANSFER">Virement</option>
+            <option value="CARD">Carte</option>
+            <option value="DIRECT_DEBIT">Prélèvement</option>
+            <option value="STANDING_ORDER">Virement permanent</option>
+          </select>
+        </div>
+
+        <div class="bulk-field">
+          <label class="bulk-field-toggle">
+            <input type="checkbox" v-model="bulkForm.periodicExpenseEnabled" />
+            Dépense périodique
+          </label>
+          <select v-model="bulkForm.periodicExpense">
+            <option :value="true">Oui</option>
+            <option :value="false">Non</option>
+          </select>
+        </div>
+
+        <div class="bulk-field">
+          <label class="bulk-field-toggle">
+            <input type="checkbox" v-model="bulkForm.annualizedEnabled" />
+            Annualisée
+          </label>
+          <select v-model="bulkForm.annualized">
+            <option :value="true">Oui</option>
+            <option :value="false">Non</option>
+          </select>
+        </div>
+
+        <div class="bulk-field">
+          <label class="bulk-field-toggle">
+            <input type="checkbox" v-model="bulkForm.validatedEnabled" />
+            Statut
+          </label>
+          <select v-model="bulkForm.validated">
+            <option :value="true">Validée</option>
+            <option :value="false">En attente</option>
+          </select>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+          <button class="btn secondary" @click="showBulkEditModal = false">Annuler</button>
+          <button class="btn" :disabled="!bulkHasAnyFieldEnabled || bulkSaving" @click="saveBulkEdit">
+            {{ bulkSaving ? 'Application…' : 'Appliquer' }}
+          </button>
         </div>
       </div>
     </div>
@@ -291,6 +402,114 @@ const form = ref(emptyForm())
 // en tete de TransactionRow.vue pour le detail de l'optimisation.
 const editingId = ref(null)
 
+/**
+ * Sélection multiple (checkboxes) pour l'édition en masse ci-dessous. Un
+ * `Set` reactif (plutot qu'un tableau) : `selectedIds.has(id)` passe en O(1)
+ * par transaction affichee, sans scan lineaire a chaque rendu, meme sur un
+ * grand historique. Persiste volontairement a travers les changements de
+ * page/filtre (l'utilisateur peut ainsi selectionner sur plusieurs pages) ;
+ * seul un clic explicite sur "Désélectionner tout" ou une édition en masse
+ * reussie la vide.
+ */
+const selectedIds = ref(new Set())
+
+function toggleSelect(transaction) {
+  if (selectedIds.value.has(transaction.id)) selectedIds.value.delete(transaction.id)
+  else selectedIds.value.add(transaction.id)
+}
+
+function clearSelection() {
+  selectedIds.value.clear()
+}
+
+const allPagedSelected = computed(() =>
+  pagedTransactions.value.length > 0 && pagedTransactions.value.every(t => selectedIds.value.has(t.id))
+)
+
+function toggleSelectAllPaged() {
+  if (allPagedSelected.value) {
+    for (const t of pagedTransactions.value) selectedIds.value.delete(t.id)
+  } else {
+    for (const t of pagedTransactions.value) selectedIds.value.add(t.id)
+  }
+}
+
+/** État du formulaire d'édition en masse : voir modal correspondant. */
+function emptyBulkForm() {
+  return {
+    categoryEnabled: false,
+    categoryId: null,
+    payeeEnabled: false,
+    payee: '',
+    paymentModeEnabled: false,
+    paymentMode: 'NONE',
+    periodicExpenseEnabled: false,
+    periodicExpense: false,
+    annualizedEnabled: false,
+    annualized: false,
+    validatedEnabled: false,
+    validated: true
+  }
+}
+
+const showBulkEditModal = ref(false)
+const bulkForm = ref(emptyBulkForm())
+const bulkSaving = ref(false)
+
+const bulkHasAnyFieldEnabled = computed(() =>
+  bulkForm.value.categoryEnabled ||
+  bulkForm.value.payeeEnabled ||
+  bulkForm.value.paymentModeEnabled ||
+  bulkForm.value.periodicExpenseEnabled ||
+  bulkForm.value.annualizedEnabled ||
+  bulkForm.value.validatedEnabled
+)
+
+function openBulkEdit() {
+  bulkForm.value = emptyBulkForm()
+  showBulkEditModal.value = true
+}
+
+async function saveBulkEdit() {
+  if (!bulkHasAnyFieldEnabled.value || !selectedIds.value.size) return
+
+  const payload = { ids: Array.from(selectedIds.value) }
+  if (bulkForm.value.categoryEnabled) {
+    payload.categoryIdProvided = true
+    payload.categoryId = bulkForm.value.categoryId
+  }
+  if (bulkForm.value.payeeEnabled) {
+    payload.payeeProvided = true
+    payload.payee = bulkForm.value.payee
+  }
+  if (bulkForm.value.paymentModeEnabled) {
+    payload.paymentModeProvided = true
+    payload.paymentMode = bulkForm.value.paymentMode
+  }
+  if (bulkForm.value.periodicExpenseEnabled) {
+    payload.periodicExpenseProvided = true
+    payload.periodicExpense = bulkForm.value.periodicExpense
+  }
+  if (bulkForm.value.annualizedEnabled) {
+    payload.annualizedProvided = true
+    payload.annualized = bulkForm.value.annualized
+  }
+  if (bulkForm.value.validatedEnabled) {
+    payload.validatedProvided = true
+    payload.validated = bulkForm.value.validated
+  }
+
+  bulkSaving.value = true
+  try {
+    await TransactionsAPI.bulkUpdate(payload)
+    showBulkEditModal.value = false
+    clearSelection()
+    await load()
+  } finally {
+    bulkSaving.value = false
+  }
+}
+
 function emptyForm() {
   return {
     accountId: null,
@@ -303,6 +522,7 @@ function emptyForm() {
     tags: '',
     transferTransactionId: null,
     periodicExpense: false,
+    annualized: false,
     validated: true
   }
 }
@@ -550,6 +770,7 @@ async function save() {
     tags: form.value.tags,
     transferTransactionId: form.value.transferTransactionId,
     periodicExpense: form.value.periodicExpense,
+    annualized: form.value.annualized,
     validated: form.value.validated
   }
 
@@ -586,6 +807,12 @@ async function remove(transaction) {
 /** Bascule directement le statut "dépense périodique" sans passer par l'édition complète. */
 async function togglePeriodic(transaction) {
   await TransactionsAPI.togglePeriodicExpense(transaction.id)
+  await load()
+}
+
+/** Bascule directement le statut "annualisée" sans passer par l'édition complète. */
+async function toggleAnnualized(transaction) {
+  await TransactionsAPI.toggleAnnualized(transaction.id)
   await load()
 }
 
@@ -653,19 +880,20 @@ onMounted(async () => {
   border-radius: var(--radius-lg);
 }
 .transactions-table {
-  min-width: 1100px;
+  min-width: 1200px;
   width: 100%;
   table-layout: fixed;
 }
-.col-date { width: 145px; }
-.col-status { width: 60px; }
-.col-account { width: 130px; }
-.col-payee { width: 130px; }
+.col-select { width: 36px; }
+.col-date { width: 120px; }
+.col-status { width: 50px; }
+.col-account { width: 100px; }
+.col-payee { width: 280px; }
 .col-category { width: auto; }
-.col-memo { width: 170px; }
-.col-amount { width: 120px; }
-.col-monthly { width: 90px; }
-.col-actions { width: 110px; }
+.col-memo { width: 140px; }
+.col-amount { width: 110px; }
+.col-monthly { width: 70px; }
+.col-actions { width: 90px; }
 
 .transactions-table th {
   white-space: nowrap;
@@ -702,6 +930,40 @@ onMounted(async () => {
   color: var(--text-faint);
   margin-top: 4px;
   line-height: 1.4;
+}
+
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  background: var(--azure-dim);
+  border: 1px solid var(--azure);
+  border-radius: var(--radius-md);
+}
+
+.bulk-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.bulk-field > *:last-child {
+  flex: 1;
+  min-width: 0;
+}
+.bulk-field-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 170px;
+  font-size: 14px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.bulk-field-toggle input {
+  width: auto;
 }
 
 .pagination {

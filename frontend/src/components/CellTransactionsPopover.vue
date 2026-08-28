@@ -7,7 +7,7 @@
     <template v-else>
       <div v-if="!rows.length" class="cell-popover-empty">Aucune transaction.</div>
       <ul v-else class="cell-popover-rows">
-        <li v-for="row in rows" :key="row.id" class="cell-popover-row">
+        <li v-for="row in rows" :key="row.id + '-' + row.date" class="cell-popover-row">
           <span class="cell-popover-date">{{ formatDate(row.date) }}</span>
           <span class="cell-popover-payee">{{ row.payee || 'Sans nom' }}</span>
           <span class="cell-popover-amount" :class="row.amount >= 0 ? 'positive' : 'negative'">

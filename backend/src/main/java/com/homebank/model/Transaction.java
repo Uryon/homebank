@@ -88,6 +88,18 @@ public class Transaction {
     private boolean periodicExpense = false;
 
     /**
+     * Coche pour une depense/revenu ponctuel dont le montant doit etre lisse
+     * sur les 12 mois qui suivent (et incluent) son propre mois de paiement,
+     * plutot que compte en une fois sur ce seul mois (ex : taxe fonciere
+     * payee en octobre 2025, lissee d'octobre 2025 a septembre 2026 inclus).
+     * Pris en compte uniquement dans les rapports (tableau de bord) ;
+     * n'affecte jamais le solde reel des comptes, qui
+     * reste base sur la date et le montant reels (voir ServiceRapport).
+     */
+    @Column(nullable = false, columnDefinition = "boolean not null default false")
+    private boolean annualized = false;
+
+    /**
      * Identifiant unique fourni par la banque ou le fichier importe (si
      * disponible), utilise en priorite pour la detection de doublons lors
      * des imports CSV/QIF ou d'une future synchronisation bancaire.

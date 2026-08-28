@@ -15,6 +15,7 @@ public class MappeurCategorie {
                         ? category.getParent().getId()
                         : null)
                 .type(category.getType())
+                .hidden(category.isHidden())
                 .build();
     }
 }

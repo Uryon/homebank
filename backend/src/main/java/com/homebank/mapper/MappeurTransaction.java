@@ -29,6 +29,7 @@ public class MappeurTransaction {
                         : null)
                 .validated(transaction.isValidated())
                 .periodicExpense(transaction.isPeriodicExpense())
+                .annualized(transaction.isAnnualized())
                 .externalId(transaction.getExternalId())
                 .build();
     }

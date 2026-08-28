@@ -14,4 +14,5 @@ public class CategorieDTO {
     private String name;
     private Long parentId;
     private TypeCategorie type;
+    private boolean hidden;
 }

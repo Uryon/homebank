@@ -2,6 +2,7 @@ package com.homebank.controller;
 
 import com.homebank.dto.GroupeDoublonDTO;
 import com.homebank.dto.SuggestionPeriodiqueDTO;
+import com.homebank.dto.TransactionBulkUpdateDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.dto.DemandeVirementDTO;
 import com.homebank.service.ServiceTransaction;
@@ -61,6 +62,11 @@ public class ControleurTransaction {
         return transactionService.togglePeriodicExpense(id);
     }
 
+    @PostMapping("/{id}/toggle-annualized")
+    public TransactionDTO toggleAnnualized(@PathVariable Long id) {
+        return transactionService.toggleAnnualized(id);
+    }
+
     /**
      * Suggestions de transactions qui semblent periodiques (meme tiers,
      * montant proche, plusieurs occurrences), pas encore marquees comme
@@ -96,6 +102,16 @@ public class ControleurTransaction {
     @PutMapping("/{id}")
     public TransactionDTO update(@PathVariable Long id, @RequestBody TransactionDTO transaction) {
         return transactionService.update(id, transaction);
+    }
+
+    /**
+     * Modifie en une fois un ou plusieurs champs sur toutes les transactions
+     * dont l'id figure dans le payload (selection multiple de l'onglet
+     * Transactions).
+     */
+    @PutMapping("/bulk")
+    public List<TransactionDTO> bulkUpdate(@RequestBody TransactionBulkUpdateDTO payload) {
+        return transactionService.bulkUpdate(payload);
     }
 
     @DeleteMapping("/{id}")

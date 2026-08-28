@@ -111,7 +111,10 @@ const normalizedCategories = computed(() =>
 
 const groupedOptions = computed(() => {
   const q = normalizeSearch(query.value)
-  const matches = (c) => !q || c.normalizedLabel.includes(q)
+  // Une categorie masquee (Categories.vue > "Masquer") n'est plus proposee
+  // comme suggestion, mais reste dans props.categories pour que labelFor()
+  // affiche correctement une categorie deja affectee avant masquage.
+  const matches = (c) => !c.hidden && (!q || c.normalizedLabel.includes(q))
 
   const groups = []
   if (props.transactionType !== 'INCOME') {
@@ -215,7 +218,7 @@ function reconcileTypedText() {
     if (props.modelValue !== null) emit('update:modelValue', null)
     return
   }
-  const exact = props.categories.find(c => c.selectable && c.label.toLowerCase() === trimmed)
+  const exact = props.categories.find(c => c.selectable && !c.hidden && c.label.toLowerCase() === trimmed)
   if (exact) {
     if (exact.id !== props.modelValue) emit('update:modelValue', exact.id)
     query.value = exact.label

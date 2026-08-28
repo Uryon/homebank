@@ -5,6 +5,22 @@
         <h1>Tableau de bord</h1>
         <div class="subtitle">Vue d'ensemble de vos finances</div>
       </div>
+      <div class="month-nav">
+        <button
+          class="month-nav-btn"
+          @click="goToPreviousMonth"
+          title="Mois précédent"
+          aria-label="Mois précédent"
+        >‹</button>
+        <span class="month-nav-label">{{ monthLabel }}</span>
+        <button
+          class="month-nav-btn"
+          :disabled="!canGoToNextMonth"
+          @click="goToNextMonth"
+          title="Mois suivant"
+          aria-label="Mois suivant"
+        >›</button>
+      </div>
     </div>
 
     <div class="card-grid">
@@ -39,6 +55,10 @@
       <canvas ref="forecastChart" height="90"></canvas>
       <p class="chart-note">
         Le prévisionnel est estimé à partir de la variation moyenne du solde observée sur les 12 derniers mois.
+        <template v-if="hasLoans">
+          La courbe inclut aussi le capital déjà remboursé sur l'ensemble de vos prêts (connu à l'avance,
+          indépendant de la projection de solde).
+        </template>
       </p>
     </div>
 
@@ -435,7 +455,7 @@
 
 <script setup>
 import { ref, onMounted, computed, nextTick } from 'vue'
-import { AccountsAPI, ReportsAPI } from '../services/api'
+import { AccountsAPI, ReportsAPI, LoansAPI } from '../services/api'
 import { formatAmount } from '../services/format'
 import CellTransactionsPopover from '../components/CellTransactionsPopover.vue'
 import Chart from 'chart.js/auto'
@@ -450,6 +470,7 @@ const forecastChart = ref(null)
 const savingsChart = ref(null)
 let forecastChartInstance = null
 let savingsChartInstance = null
+const hasLoans = ref(false)
 
 // --- "Où va mon argent ?" + tableaux d'analyse mensuelle (ex-page Rapports,
 // desormais integres au tableau de bord). Portee sur l'ensemble des comptes,
@@ -582,30 +603,56 @@ function formatAmountCompact(v) {
 
 /**
  * Dernier mois calendaire déjà terminé (le mois en cours n'est pas fini,
- * les revenus/dépenses n'y sont donc pas encore complets).
+ * les revenus/dépenses n'y sont donc pas encore complets) : point de départ
+ * de la navigation mensuelle ci-dessous. Calculé une seule fois : la date
+ * du jour ne change pas en cours de session.
  */
-function lastCompletedMonthRange() {
+const lastCompletedMonthStart = (() => {
   const now = new Date()
-  const from = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const to = new Date(now.getFullYear(), now.getMonth(), 0)
+  return new Date(now.getFullYear(), now.getMonth() - 1, 1)
+})()
+
+/**
+ * Borne haute de la navigation : on peut avancer dans le futur (les cartes
+ * revenus/dépenses/tableaux affichent alors simplement "pas de données"),
+ * jusqu'à l'horizon du graphique prévisionnel (12 mois). Au-delà, le solde
+ * projeté ne fait que prolonger la même tendance, sans information nouvelle.
+ */
+const maxFutureMonthStart = new Date(lastCompletedMonthStart.getFullYear(), lastCompletedMonthStart.getMonth() + 12, 1)
+
+/** Mois actuellement affiché par les cartes "Revenus/Dépenses/Net (mois)", navigable via les flèches du tableau de bord. */
+const viewedMonthStart = ref(lastCompletedMonthStart)
+
+const canGoToNextMonth = computed(() => viewedMonthStart.value < maxFutureMonthStart)
+
+function monthRangeOf(monthStart) {
+  const to = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0)
   return {
-    from: from.toISOString().slice(0, 10),
+    from: monthStart.toISOString().slice(0, 10),
     to: to.toISOString().slice(0, 10)
   }
 }
 
-function lastCompletedMonthLabel() {
-  const now = new Date()
-  const d = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const label = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+function monthLabelOf(monthStart) {
+  const label = monthStart.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
 
-/** Plage fixe des 12 derniers mois glissants, utilisee par "Où va mon argent ?". */
-function last12MonthsIso() {
-  const to = new Date()
-  const from = new Date()
-  from.setMonth(from.getMonth() - 12)
+function goToPreviousMonth() {
+  viewedMonthStart.value = new Date(viewedMonthStart.value.getFullYear(), viewedMonthStart.value.getMonth() - 1, 1)
+  loadMonthlyReports()
+}
+
+function goToNextMonth() {
+  if (!canGoToNextMonth.value) return
+  viewedMonthStart.value = new Date(viewedMonthStart.value.getFullYear(), viewedMonthStart.value.getMonth() + 1, 1)
+  loadMonthlyReports()
+}
+
+/** 12 mois pleins se terminant a monthStart inclus, utilise par "Où va mon argent ?" (aligne sur le meme mois que le reste du tableau de bord, plutot qu'une fenetre glissante figee sur aujourd'hui). */
+function last12MonthsRange(monthStart) {
+  const from = new Date(monthStart.getFullYear(), monthStart.getMonth() - 11, 1)
+  const to = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0)
   return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
 }
 
@@ -689,74 +736,129 @@ async function loadDashboard() {
   accounts.value = await AccountsAPI.list()
   balances.value = await AccountsAPI.balances()
 
-  monthLabel.value = lastCompletedMonthLabel()
-  const { from, to } = lastCompletedMonthRange()
-  summary.value = await ReportsAPI.summary({ from, to })
-
+  // "Dépenses périodiques" ne depend pas du mois navigue (voir plus haut :
+  // toujours la derniere occurrence connue, dans l'esprit "abonnement actif
+  // ou non aujourd'hui"), donc charge une seule fois ici plutot que dans
+  // loadMonthlyReports.
   periodicExpenses.value = await ReportsAPI.periodicExpenses()
 
-  whereMoneyRange.value = last12MonthsIso()
-  const [forecast, savings, whereMoney, monthly] = await Promise.all([
-    ReportsAPI.balanceForecast({}),
-    ReportsAPI.monthlySavings({ months: 12 }),
+  await loadMonthlyReports()
+}
+
+/**
+ * Recharge tout ce qui depend du mois navigue (viewedMonthStart, voir les
+ * fleches du tableau de bord) : les 3 cartes du haut, le graphique de solde,
+ * l'epargne mensuelle, "Où va mon argent ?" et les deux tableaux d'analyse
+ * mensuelle par categorie. Appelee au montage puis a chaque navigation
+ * (goToPreviousMonth/goToNextMonth), pour que tout le tableau de bord se
+ * decale ensemble sur le meme mois.
+ */
+async function loadMonthlyReports() {
+  monthLabel.value = monthLabelOf(viewedMonthStart.value)
+  const { from, to } = monthRangeOf(viewedMonthStart.value)
+  // "YYYY-MM-01" : meme mois que les cartes du haut, transmis aux rapports
+  // en fenetre glissante de 12 mois pour qu'ils se terminent sur ce mois.
+  const referenceMonth = `${viewedMonthStart.value.getFullYear()}-${String(viewedMonthStart.value.getMonth() + 1).padStart(2, '0')}-01`
+
+  whereMoneyRange.value = last12MonthsRange(viewedMonthStart.value)
+  const loansPromise = LoansAPI.list().then(async (loansList) => {
+    const schedules = await Promise.all(loansList.map(l => LoansAPI.schedule(l.id)))
+    return { loansList, schedules }
+  })
+  const [monthSummary, forecast, savings, whereMoney, monthly, { loansList, schedules }] = await Promise.all([
+    ReportsAPI.summary({ from, to }),
+    ReportsAPI.balanceForecast({ referenceMonth }),
+    ReportsAPI.monthlySavings({ months: 12, referenceMonth }),
     ReportsAPI.expensesByCategory(whereMoneyRange.value),
-    ReportsAPI.monthlyCategoryAnalysis({})
+    ReportsAPI.monthlyCategoryAnalysis({ referenceMonth }),
+    loansPromise
   ])
+  summary.value = monthSummary
   whereMoneyData.value = whereMoney
   monthlyAnalysis.value = monthly
+  hasLoans.value = loansList.length > 0
 
   await nextTick()
-  renderForecastChart(forecast)
+  renderForecastChart(forecast, buildLoanOwnedSeries(forecast, loansList, schedules))
   renderSavingsChart(savings)
   renderWhereMoneyChart(whereMoneyData.value)
 }
 
 /**
- * Affiche le solde sur 12 mois historiques (deja termines, ligne pleine
- * "Réel") + 12 mois prévisionnels a partir du mois en cours inclus (ligne
- * pointillee "Prévisionnel") : un mois n'est compte comme réel qu'a partir
- * du 1er du mois suivant, une fois entierement termine. Les deux lignes
- * partagent le dernier point historique (mois precedent) comme point de
- * jonction, pour eviter tout trou visuel entre les deux.
+ * Capital des prets deja rembourse (= vous appartient), mois par mois, aligne
+ * sur les points du graphique "Evolution du solde" (12 mois historiques +
+ * 12 mois previsionnels). Contrairement au solde, cette serie n'a rien
+ * d'incertain : l'echeancier d'un pret a taux fixe est connu a l'avance, donc
+ * pas de distinction historique/previsionnel necessaire ici, juste une somme
+ * sur tous les prets pour chaque mois. Retourne null si l'utilisateur n'a
+ * aucun pret, pour ne pas ajouter une ligne a plat inutile au graphique.
  */
-function renderForecastChart(points) {
-  const firstForecastIndex = points.findIndex(p => p.type === 'previsionnel')
-  const junctionIndex = firstForecastIndex - 1
+function buildLoanOwnedSeries(points, loansList, schedules) {
+  if (!loansList.length) return null
 
-  const actualData = points.map((p, i) => (i < firstForecastIndex ? p.balance : null))
-  const forecastData = points.map((p, i) => (i >= junctionIndex ? p.balance : null))
+  const perLoan = loansList.map((loan, i) => {
+    const rows = schedules[i]?.rows || []
+    const byMonth = new Map(rows.map(r => [r.date.slice(0, 7), Number(r.remainingBalance)]))
+    return {
+      principal: Number(loan.principal || 0),
+      byMonth,
+      firstMonth: rows.length ? rows[0].date.slice(0, 7) : null,
+      lastMonth: rows.length ? rows[rows.length - 1].date.slice(0, 7) : null
+    }
+  })
+
+  return points.map(p => {
+    const monthKey = p.date.slice(0, 7)
+    let owned = 0
+    for (const loan of perLoan) {
+      if (!loan.firstMonth || monthKey < loan.firstMonth) continue // pret pas encore commence
+      if (monthKey > loan.lastMonth) { owned += loan.principal; continue } // deja solde
+      owned += loan.principal - (loan.byMonth.get(monthKey) ?? 0)
+    }
+    return owned
+  })
+}
+
+/**
+ * Affiche le solde sur 12 mois historiques (deja termines) + 12 mois
+ * prévisionnels a partir du mois en cours inclus, en une seule courbe (un
+ * seul dataset/entree de legende) mais en pointille a partir du mois en
+ * cours (voir "segment.borderDash") pour distinguer visuellement le
+ * prévisionnel. Si l'utilisateur a des prets, le capital deja rembourse
+ * (voir buildLoanOwnedSeries) est additionne au solde de chaque mois,
+ * sinon la courbe correspond simplement au solde.
+ */
+function renderForecastChart(points, loanOwnedSeries) {
+  const data = points.map((p, i) => Number(p.balance) + (loanOwnedSeries ? Number(loanOwnedSeries[i]) : 0))
+  const firstForecastIndex = points.findIndex(p => p.type === 'previsionnel')
+  // Si aucun point previsionnel n'est visible (fenetre entierement passee,
+  // navigation loin en arriere), pas de jonction : toute la courbe reste
+  // pleine plutot que de tomber sur un index negatif qui pointillerait tout.
+  const junctionIndex = firstForecastIndex === -1 ? points.length - 1 : firstForecastIndex - 1
+
+  const datasets = [
+    {
+      label: 'Solde',
+      data,
+      borderColor: '#5B4FCF',
+      backgroundColor: 'rgba(91, 79, 207, 0.10)',
+      fill: true,
+      tension: 0.25,
+      pointRadius: (ctx) => (ctx.dataIndex === junctionIndex ? 4 : 0),
+      pointBackgroundColor: '#5B4FCF',
+      borderWidth: 2,
+      segment: {
+        borderDash: (ctx) => (ctx.p1DataIndex > junctionIndex ? [6, 5] : undefined)
+      }
+    }
+  ]
 
   if (forecastChartInstance) forecastChartInstance.destroy()
   forecastChartInstance = new Chart(forecastChart.value, {
     type: 'line',
     data: {
       labels: points.map(p => p.label),
-      datasets: [
-        {
-          label: 'Réel',
-          data: actualData,
-          borderColor: '#1F9D6C',
-          backgroundColor: 'rgba(31, 157, 108, 0.10)',
-          fill: true,
-          tension: 0.25,
-          pointRadius: 0,
-          borderWidth: 2,
-          spanGaps: false
-        },
-        {
-          label: 'Prévisionnel',
-          data: forecastData,
-          borderColor: '#3B6FE0',
-          backgroundColor: 'rgba(59, 111, 224, 0.06)',
-          borderDash: [6, 5],
-          fill: true,
-          tension: 0.25,
-          pointRadius: (ctx) => (ctx.dataIndex === junctionIndex ? 4 : 0),
-          pointBackgroundColor: '#3B6FE0',
-          borderWidth: 2,
-          spanGaps: false
-        }
-      ]
+      datasets
     },
     options: {
       responsive: true,
@@ -765,7 +867,19 @@ function renderForecastChart(points) {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (ctx) => `${ctx.dataset.label} : ${formatAmount(ctx.parsed.y)}`
+            // Detail solde / capital prets / total meme si une seule courbe
+            // est affichee (voir "data" ci-dessus) : les deux composantes de
+            // la somme restent utiles au survol.
+            label: (ctx) => {
+              if (!loanOwnedSeries) return `Solde : ${formatAmount(ctx.parsed.y)}`
+              const balance = Number(points[ctx.dataIndex].balance)
+              const loanCapital = Number(loanOwnedSeries[ctx.dataIndex])
+              return [
+                `Solde : ${formatAmount(balance)}`,
+                `Capital des prêts : ${formatAmount(loanCapital)}`,
+                `Total : ${formatAmount(balance + loanCapital)}`
+              ]
+            }
           }
         }
       },
@@ -857,6 +971,59 @@ onMounted(loadDashboard)
   margin: 12px 0 0;
   font-size: 12px;
   color: var(--text-faint);
+}
+
+/*
+ * position: fixed (pas sticky) : .page-header est un bandeau tres court, un
+ * enfant en sticky ne resterait "accroche" que tant que ce bandeau est
+ * encore a l'ecran, puis defilerait avec lui (teste : les fleches
+ * disparaissaient des les premiers pixels de scroll). fixed les maintient
+ * ancrees en haut a droite quelle que soit la position de scroll dans la
+ * page. Fond + bordure + ombre opaques pour rester lisible par-dessus le
+ * contenu qui defile dessous (meme traitement que le thead sticky de
+ * .monthly-analysis-table plus bas).
+ */
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: fixed;
+  top: 24px;
+  right: 40px;
+  z-index: 50;
+  background: var(--ink-900);
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+.month-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--ink-800);
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.month-nav-btn:hover:not(:disabled) {
+  background: var(--ink-700);
+}
+.month-nav-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.month-nav-label {
+  min-width: 140px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
 }
 
 .dashboard-grid {

@@ -15,6 +15,12 @@
  * Les enfants sont indexes par parentId en un seul passage (Map), plutot
  * que de refaire un `.filter(c => c.parentId === root.id)` pour chaque
  * racine (scan lineaire repete inutile si le nombre de categories croit).
+ *
+ * `hidden` reprend le flag Category#hidden (categorie masquee car plus
+ * utilisee) : conserve sur chaque entree pour que CategoryAutocomplete
+ * puisse toujours resoudre le libelle d'une categorie deja affectee (meme
+ * masquee), tout en l'excluant des suggestions proposees pour un nouveau
+ * choix.
  */
 export function flattenCategories(categories) {
   const childrenByParentId = new Map()
@@ -28,9 +34,9 @@ export function flattenCategories(categories) {
   for (const root of categories) {
     if (root.parentId) continue
     const children = childrenByParentId.get(root.id) || []
-    result.push({ id: root.id, label: root.name, type: root.type, selectable: children.length === 0 })
+    result.push({ id: root.id, label: root.name, type: root.type, selectable: children.length === 0, hidden: !!root.hidden })
     for (const child of children) {
-      result.push({ id: child.id, label: `${root.name} : ${child.name}`, type: child.type, selectable: true })
+      result.push({ id: child.id, label: `${root.name} : ${child.name}`, type: child.type, selectable: true, hidden: !!child.hidden })
     }
   }
   return result

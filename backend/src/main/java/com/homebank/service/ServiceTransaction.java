@@ -2,6 +2,7 @@ package com.homebank.service;
 
 import com.homebank.dto.GroupeDoublonDTO;
 import com.homebank.dto.SuggestionPeriodiqueDTO;
+import com.homebank.dto.TransactionBulkUpdateDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.dto.DemandeVirementDTO;
 import com.homebank.mapper.MappeurTransaction;
@@ -134,6 +135,80 @@ public class ServiceTransaction {
         return transactionMapper.toDTO(saved);
     }
 
+    /**
+     * Modifie en une fois un ou plusieurs champs (categorie, tiers, mode de
+     * paiement, depense periodique, annualisation, statut de validation) sur toutes les
+     * transactions listees dans payload.getIds() — utilise par la selection
+     * multiple de l'onglet Transactions. Seuls les champs dont le drapeau
+     * "...Provided" est a true sont modifies ; les autres sont laisses tels
+     * quels sur chaque transaction. Le tiers, quand fourni, passe par la meme
+     * reconnaissance/creation automatique qu'une saisie manuelle unitaire
+     * (voir applyPayload / ServiceTiers#resolveOrCreate).
+     */
+    @Transactional
+    public List<TransactionDTO> bulkUpdate(TransactionBulkUpdateDTO payload) {
+        List<Long> ids = payload.getIds();
+        if (ids == null || ids.isEmpty()) {
+            throw new IllegalArgumentException("Aucune transaction selectionnee");
+        }
+
+        Categorie category = payload.isCategoryIdProvided() && payload.getCategoryId() != null
+                ? categoryService.findById(payload.getCategoryId())
+                : null;
+
+        List<Transaction> transactions = transactionRepository.findAllById(ids);
+        List<Tiers> orphanCandidates = new ArrayList<>();
+
+        for (Transaction t : transactions) {
+            if (payload.isCategoryIdProvided()) {
+                t.setCategory(category);
+            }
+
+            if (payload.isPayeeProvided()) {
+                Tiers previousPayee = t.getPayee();
+                String payeeText = payload.getPayee();
+                Tiers resolvedPayee = (payeeText != null && !payeeText.isBlank())
+                        ? payeeService.resolveOrCreate(payeeText, t.getAmount())
+                        : null;
+                t.setPayee(resolvedPayee);
+                if (previousPayee != null && !previousPayee.equals(resolvedPayee)) {
+                    orphanCandidates.add(previousPayee);
+                }
+            }
+
+            if (payload.isPaymentModeProvided()) {
+                t.setPaymentMode(payload.getPaymentMode());
+            }
+
+            if (payload.isPeriodicExpenseProvided()) {
+                t.setPeriodicExpense(payload.isPeriodicExpense());
+            }
+
+            if (payload.isAnnualizedProvided()) {
+                t.setAnnualized(payload.isAnnualized());
+            }
+
+            if (payload.isValidatedProvided()) {
+                t.setValidated(payload.isValidated());
+            }
+        }
+
+        List<Transaction> saved = transactionRepository.saveAll(transactions);
+        log.info("Modification en masse de {} transaction(s)", saved.size());
+
+        // Nettoyage des anciens tiers devenus orphelins "best effort" : ne
+        // doit jamais faire echouer la mise a jour elle-meme (deja actee).
+        for (Tiers previousPayee : orphanCandidates) {
+            try {
+                payeeService.cleanupIfPayeeChanged(previousPayee, null);
+            } catch (Exception e) {
+                log.warn("Echec du nettoyage d'un ancien tiers apres modification en masse : {}", e.getMessage(), e);
+            }
+        }
+
+        return saved.stream().map(transactionMapper::toDTO).toList();
+    }
+
     public void delete(Long id) {
         Transaction existing = findEntityById(id);
         Tiers previousPayee = existing.getPayee();
@@ -167,6 +242,13 @@ public class ServiceTransaction {
         return transactionMapper.toDTO(transactionRepository.save(t));
     }
 
+    /** Bascule le statut "annualisee" (lissee sur l'annee dans les rapports) d'une transaction. */
+    public TransactionDTO toggleAnnualized(Long id) {
+        Transaction t = findEntityById(id);
+        t.setAnnualized(!t.isAnnualized());
+        return transactionMapper.toDTO(transactionRepository.save(t));
+    }
+
     /**
      * Nombre minimum d'occurrences (meme tiers, montant proche) pour qu'un
      * groupe soit suggere comme periodique : en dessous, le rapprochement est
@@ -193,6 +275,14 @@ public class ServiceTransaction {
             {91, 10},   // trimestriel
             {365, 20},  // annuel
     };
+
+    /**
+     * Nombre maximum d'occurrences consecutives manquees tolerees dans un
+     * intervalle (ex : mois sans prelevement, paiement en retard groupe avec
+     * le suivant). Au-dela, un ecart aussi grand a plus de chances d'etre une
+     * coincidence qu'une vraie periodicite avec trou.
+     */
+    private static final int PERIODIC_MAX_MISSED_OCCURRENCES = 3;
 
     /**
      * Suggere des groupes de transactions qui semblent periodiques : meme
@@ -233,7 +323,8 @@ public class ServiceTransaction {
      * Vrai si les dates du groupe (deja rapproche par tiers + montant) se
      * repetent selon un intervalle globalement regulier : il existe une
      * frequence (voir PERIODIC_FREQUENCIES_DAYS) dont TOUS les intervalles
-     * consecutifs (dates triees) sont proches, a sa tolerance pres.
+     * consecutifs (dates triees) sont proches d'un multiple entier de sa
+     * cible, a sa tolerance pres (voir {@link #matchesFrequencyWithGaps}).
      */
     private boolean hasRegularInterval(List<Transaction> transactions) {
         List<LocalDate> dates = transactions.stream()
@@ -249,7 +340,7 @@ public class ServiceTransaction {
         for (int[] frequency : PERIODIC_FREQUENCIES_DAYS) {
             int target = frequency[0];
             int tolerance = frequency[1];
-            if (intervals.stream().allMatch(days -> Math.abs(days - target) <= tolerance)) {
+            if (intervals.stream().allMatch(days -> matchesFrequencyWithGaps(days, target, tolerance))) {
                 return true;
             }
         }
@@ -257,11 +348,29 @@ public class ServiceTransaction {
     }
 
     /**
+     * Vrai si l'intervalle (en jours) correspond a la frequence cible, ou a
+     * un multiple entier proche de celle-ci — une ou plusieurs occurrences
+     * manquees (mois sans prelevement, paiement en retard qui se retrouve
+     * groupe avec le suivant...). Plafonne a PERIODIC_MAX_MISSED_OCCURRENCES
+     * occurrences manquees pour eviter de faire matcher un ecart demesure par
+     * pure coincidence.
+     */
+    private boolean matchesFrequencyWithGaps(long days, int target, int tolerance) {
+        long occurrences = Math.max(1, Math.min(
+                Math.round((double) days / target),
+                PERIODIC_MAX_MISSED_OCCURRENCES + 1L));
+        return Math.abs(days - occurrences * target) <= tolerance;
+    }
+
+    /**
      * Regroupe des transactions d'un meme tiers par montant proche : trie par
      * montant absolu croissant, puis constitue des groupes successifs tant
-     * que chaque nouveau montant reste dans la tolerance du plus petit montant
-     * deja present dans le groupe courant (glissement progressif accepte,
-     * comme une facture d'energie qui augmente legerement mois apres mois).
+     * que chaque nouveau montant reste dans la tolerance de la moyenne du
+     * groupe courant. La moyenne (plutot qu'un minimum fige au premier
+     * element du cluster) suit le groupe au fur et a mesure des ajouts : elle
+     * absorbe aussi bien une derive progressive (facture d'energie qui
+     * augmente legerement mois apres mois) qu'une fluctuation dans les deux
+     * sens autour d'une valeur centrale (revenu variable, ex : commissions).
      */
     private List<List<Transaction>> groupByToleranteAmount(List<Transaction> transactions) {
         List<Transaction> sorted = transactions.stream()
@@ -270,22 +379,24 @@ public class ServiceTransaction {
 
         List<List<Transaction>> clusters = new ArrayList<>();
         List<Transaction> current = new ArrayList<>();
-        BigDecimal clusterMin = null;
+        BigDecimal clusterSum = BigDecimal.ZERO;
 
         for (Transaction t : sorted) {
             BigDecimal abs = t.getAmount().abs();
             if (current.isEmpty()) {
                 current.add(t);
-                clusterMin = abs;
+                clusterSum = abs;
                 continue;
             }
-            if (abs.compareTo(clusterMin.multiply(PERIODIC_AMOUNT_TOLERANCE)) <= 0) {
+            BigDecimal clusterAvg = clusterSum.divide(BigDecimal.valueOf(current.size()), 10, RoundingMode.HALF_UP);
+            if (abs.compareTo(clusterAvg.multiply(PERIODIC_AMOUNT_TOLERANCE)) <= 0) {
                 current.add(t);
+                clusterSum = clusterSum.add(abs);
             } else {
                 clusters.add(current);
                 current = new ArrayList<>();
                 current.add(t);
-                clusterMin = abs;
+                clusterSum = abs;
             }
         }
         if (!current.isEmpty()) clusters.add(current);
@@ -440,6 +551,7 @@ public class ServiceTransaction {
         transaction.setPaymentMode(payload.getPaymentMode());
         transaction.setTags(payload.getTags());
         transaction.setPeriodicExpense(payload.isPeriodicExpense());
+        transaction.setAnnualized(payload.isAnnualized());
         transaction.setExternalId(payload.getExternalId());
         // Une transaction saisie/modifiee manuellement est consideree comme validee ;
         // seules les transactions importees/synchronisees demarrent "en attente".

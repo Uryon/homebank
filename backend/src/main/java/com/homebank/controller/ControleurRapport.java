@@ -35,25 +35,33 @@ public class ControleurRapport {
         return reportService.summary(from, to, accountId);
     }
 
-    /** Analyse détaillée revenus/dépenses par catégorie sur les 12 derniers mois terminés. */
+    /**
+     * Analyse détaillée revenus/dépenses par catégorie sur les 12 mois terminés
+     * précédant referenceMonth (dernier mois inclus). referenceMonth omis =
+     * dernier mois calendaire déjà terminé (comportement historique).
+     */
     @GetMapping("/monthly-category-analysis")
     public Map<String, Object> monthlyCategoryAnalysis(
-            @RequestParam(required = false) Long accountId) {
-        return reportService.monthlyCategoryAnalysis(accountId);
+            @RequestParam(required = false) Long accountId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate referenceMonth) {
+        return reportService.monthlyCategoryAnalysis(accountId, referenceMonth);
     }
 
-    /** Epargne mensuelle (revenus - depenses) sur les N derniers mois termines. */
+    /** Epargne mensuelle (revenus - depenses) sur les N derniers mois termines, jusqu'a referenceMonth inclus (omis = dernier mois calendaire deja termine). */
     @GetMapping("/monthly-savings")
     public List<Map<String, Object>> monthlySavings(
             @RequestParam(required = false, defaultValue = "12") int months,
-            @RequestParam(required = false) Long accountId) {
-        return reportService.monthlySavings(months, accountId);
+            @RequestParam(required = false) Long accountId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate referenceMonth) {
+        return reportService.monthlySavings(months, accountId, referenceMonth);
     }
 
-    /** Solde : 12 mois historiques + present + 12 mois prevus. */
+    /** Solde : 12 mois historiques + present + 12 mois prevus, ancres sur referenceMonth (omis = dernier mois calendaire deja termine). */
     @GetMapping("/balance-forecast")
-    public List<Map<String, Object>> balanceForecast(@RequestParam(required = false) Long accountId) {
-        return reportService.balanceForecast(accountId);
+    public List<Map<String, Object>> balanceForecast(
+            @RequestParam(required = false) Long accountId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate referenceMonth) {
+        return reportService.balanceForecast(accountId, referenceMonth);
     }
 
     /** Total des transactions marquees "depense periodique". */
