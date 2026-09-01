@@ -1,22 +1,33 @@
 package com.homebank.service;
 
+import com.homebank.dto.CategorisationAutoResultatDTO;
 import com.homebank.dto.TiersDTO;
 import com.homebank.mapper.MappeurTiers;
 import com.homebank.model.Categorie;
 import com.homebank.model.Tiers;
+import com.homebank.model.Transaction;
 import com.homebank.repository.DepotTiers;
 import com.homebank.repository.DepotTransaction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 @Service
 public class ServiceTiers {
+
+    private static final Logger log = LoggerFactory.getLogger(ServiceTiers.class);
 
     private final DepotTiers payeeRepository;
     private final ServiceCategorie categoryService;
@@ -140,11 +151,24 @@ public class ServiceTiers {
         return regex.toString();
     }
 
+    /**
+     * Reduit toute suite d'espaces/tabulations a un seul espace (et trim).
+     * Les releves bancaires inserent souvent un nombre d'espaces variable entre
+     * les mots (ex : "SGC  TOURCOING" avec deux espaces) : sans cette
+     * normalisation, un motif stocke avec un espace simple ("SGC TOURCOING")
+     * ne matcherait jamais ce genre de libelle, alors que visuellement le
+     * texte "correspond" bien pour l'utilisateur.
+     */
+    private static String normalizeWhitespace(String s) {
+        return s == null ? null : s.trim().replaceAll("\\s+", " ");
+    }
+
     /** Teste si le champ "pattern" (un ou plusieurs motifs separes par ";") correspond au texte donne. */
     private static boolean matchesPatternField(String patternField, String text) {
         if (patternField == null || patternField.isBlank() || text == null || text.isBlank()) return false;
+        String normalizedText = normalizeWhitespace(text);
         for (String rawPart : patternField.split(";")) {
-            String part = rawPart.trim();
+            String part = normalizeWhitespace(rawPart);
             if (part.isEmpty()) continue;
             try {
                 // Le champ stocke/affiche est du texte simple, sans etoile
@@ -155,7 +179,7 @@ public class ServiceTiers {
                 // on ne touche a rien de plus : il sait ce qu'il fait.
                 String wildcarded = part.indexOf('*') < 0 ? "*" + part + "*" : part;
                 Pattern compiled = Pattern.compile(wildcardToRegex(wildcarded), Pattern.CASE_INSENSITIVE);
-                if (compiled.matcher(text).find()) return true;
+                if (compiled.matcher(normalizedText).find()) return true;
             } catch (PatternSyntaxException e) {
                 // motif invalide (ne devrait plus arriver avec le systeme "joker") : on l'ignore
             }
@@ -245,11 +269,17 @@ public class ServiceTiers {
         Optional<Tiers> matched = matchPayee(trimmed, normalizedAmount, knownPayees);
         if (matched.isPresent()) return matched.get();
 
-        // Filet de securite : evite un doublon si un tiers de meme nom ET meme
-        // montant existe deja mais que son motif ne matchait pas ce texte precis.
+        // Filet de securite : evite un doublon si un tiers de meme nom existe
+        // deja mais que son motif ne matchait pas ce texte precis (ex :
+        // l'utilisateur retape a la main le nom exact d'un tiers existant
+        // dans le champ "Tiers" d'une transaction). Un tiers generique
+        // (amount == null) matche quel que soit le montant, comme partout
+        // ailleurs dans ce fichier (voir matchPayee) : sans ce cas, retaper
+        // le nom d'un tiers generique sur une transaction d'un montant
+        // different creait un second tiers generique portant le meme nom.
         Optional<Tiers> byNameAndAmount = knownPayees.stream()
                 .filter(p -> p.getName() != null && p.getName().equalsIgnoreCase(trimmed))
-                .filter(p -> sameAmount(p.getAmount(), normalizedAmount))
+                .filter(p -> p.getAmount() == null || sameAmount(p.getAmount(), normalizedAmount))
                 .findFirst();
         if (byNameAndAmount.isPresent()) return byNameAndAmount.get();
 
@@ -372,5 +402,66 @@ public class ServiceTiers {
             migrated++;
         }
         return migrated;
+    }
+
+    /**
+     * Categorisation automatique en masse : pour chaque tiers sans categorie,
+     * si TOUTES ses transactions deja categorisees s'accordent sur UNE seule
+     * categorie (les transactions encore sans categorie n'entrent pas en
+     * compte, ni pour ni contre — voir suggestedCategoryId cote frontend,
+     * meme logique), cette categorie est affectee au tiers. Dans la foulee,
+     * la categorie ainsi determinee pour le tiers (deduite a l'instant, ou
+     * deja presente auparavant) est propagee a TOUTES les transactions de ce
+     * tiers encore sans categorie : ne modifie jamais une categorie deja
+     * choisie, ni sur un tiers ni sur une transaction — ne fait que combler
+     * les vides a partir d'un signal deja consistant.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public CategorisationAutoResultatDTO autoCategorize() {
+        List<Tiers> allPayees = payeeRepository.findAll();
+        List<Transaction> allTransactions = transactionRepository.findAllWithPayeeAndCategory();
+
+        Map<Long, List<Transaction>> transactionsByPayeeId = new HashMap<>();
+        for (Transaction t : allTransactions) {
+            if (t.getPayee() == null) continue;
+            transactionsByPayeeId.computeIfAbsent(t.getPayee().getId(), id -> new ArrayList<>()).add(t);
+        }
+
+        List<Tiers> payeesToSave = new ArrayList<>();
+        List<Transaction> transactionsToSave = new ArrayList<>();
+
+        for (Tiers payee : allPayees) {
+            List<Transaction> transactions = transactionsByPayeeId.getOrDefault(payee.getId(), List.of());
+
+            Categorie targetCategory = payee.getCategory();
+            if (targetCategory == null) {
+                Set<Categorie> distinctCategories = new HashSet<>();
+                for (Transaction t : transactions) {
+                    if (t.getCategory() != null) distinctCategories.add(t.getCategory());
+                }
+                if (distinctCategories.size() == 1) {
+                    targetCategory = distinctCategories.iterator().next();
+                    payee.setCategory(targetCategory);
+                    payeesToSave.add(payee);
+                }
+            }
+
+            if (targetCategory == null) continue;
+
+            for (Transaction t : transactions) {
+                if (t.getCategory() == null) {
+                    t.setCategory(targetCategory);
+                    transactionsToSave.add(t);
+                }
+            }
+        }
+
+        payeeRepository.saveAll(payeesToSave);
+        transactionRepository.saveAll(transactionsToSave);
+
+        log.info("Categorisation automatique : {} tiers categorise(s), {} transaction(s) mise(s) a jour",
+                payeesToSave.size(), transactionsToSave.size());
+
+        return new CategorisationAutoResultatDTO(payeesToSave.size(), transactionsToSave.size());
     }
 }

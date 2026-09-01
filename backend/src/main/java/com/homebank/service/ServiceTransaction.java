@@ -4,13 +4,16 @@ import com.homebank.dto.GroupeDoublonDTO;
 import com.homebank.dto.SuggestionPeriodiqueDTO;
 import com.homebank.dto.TransactionBulkUpdateDTO;
 import com.homebank.dto.TransactionDTO;
+import com.homebank.dto.DemandeDivisionDTO;
 import com.homebank.dto.DemandeVirementDTO;
 import com.homebank.mapper.MappeurTransaction;
 import com.homebank.model.Compte;
 import com.homebank.model.Categorie;
 import com.homebank.model.Tiers;
 import com.homebank.model.Transaction;
+import com.homebank.model.TransactionSupprimee;
 import com.homebank.repository.DepotTransaction;
+import com.homebank.repository.DepotTransactionSupprimee;
 import com.homebank.utils.ModePaiement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,9 +28,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 public class ServiceTransaction {
@@ -35,6 +40,7 @@ public class ServiceTransaction {
     private static final Logger log = LoggerFactory.getLogger(ServiceTransaction.class);
 
     private final DepotTransaction transactionRepository;
+    private final DepotTransactionSupprimee deletedTransactionRepository;
     private final ServiceCompte accountService;
     private final ServiceCategorie categoryService;
     private final ServiceTiers payeeService;
@@ -42,12 +48,14 @@ public class ServiceTransaction {
 
     public ServiceTransaction(
             DepotTransaction transactionRepository,
+            DepotTransactionSupprimee deletedTransactionRepository,
             ServiceCompte accountService,
             ServiceCategorie categoryService,
             ServiceTiers payeeService,
             MappeurTransaction transactionMapper) {
 
         this.transactionRepository = transactionRepository;
+        this.deletedTransactionRepository = deletedTransactionRepository;
         this.accountService = accountService;
         this.categoryService = categoryService;
         this.payeeService = payeeService;
@@ -136,8 +144,73 @@ public class ServiceTransaction {
     }
 
     /**
+     * Divise une transaction en deux : la transaction d'origine devient la
+     * "1ere partie" (montant/categorie/memo remplaces sur place), et une
+     * nouvelle transaction est creee pour la "2e partie" — meme compte, date,
+     * tiers, mode de paiement, statut de validation et marqueurs (periodique,
+     * exceptionnelle) que l'originale ; seuls le montant, la categorie et le
+     * memo different entre les deux parties (le caractere "annuel" suit donc
+     * automatiquement la categorie de chaque partie, voir Categorie#annualized).
+     * Le montant de la 2e partie est calcule cote serveur (montant d'origine - firstAmount),
+     * jamais saisi directement, pour garantir que la somme des deux parties
+     * egale toujours le montant d'origine — le solde du compte n'est donc
+     * jamais affecte par une division.
+     */
+    @Transactional
+    public List<TransactionDTO> splitTransaction(Long id, DemandeDivisionDTO payload) {
+        Transaction original = findEntityById(id);
+
+        if (original.getPaymentMode() == ModePaiement.TRANSFER || original.getTransferTransaction() != null) {
+            throw new IllegalArgumentException("Un virement ne peut pas etre divise");
+        }
+
+        BigDecimal totalAmount = original.getAmount();
+        BigDecimal firstAmount = payload.getFirstAmount();
+        if (firstAmount == null || firstAmount.signum() == 0) {
+            throw new IllegalArgumentException("Le montant de la 1ere partie est obligatoire et ne peut pas etre nul");
+        }
+        if (firstAmount.signum() != totalAmount.signum()) {
+            throw new IllegalArgumentException("Le montant de la 1ere partie doit avoir le meme signe que le montant d'origine");
+        }
+        if (firstAmount.abs().compareTo(totalAmount.abs()) >= 0) {
+            throw new IllegalArgumentException(
+                    "Le montant de la 1ere partie doit etre strictement inferieur, en valeur absolue, au montant d'origine");
+        }
+        BigDecimal secondAmount = totalAmount.subtract(firstAmount);
+
+        original.setAmount(firstAmount);
+        original.setCategory(payload.getFirstCategoryId() != null
+                ? categoryService.findById(payload.getFirstCategoryId())
+                : null);
+        original.setMemo(sanitizeMemo(payload.getFirstMemo()));
+
+        Transaction second = new Transaction();
+        second.setAccount(original.getAccount());
+        second.setDate(original.getDate());
+        second.setAmount(secondAmount);
+        second.setPayee(original.getPayee());
+        second.setCategory(payload.getSecondCategoryId() != null
+                ? categoryService.findById(payload.getSecondCategoryId())
+                : null);
+        second.setMemo(sanitizeMemo(payload.getSecondMemo()));
+        second.setPaymentMode(original.getPaymentMode());
+        second.setTags(original.getTags());
+        second.setValidated(original.isValidated());
+        second.setPeriodicExpense(original.isPeriodicExpense());
+        second.setExceptional(original.isExceptional());
+
+        Transaction savedOriginal = transactionRepository.save(original);
+        Transaction savedSecond = transactionRepository.save(second);
+
+        log.info("Transaction {} divisee en deux : {} et {}", id, savedOriginal.getId(), savedSecond.getId());
+
+        return List.of(transactionMapper.toDTO(savedOriginal), transactionMapper.toDTO(savedSecond));
+    }
+
+    /**
      * Modifie en une fois un ou plusieurs champs (categorie, tiers, mode de
-     * paiement, depense periodique, annualisation, statut de validation) sur toutes les
+     * paiement, depense periodique, annualisation, caractere exceptionnel,
+     * statut de validation) sur toutes les
      * transactions listees dans payload.getIds() — utilise par la selection
      * multiple de l'onglet Transactions. Seuls les champs dont le drapeau
      * "...Provided" est a true sont modifies ; les autres sont laisses tels
@@ -184,8 +257,8 @@ public class ServiceTransaction {
                 t.setPeriodicExpense(payload.isPeriodicExpense());
             }
 
-            if (payload.isAnnualizedProvided()) {
-                t.setAnnualized(payload.isAnnualized());
+            if (payload.isExceptionalProvided()) {
+                t.setExceptional(payload.isExceptional());
             }
 
             if (payload.isValidatedProvided()) {
@@ -209,10 +282,12 @@ public class ServiceTransaction {
         return saved.stream().map(transactionMapper::toDTO).toList();
     }
 
+    @Transactional
     public void delete(Long id) {
         Transaction existing = findEntityById(id);
         Tiers previousPayee = existing.getPayee();
 
+        recordDeletion(existing);
         transactionRepository.deleteById(id);
 
         try {
@@ -220,6 +295,24 @@ public class ServiceTransaction {
         } catch (Exception e) {
             log.warn("Echec du nettoyage de l'ancien tiers apres suppression de la transaction {} : {}", id, e.getMessage(), e);
         }
+    }
+
+    /**
+     * Enregistre une empreinte de la transaction avant sa suppression (voir
+     * TransactionSupprimee), pour que ServiceImport#isDuplicate la reconnaisse
+     * et evite de la reimporter si le releve bancaire source la contient
+     * encore lors d'un futur import — sans quoi une transaction supprimee
+     * manuellement (ex : paire "depense remboursee", voir
+     * findReimbursementGroups) reapparaissait au prochain import.
+     */
+    private void recordDeletion(Transaction t) {
+        TransactionSupprimee tombstone = new TransactionSupprimee();
+        tombstone.setAccountId(t.getAccount().getId());
+        tombstone.setDate(t.getDate());
+        tombstone.setAmount(t.getAmount());
+        tombstone.setPayeeName(t.getPayee() != null ? t.getPayee().getName() : null);
+        tombstone.setExternalId(t.getExternalId());
+        deletedTransactionRepository.save(tombstone);
     }
 
     /** Passe toutes les transactions en attente au statut "validee". Renvoie le nombre concerne. */
@@ -242,10 +335,10 @@ public class ServiceTransaction {
         return transactionMapper.toDTO(transactionRepository.save(t));
     }
 
-    /** Bascule le statut "annualisee" (lissee sur l'annee dans les rapports) d'une transaction. */
-    public TransactionDTO toggleAnnualized(Long id) {
+    /** Bascule le statut "exceptionnelle" (exclue des tableaux de bord) d'une transaction. */
+    public TransactionDTO toggleExceptional(Long id) {
         Transaction t = findEntityById(id);
-        t.setAnnualized(!t.isAnnualized());
+        t.setExceptional(!t.isExceptional());
         return transactionMapper.toDTO(transactionRepository.save(t));
     }
 
@@ -291,13 +384,16 @@ public class ServiceTransaction {
      * regulier (mensuel/trimestriel/annuel a tolerance pres) — sans quoi une
      * simple coincidence de montant (ex : plusieurs achats ponctuels du meme
      * montant) serait a tort suggeree comme periodique. Ignore les
-     * transactions deja marquees periodiques (deja acceptees) et les
-     * virements internes (jamais une depense/revenu periodique au sens
-     * metier).
+     * transactions deja marquees periodiques (deja acceptees), les
+     * transactions dont la suggestion a ete refusee par l'utilisateur (voir
+     * Transaction#periodicSuggestionIgnored / ignorePeriodicSuggestion
+     * ci-dessous) et les virements internes (jamais une depense/revenu
+     * periodique au sens metier).
      */
     public List<SuggestionPeriodiqueDTO> findPeriodicSuggestions() {
         List<Transaction> candidates = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
                 .filter(t -> !t.isPeriodicExpense())
+                .filter(t -> !t.isPeriodicSuggestionIgnored())
                 .filter(t -> t.getPaymentMode() != ModePaiement.TRANSFER)
                 .filter(t -> t.getPayee() != null)
                 .toList();
@@ -431,28 +527,125 @@ public class ServiceTransaction {
     }
 
     /**
-     * Regroupe les transactions deja en base qui semblent doublonnees, selon
-     * la meme definition que la detection a l'import (voir
-     * ServiceImport#isDuplicate) : meme compte, et soit le meme identifiant
-     * externe (fourni par la banque/le fichier importe), soit la meme date +
-     * montant + tiers canonique (insensible a la casse). Pour l'onglet
-     * "Doublons" de la page Transactions, qui permet de nettoyer les
-     * doublons importes par erreur (ex : meme fichier importe deux fois).
+     * Marque les transactions passees comme "non periodiques" pour de bon
+     * (voir Transaction#periodicSuggestionIgnored) : elles seront exclues de
+     * findPeriodicSuggestions, pour que refuser une suggestion depuis
+     * l'onglet "Periodiques" soit definitif et ne revienne plus a chaque
+     * visite.
+     */
+    @Transactional
+    public void ignorePeriodicSuggestion(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new IllegalArgumentException("Aucune transaction selectionnee");
+        }
+        List<Transaction> transactions = transactionRepository.findAllById(ids);
+        transactions.forEach(t -> t.setPeriodicSuggestionIgnored(true));
+        transactionRepository.saveAll(transactions);
+        log.info("Marquage de {} transaction(s) comme suggestion periodique ignoree", transactions.size());
+    }
+
+    /**
+     * Regroupe les transactions deja en base qui semblent doublonnees, en
+     * deux categories (voir GroupeDoublonDTO#certain) :
+     * - "certains" : meme definition que la detection a l'import (voir
+     *   ServiceImport#isDuplicate) — meme compte, et soit le meme identifiant
+     *   externe (fourni par la banque/le fichier importe), soit la meme date
+     *   + montant + tiers canonique (insensible a la casse). Occurrences
+     *   interchangeables.
+     * - "probables" : meme compte + date + montant, mais tiers different —
+     *   ratees par la detection ci-dessus car elle exige le meme tiers. Cas
+     *   frequent d'un meme releve importe deux fois a des moments differents :
+     *   la premiere fois categorisee et le tiers renomme a la main, la
+     *   seconde fois avec le libelle brut de la banque jamais nettoye (ex :
+     *   "Transfer : Prêt immobilier" vs "PRELEVEMENT DE ECHEANCE PRET REF :
+     *   ..." le meme jour pour le meme montant). Un groupe deja compte parmi
+     *   les "certains" (tiers identiques) n'est jamais liste une deuxieme
+     *   fois ici. Pour l'onglet "Doublons" de la page Transactions, qui
+     *   permet de nettoyer les doublons importes par erreur.
      */
     public List<GroupeDoublonDTO> findDuplicateGroups() {
-        Map<String, List<Transaction>> groups = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
+        List<Transaction> all = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
+                .filter(t -> !t.isDuplicateIgnored())
+                .toList();
+
+        Map<String, List<Transaction>> certainGroups = all.stream()
                 .collect(Collectors.groupingBy(this::duplicateGroupKey, LinkedHashMap::new, Collectors.toList()));
 
-        return groups.values().stream()
+        Stream<GroupeDoublonDTO> certain = certainGroups.values().stream()
                 .filter(group -> group.size() > 1)
-                .map(this::buildDuplicateGroup)
+                .map(group -> buildDuplicateGroup(group, true, false));
+
+        Map<String, List<Transaction>> looseGroups = all.stream()
+                .collect(Collectors.groupingBy(this::looseDuplicateGroupKey, LinkedHashMap::new, Collectors.toList()));
+
+        Stream<GroupeDoublonDTO> probable = looseGroups.values().stream()
+                .filter(group -> group.size() > 1)
+                .filter(group -> !samePayeeForAll(group)) // sinon deja remonte parmi les "certains" ci-dessus
+                .map(group -> buildDuplicateGroup(group, false, false));
+
+        Stream<GroupeDoublonDTO> reimbursements = findReimbursementGroups(all).stream();
+
+        return Stream.concat(Stream.concat(certain, probable), reimbursements)
                 .sorted(Comparator.comparing((GroupeDoublonDTO g) -> g.getTransactions().get(0).getDate()).reversed())
                 .toList();
     }
 
     /**
-     * Cle de regroupement d'une transaction pour la detection de doublons :
-     * l'identifiant externe prime s'il est fourni (identique a
+     * Detecte les groupes "remboursement" : PAIRES d'une depense et d'un
+     * remboursement de meme montant (valeur absolue) par le meme tiers, a une
+     * date quelconque, meme compte ou non. A la difference des doublons
+     * "certains"/"probables" ci-dessus (qui exigent un montant identique,
+     * signe compris, et ne peuvent donc jamais matcher ce cas), il ne s'agit
+     * pas d'un import en double a supprimer : juste un reperage pour que
+     * l'utilisateur voie d'un coup d'œil qu'une depense a deja ete remboursee.
+     * Ignore les virements internes (jamais un remboursement au sens metier,
+     * et de toute facon sans tiers).
+     * <p>
+     * S'il y a plusieurs depenses du meme montant mais un seul remboursement
+     * (ex : 5 pleins d'essence a -50€ chez le meme tiers, un seul rembourse),
+     * une seule paire est formee, avec la depense la plus RECENTE parmi
+     * celles pas deja appariees (la plus probable d'etre celle concernee par
+     * le remboursement) : les autres depenses du meme montant ne sont pas
+     * proposees. S'il y a plusieurs remboursements, chacun forme sa propre
+     * paire avec la depense la plus recente restante, en repetant l'operation
+     * (2e remboursement <-> 2e depense la plus recente, etc.).
+     */
+    private List<GroupeDoublonDTO> findReimbursementGroups(List<Transaction> all) {
+        Map<Long, List<Transaction>> byPayee = all.stream()
+                .filter(t -> t.getPayee() != null)
+                .filter(t -> t.getPaymentMode() != ModePaiement.TRANSFER)
+                .collect(Collectors.groupingBy(t -> t.getPayee().getId()));
+
+        Comparator<Transaction> mostRecentFirst =
+                Comparator.comparing(Transaction::getDate).thenComparing(Transaction::getId).reversed();
+
+        List<GroupeDoublonDTO> groups = new ArrayList<>();
+        for (List<Transaction> payeeTransactions : byPayee.values()) {
+            Map<BigDecimal, List<Transaction>> byAbsAmount = payeeTransactions.stream()
+                    .collect(Collectors.groupingBy(t -> t.getAmount().abs().setScale(2, RoundingMode.HALF_UP)));
+
+            for (List<Transaction> sameAbsAmount : byAbsAmount.values()) {
+                List<Transaction> expenses = sameAbsAmount.stream()
+                        .filter(t -> t.getAmount().signum() < 0)
+                        .sorted(mostRecentFirst)
+                        .toList();
+                List<Transaction> reimbursements = sameAbsAmount.stream()
+                        .filter(t -> t.getAmount().signum() > 0)
+                        .sorted(mostRecentFirst)
+                        .toList();
+
+                int pairCount = Math.min(expenses.size(), reimbursements.size());
+                for (int i = 0; i < pairCount; i++) {
+                    groups.add(buildDuplicateGroup(List.of(expenses.get(i), reimbursements.get(i)), false, true));
+                }
+            }
+        }
+        return groups;
+    }
+
+    /**
+     * Cle de regroupement d'une transaction pour la detection de doublons
+     * "certains" : l'identifiant externe prime s'il est fourni (identique a
      * ServiceImport#isDuplicate), sinon on retombe sur compte+date+montant+
      * tiers canonique (voir CleDoublon).
      */
@@ -465,13 +658,52 @@ public class ServiceTransaction {
         return "key:" + t.getAccount().getId() + "|" + key;
     }
 
-    private GroupeDoublonDTO buildDuplicateGroup(List<Transaction> transactions) {
+    /**
+     * Cle de regroupement "large" pour la detection des doublons probables :
+     * compte + date + montant seulement, sans le tiers (voir
+     * findDuplicateGroups).
+     */
+    private String looseDuplicateGroupKey(Transaction t) {
+        return t.getAccount().getId() + "|" + t.getDate() + "|" + t.getAmount().setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private String canonicalPayee(Transaction t) {
+        String name = t.getPayee() != null ? t.getPayee().getName() : null;
+        return name != null ? name.trim().toLowerCase(Locale.ROOT) : "";
+    }
+
+    private boolean samePayeeForAll(List<Transaction> group) {
+        String first = canonicalPayee(group.get(0));
+        return group.stream().allMatch(t -> canonicalPayee(t).equals(first));
+    }
+
+    /**
+     * Marque les transactions passees comme n'etant pas des doublons : elles
+     * seront exclues de findDuplicateGroups (voir Transaction#duplicateIgnored),
+     * ce qui fait disparaitre de l'onglet "Doublons" tout groupe dont l'une des
+     * occurrences ne compte plus (un groupe necessite au moins 2 occurrences
+     * restantes pour etre affiche).
+     */
+    @Transactional
+    public void markAsNotDuplicate(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new IllegalArgumentException("Aucune transaction selectionnee");
+        }
+        List<Transaction> transactions = transactionRepository.findAllById(ids);
+        transactions.forEach(t -> t.setDuplicateIgnored(true));
+        transactionRepository.saveAll(transactions);
+        log.info("Marquage de {} transaction(s) comme non doublon", transactions.size());
+    }
+
+    private GroupeDoublonDTO buildDuplicateGroup(List<Transaction> transactions, boolean certain, boolean reimbursement) {
         List<Transaction> sorted = transactions.stream()
                 .sorted(Comparator.comparing(Transaction::getId))
                 .toList();
         return GroupeDoublonDTO.builder()
                 .count(sorted.size())
                 .transactions(sorted.stream().map(transactionMapper::toDTO).toList())
+                .certain(certain)
+                .reimbursement(reimbursement)
                 .build();
     }
 
@@ -551,29 +783,27 @@ public class ServiceTransaction {
         transaction.setPaymentMode(payload.getPaymentMode());
         transaction.setTags(payload.getTags());
         transaction.setPeriodicExpense(payload.isPeriodicExpense());
-        transaction.setAnnualized(payload.isAnnualized());
+        transaction.setExceptional(payload.isExceptional());
         transaction.setExternalId(payload.getExternalId());
         // Une transaction saisie/modifiee manuellement est consideree comme validee ;
         // seules les transactions importees/synchronisees demarrent "en attente".
         transaction.setValidated(payload.isValidated());
 
-        if (payload.getCategoryId() != null) {
-            // Categorie choisie explicitement (saisie manuelle, ou deja
-            // presente sur une transaction existante en cours de modification) :
-            // ce choix prevaut toujours et n'est jamais ecrase.
-            Categorie category =
-                    categoryService.findById(payload.getCategoryId());
-
-            transaction.setCategory(category);
-        } else if (resolvedPayee != null && resolvedPayee.getCategory() != null) {
-            // Aucune categorie fournie explicitement : on applique la
-            // categorie par defaut du tiers, si elle existe (source unique
-            // de categorisation automatique, cf. Tiers#category). On ne
-            // touche a rien si le tiers n'a pas de categorie par defaut.
-            transaction.setCategory(resolvedPayee.getCategory());
-        } else {
-            transaction.setCategory(null);
-        }
+        // Categorie appliquee TELLE QUELLE depuis le payload, comme les autres
+        // champs (memo, tags...) : payload.getCategoryId() == null signifie
+        // "pas de categorie", y compris quand l'utilisateur vient d'effacer
+        // volontairement la categorie d'une transaction deja categorisee (le
+        // champ CategoryAutocomplete a un bouton dedie pour ca). Le
+        // pre-remplissage depuis la categorie par defaut du tiers (voir
+        // Tiers#category) reste gere cote FRONTEND uniquement (voir
+        // Transactions.vue#applyDefaultCategoryFromPayee et son equivalent
+        // dans TransactionRow.vue) : le reappliquer ici aussi ecrasait
+        // silencieusement toute tentative de l'utilisateur de rendre une
+        // transaction non categorisee des que son tiers avait une categorie
+        // par defaut.
+        transaction.setCategory(payload.getCategoryId() != null
+                ? categoryService.findById(payload.getCategoryId())
+                : null);
     }
 
     /** Remplace un memo litteralement "(NULL)"/"NULL" ou vide par null. */

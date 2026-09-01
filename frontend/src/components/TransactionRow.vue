@@ -1,5 +1,6 @@
 <template>
   <tr
+    :data-transaction-id="transaction.id"
     :class="{
       'row-editing': isEditing,
       'row-pending': !isEditing && !transaction.validated,
@@ -47,11 +48,13 @@
         <input type="checkbox" v-model="editForm.periodicExpense" title="Dépense périodique récurrente" />
       </td>
       <td class="num" @click.stop>
-        <input type="checkbox" v-model="editForm.annualized" title="Lisser sur les 12 mois suivant le paiement, dans les rapports (ex : taxe foncière)" />
+        <input type="checkbox" v-model="editForm.exceptional" title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)" />
       </td>
-      <td @click.stop class="row-actions">
-        <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
-        <button class="btn secondary" style="padding: 6px 10px;" @click="$emit('cancel-edit')">✕</button>
+      <td @click.stop>
+        <span class="row-actions">
+          <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
+          <button class="btn secondary" style="padding: 6px 10px;" @click="$emit('cancel-edit')">✕</button>
+        </span>
       </td>
     </template>
 
@@ -91,13 +94,16 @@
       <td class="num" @click.stop>
         <input
           type="checkbox"
-          :checked="transaction.annualized"
-          title="Lisser sur les 12 mois suivant le paiement, dans les rapports (ex : taxe foncière)"
-          @change="$emit('toggle-annualized', transaction)"
+          :checked="transaction.exceptional"
+          title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)"
+          @change="$emit('toggle-exceptional', transaction)"
         />
       </td>
-      <td class="row-actions" @click.stop>
-        <button class="btn danger" @click="$emit('remove', transaction)">Suppr.</button>
+      <td @click.stop>
+        <span class="row-actions">
+          <button class="split-btn" title="Diviser cette transaction en deux" @click="$emit('split', transaction)">✂</button>
+          <button class="delete-btn" title="Supprimer cette transaction" @click="$emit('remove', transaction)">✕</button>
+        </span>
       </td>
     </template>
   </tr>
@@ -138,8 +144,9 @@ const props = defineProps({
   // lineaire de accounts/categories a chaque ligne affichee.
   accountsById: { type: Map, required: true },
   categoriesById: { type: Map, required: true },
-  // Map (nom de tiers normalise -> tiers), pour la categorisation
-  // automatique par tiers pendant l'edition.
+  // Map (nom de tiers normalise -> tiers[]) — plusieurs tiers peuvent
+  // partager le meme nom pour des montants differents, voir Tiers#amount —
+  // pour la categorisation automatique par tiers pendant l'edition.
   payeeIndex: { type: Map, required: true },
   todayIso: { type: String, required: true },
   selected: { type: Boolean, default: false }
@@ -151,9 +158,10 @@ const emit = defineEmits([
   'confirm-edit',
   'toggle-validated',
   'toggle-periodic',
-  'toggle-annualized',
+  'toggle-exceptional',
   'toggle-select',
-  'remove'
+  'remove',
+  'split'
 ])
 
 const editForm = ref(null)
@@ -171,14 +179,22 @@ function buildEditForm(t) {
     tags: t.tags || '',
     transferTransactionId: t.transferTransactionId ?? null,
     periodicExpense: !!t.periodicExpense,
-    annualized: !!t.annualized,
+    exceptional: !!t.exceptional,
     validated: !!t.validated
   }
 }
 
+// Valeur du champ Tiers au moment ou l'edition commence (voir le watch sur
+// editForm.value?.payee plus bas) : sert a distinguer un VRAI changement de
+// tiers (saisi/choisi par l'utilisateur pendant l'edition) du simple echo
+// reactif declenche par le remplissage initial de editForm ci-dessous — ce
+// dernier ne doit jamais a lui seul ecraser une categorie deja renseignee.
+let payeeAtEditStart = null
+
 watch(() => props.isEditing, (editing) => {
   if (editing) {
     editForm.value = buildEditForm(props.transaction)
+    payeeAtEditStart = editForm.value.payee
     nextTick(() => firstEditField.value?.focus?.())
   } else {
     editForm.value = null
@@ -195,17 +211,46 @@ const editAmountType = computed(() => {
   return amount < 0 ? 'EXPENSE' : 'INCOME'
 })
 
-function findPayeeByName(name) {
+/**
+ * Meme logique de desambiguisation par montant que Transactions.vue#findPayeeByName
+ * (copie locale, editForm n'etant pas accessible depuis ce composant) : parmi
+ * les tiers partageant ce nom, celui dont le montant de reference correspond
+ * exactement (en valeur absolue) au montant de la transaction, sinon un tiers
+ * "generique" (sans montant de reference), sinon le premier.
+ */
+function findPayeeByName(name, amount) {
   if (!name || !name.trim()) return null
-  return props.payeeIndex.get(name.trim().toLowerCase()) || null
+  const candidates = props.payeeIndex.get(name.trim().toLowerCase())
+  if (!candidates?.length) return null
+  if (candidates.length === 1) return candidates[0]
+
+  if (amount != null && amount !== '') {
+    const absAmount = Math.abs(Number(amount))
+    const exactAmountMatch = candidates.find(p => p.amount != null && Math.abs(Number(p.amount)) === absAmount)
+    if (exactAmountMatch) return exactAmountMatch
+  }
+  return candidates.find(p => p.amount == null) || candidates[0]
 }
 
-// Categorisation automatique par tiers (voir Transactions.vue pour le detail
-// du raisonnement) : ne s'applique que si aucune categorie n'est deja
-// choisie, sur le tiers actuellement tape dans CETTE ligne.
+/**
+ * Categorisation automatique par tiers (voir Transactions.vue pour le detail
+ * du raisonnement), sur CETTE ligne. Deux cas :
+ * - categorie encore vide : rempli des l'ouverture de l'edition (ce watch se
+ *   declenche aussi tout seul, par simple echo reactif, quand editForm vient
+ *   d'etre rempli ci-dessus) — comportement historique, rien a perdre.
+ * - categorie deja renseignee : n'est ecrasee que si le tiers a REELLEMENT
+ *   change depuis l'ouverture de l'edition (voir payeeAtEditStart), jamais
+ *   par le seul fait d'ouvrir la ligne — sinon rouvrir une transaction pour
+ *   corriger juste la date, par exemple, ecraserait silencieusement une
+ *   categorie choisie a la main. Corrige en revanche le cas d'une categorie
+ *   deja mal pre-remplie par un tiers homonyme avant la desambiguisation par
+ *   montant (voir findPayeeByName) : re-choisir/retaper le tiers suffit.
+ */
 watch(() => editForm.value?.payee, (payeeName) => {
-  if (!editForm.value || editForm.value.categoryId) return
-  const payee = findPayeeByName(payeeName)
+  if (!editForm.value) return
+  const payeeActuallyChanged = payeeName !== payeeAtEditStart
+  if (editForm.value.categoryId && !payeeActuallyChanged) return
+  const payee = findPayeeByName(payeeName, editForm.value.amount)
   if (payee?.categoryId) editForm.value.categoryId = payee.categoryId
 })
 
@@ -245,7 +290,7 @@ function confirmEdit() {
     tags: editForm.value.tags,
     transferTransactionId: editForm.value.transferTransactionId,
     periodicExpense: editForm.value.periodicExpense,
-    annualized: editForm.value.annualized,
+    exceptional: editForm.value.exceptional,
     validated: editForm.value.validated
   })
 }
@@ -340,10 +385,21 @@ tr.row-future:hover td {
   border: 2px solid var(--amber);
 }
 
+/*
+ * .row-actions est un <span> A L'INTERIEUR du <td>, pas sur le <td>
+ * lui-meme : mettre display:flex directement sur un <td> lui fait perdre
+ * son comportement de cellule de tableau (dont le centrage vertical
+ * automatique dans la ligne), ce qui remontait le bouton en haut de la
+ * ligne des qu'une autre colonne (ex : tiers sur plusieurs lignes) la
+ * rendait plus haute que prevu. En restant un <span> inline-flex ordinaire,
+ * le <td> parent garde son vertical-align:middle natif et centre le
+ * contenu quelle que soit la hauteur de la ligne.
+ */
 .row-actions {
-  display: flex;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   gap: 6px;
-  justify-content: flex-end;
 }
 
 /*
@@ -355,6 +411,7 @@ tr.row-future:hover td {
 td:last-child {
   max-width: none;
   overflow: visible;
+  text-align: center;
   position: sticky;
   right: 0;
   background: var(--ink-900);
@@ -372,5 +429,68 @@ tr.row-future td:last-child {
 
 .text-muted {
   color: var(--text-muted);
+}
+
+/*
+ * Bouton de suppression : simple croix dans un cercle plutôt qu'un bouton
+ * texte "Suppr." — moins imposant visuellement dans une colonne consultée
+ * en permanence, tout en restant clairement reconnaissable et cliquable.
+ * Teinte corail douce (même paire dim/pleine que .badge.credit_card) au
+ * repos pour rester identifiable au premier coup d'œil sans être agressif
+ * sur toute la hauteur du tableau ; le survol passe en corail plein avec
+ * une légère élévation, comme les .btn de l'application.
+ */
+.delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--coral-dim);
+  color: var(--coral);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.delete-btn:hover {
+  background: var(--coral);
+  color: #FFFFFF;
+  box-shadow: var(--shadow-sm);
+  transform: scale(1.08);
+}
+.delete-btn:active {
+  transform: scale(0.92);
+}
+
+/* Bouton "diviser" : meme gabarit que .delete-btn (croix), teinte azur
+   (action neutre) plutot que corail (reserve aux actions destructives). */
+.split-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--azure-dim);
+  color: var(--azure);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.split-btn:hover {
+  background: var(--azure);
+  color: #FFFFFF;
+  box-shadow: var(--shadow-sm);
+  transform: scale(1.08);
+}
+.split-btn:active {
+  transform: scale(0.92);
 }
 </style>

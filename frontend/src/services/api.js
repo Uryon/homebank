@@ -18,7 +18,8 @@ export const CategoriesAPI = {
     update: (id, payload) => api.put(`/categories/${id}`, payload).then(r => r.data),
     remove: (id) => api.delete(`/categories/${id}`),
     merge: (sourceIds, targetId) => api.post('/categories/merge', { sourceIds, targetId }).then(r => r.data),
-    toggleHidden: (id) => api.post(`/categories/${id}/toggle-hidden`).then(r => r.data)
+    toggleHidden: (id) => api.post(`/categories/${id}/toggle-hidden`).then(r => r.data),
+    toggleAnnualized: (id) => api.post(`/categories/${id}/toggle-annualized`).then(r => r.data)
 }
 
 export const TransactionsAPI = {
@@ -26,13 +27,16 @@ export const TransactionsAPI = {
     create: (payload) => api.post('/transactions', payload).then(r => r.data),
     update: (id, payload) => api.put(`/transactions/${id}`, payload).then(r => r.data),
     remove: (id) => api.delete(`/transactions/${id}`),
+    split: (id, payload) => api.post(`/transactions/${id}/split`, payload).then(r => r.data),
     validateAll: () => api.post('/transactions/validate-all').then(r => r.data),
     toggleValidated: (id) => api.post(`/transactions/${id}/toggle-validated`).then(r => r.data),
     togglePeriodicExpense: (id) => api.post(`/transactions/${id}/toggle-periodic-expense`).then(r => r.data),
-    toggleAnnualized: (id) => api.post(`/transactions/${id}/toggle-annualized`).then(r => r.data),
+    toggleExceptional: (id) => api.post(`/transactions/${id}/toggle-exceptional`).then(r => r.data),
     bulkUpdate: (payload) => api.put('/transactions/bulk', payload).then(r => r.data),
     periodicSuggestions: () => api.get('/transactions/periodic-suggestions').then(r => r.data),
+    ignorePeriodicSuggestion: (ids) => api.post('/transactions/ignore-periodic-suggestion', ids).then(r => r.data),
     duplicates: () => api.get('/transactions/duplicates').then(r => r.data),
+    markNotDuplicate: (ids) => api.post('/transactions/mark-not-duplicate', ids).then(r => r.data),
     transfer: (payload) => api.post('/transactions/transfer', payload).then(r => r.data)
 }
 
@@ -51,7 +55,8 @@ export const PayeesAPI = {
     create: (payload) => api.post('/payees', payload).then(r => r.data),
     update: (id, payload) => api.put(`/payees/${id}`, payload).then(r => r.data),
     remove: (id) => api.delete(`/payees/${id}`),
-    merge: (sourceIds, targetId, pattern) => api.post('/payees/merge', { sourceIds, targetId, pattern }).then(r => r.data)
+    merge: (sourceIds, targetId, pattern) => api.post('/payees/merge', { sourceIds, targetId, pattern }).then(r => r.data),
+    autoCategorize: () => api.post('/payees/auto-categorize').then(r => r.data)
 }
 
 export const LoansAPI = {
@@ -75,6 +80,10 @@ export const ImportAPI = {
         form.append('accountId', accountId)
         return api.post('/import/qif', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
     }
+}
+
+export const ExportAPI = {
+    dashboardPdf: () => api.post('/export/dashboard-pdf').then(r => r.data)
 }
 
 export default api

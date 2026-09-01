@@ -4,7 +4,9 @@ import com.homebank.model.Compte;
 import com.homebank.model.Categorie;
 import com.homebank.model.Tiers;
 import com.homebank.model.Transaction;
+import com.homebank.model.TransactionSupprimee;
 import com.homebank.repository.DepotTransaction;
+import com.homebank.repository.DepotTransactionSupprimee;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -27,6 +29,7 @@ public class ServiceImport {
     private final ServiceCompte accountService;
     private final ServiceCategorie categoryService;
     private final DepotTransaction transactionRepository;
+    private final DepotTransactionSupprimee deletedTransactionRepository;
     private final ServiceTiers payeeService;
 
     private static final List<DateTimeFormatter> DATE_FORMATS = List.of(
@@ -40,10 +43,13 @@ public class ServiceImport {
     );
 
     public ServiceImport(ServiceCompte accountService, ServiceCategorie categoryService,
-                          DepotTransaction transactionRepository, ServiceTiers payeeService) {
+                          DepotTransaction transactionRepository,
+                          DepotTransactionSupprimee deletedTransactionRepository,
+                          ServiceTiers payeeService) {
         this.accountService = accountService;
         this.categoryService = categoryService;
         this.transactionRepository = transactionRepository;
+        this.deletedTransactionRepository = deletedTransactionRepository;
         this.payeeService = payeeService;
     }
 
@@ -85,12 +91,17 @@ public class ServiceImport {
 
     /**
      * Precharge, en une seule requete, les cles (date+montant+tiers) de
-     * toutes les transactions deja enregistrees sur ce compte : un import
-     * peut contenir des centaines/milliers de lignes, et interroger la base
-     * une fois par ligne pour verifier les doublons (comme avant) rendait
-     * l'import lineairement plus lent avec la taille du fichier ET la taille
-     * de l'historique deja importe. La detection se fait ensuite en memoire,
-     * en O(1) par ligne.
+     * toutes les transactions deja enregistrees sur ce compte, ET des
+     * transactions supprimees manuellement depuis (voir TransactionSupprimee /
+     * ServiceTransaction#delete) : un import peut contenir des centaines/
+     * milliers de lignes, et interroger la base une fois par ligne pour
+     * verifier les doublons (comme avant) rendait l'import lineairement plus
+     * lent avec la taille du fichier ET la taille de l'historique deja
+     * importe. La detection se fait ensuite en memoire, en O(1) par ligne.
+     * Inclure les transactions supprimees evite qu'une transaction volontairement
+     * effacee (ex : paire "depense remboursee" nettoyee depuis l'onglet
+     * Doublons) ne revienne au prochain import simplement parce qu'elle
+     * figure encore dans le releve bancaire source.
      */
     private Set<CleDoublon> loadDuplicateKeys(Long accountId) {
         Set<CleDoublon> keys = new HashSet<>();
@@ -98,24 +109,32 @@ public class ServiceImport {
             keys.add(CleDoublon.of(t.getDate(), t.getAmount(),
                     t.getPayee() != null ? t.getPayee().getName() : null));
         }
+        for (TransactionSupprimee deleted : deletedTransactionRepository.findByAccountId(accountId)) {
+            keys.add(CleDoublon.of(deleted.getDate(), deleted.getAmount(), deleted.getPayeeName()));
+        }
         return keys;
     }
 
     /**
      * Detection de doublons, commune aux imports CSV/QIF :
      * - si un identifiant externe (fourni par la banque/le fichier) est
-     *   disponible et qu'une transaction du meme compte le porte deja,
-     *   c'est un doublon certain ;
+     *   disponible et qu'une transaction du meme compte le porte deja (encore
+     *   presente, ou supprimee depuis, voir TransactionSupprimee), c'est un
+     *   doublon certain ;
      * - sinon, on considere qu'il y a doublon si une transaction du meme
      *   compte, a la meme date, pour le meme montant et le meme tiers
-     *   (canonique, insensible a la casse) existe deja (voir CleDoublon).
-     *   Cette combinaison large (date+montant+tiers) evite de rejeter deux
-     *   operations distinctes qui se ressembleraient partiellement.
+     *   (canonique, insensible a la casse) existe deja, ou a existe puis a ete
+     *   supprimee (voir CleDoublon / loadDuplicateKeys). Cette combinaison
+     *   large (date+montant+tiers) evite de rejeter deux operations distinctes
+     *   qui se ressembleraient partiellement.
      */
     private boolean isDuplicate(Long accountId, LocalDate date, BigDecimal amount,
                                  String canonicalPayee, String externalId, Set<CleDoublon> existingKeys) {
         if (externalId != null && !externalId.isBlank()) {
             if (transactionRepository.findByAccountIdAndExternalId(accountId, externalId).isPresent()) {
+                return true;
+            }
+            if (deletedTransactionRepository.findByAccountIdAndExternalId(accountId, externalId).isPresent()) {
                 return true;
             }
         }

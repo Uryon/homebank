@@ -16,3 +16,8 @@ ideas.txt
 *.zip
 *.log
 *.csv
+
+# Export PDF du tableau de bord (voir ServiceExport / export/export-dashboard.mjs)
+# export/sortie/ = dossier de sortie synchronise Google Drive, ne doit contenir que les PDF generes
+/export/sortie/*.pdf
+/export/node_modules/

@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="dashboard-page">
     <div class="page-header">
       <div>
         <h1>Tableau de bord</h1>
@@ -25,6 +25,14 @@
           title="Mois suivant"
           aria-label="Mois suivant"
         >›</button>
+        <button
+          class="btn secondary export-btn"
+          :disabled="exporting"
+          @click="exportDashboard"
+          title="Exporter le tableau de bord en PDF (dossier synchronisé configuré côté backend)"
+        >
+          {{ exporting ? 'Export…' : 'Exporter en PDF' }}
+        </button>
       </div>
     </div>
 
@@ -51,11 +59,24 @@
       </div>
     </div>
 
-    <div class="card" style="margin-bottom: 20px;">
-      <div style="margin-bottom: 16px;">
+    <div class="card forecast-card" style="margin-bottom: 20px;">
+      <div class="chart-header">
         <div class="stat-label" style="margin-bottom: 0;">
           Évolution du solde — historique, présent &amp; prévisionnel
         </div>
+        <button
+          v-if="hasLoans"
+          type="button"
+          class="chart-mode-toggle"
+          :class="{ 'is-separate': chartDisplayMode === 'separate' }"
+          @click="toggleChartMode"
+          :title="chartDisplayMode === 'separate' ? 'Afficher la courbe additionnée' : 'Afficher les courbes séparées'"
+        >
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          <span class="toggle-label">
+            {{ chartDisplayMode === 'separate' ? 'Courbes séparées' : 'Courbe additionnée' }}
+          </span>
+        </button>
       </div>
       <canvas ref="forecastChart" height="90"></canvas>
       <p class="chart-note">
@@ -67,83 +88,91 @@
       </p>
     </div>
 
-    <div class="dashboard-grid">
-      <div class="card">
-        <div class="stat-label" style="margin-bottom: 16px;">Épargne mensuelle (12 derniers mois)</div>
-        <canvas ref="savingsChart" height="100"></canvas>
+    <div class="top-row-grid">
+      <div class="card compact-card savings-card">
+        <div class="stat-label" style="margin-bottom: 8px;">Épargne mensuelle (12 derniers mois)</div>
+        <div class="savings-chart-wrap">
+          <canvas ref="savingsChart"></canvas>
+        </div>
         <p class="chart-note">Épargne = revenus du mois − dépenses du mois.</p>
       </div>
 
-      <div class="card">
-        <div class="stat-label" style="margin-bottom: 16px;">Dépenses périodiques</div>
-        <div v-if="periodicExpenses.expenses.items.length">
-          <table class="plain-table">
-            <tbody>
-              <tr v-for="item in periodicExpenses.expenses.items" :key="item.payee">
-                <td>{{ item.payee || 'Sans nom' }}</td>
-                <td class="num amount negative"
-                    @mouseenter="scheduleHover($event, item.payee || 'Sans nom', () => periodicItemRows(item, -1))"
+      <div class="periodic-grid">
+        <div class="card compact-card">
+          <div class="stat-label" style="margin-bottom: 10px;">Dépenses périodiques</div>
+          <div v-if="periodicExpenses.expenses.items.length">
+            <div class="periodic-table-wrap">
+              <table class="plain-table">
+                <tbody>
+                  <tr v-for="item in periodicExpenses.expenses.items" :key="item.payee">
+                    <td>{{ item.payee || 'Sans nom' }}</td>
+                    <td class="num amount negative"
+                        @mouseenter="scheduleHover($event, item.payee || 'Sans nom', () => periodicItemRows(item, -1))"
+                        @mouseleave="onCellLeave">
+                      {{ formatAmount(item.amount) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="periodic-total">
+              <span>Total</span>
+              <span class="amount negative"
+                    @mouseenter="scheduleHover($event, 'Dépenses périodiques', () => periodicGroupRows(periodicExpenses.expenses, -1))"
                     @mouseleave="onCellLeave">
-                  {{ formatAmount(item.amount) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="periodic-total">
-            <span>Total</span>
-            <span class="amount negative"
-                  @mouseenter="scheduleHover($event, 'Dépenses périodiques', () => periodicGroupRows(periodicExpenses.expenses, -1))"
-                  @mouseleave="onCellLeave">
-              {{ formatAmount(periodicExpenses.expenses.total) }}
-            </span>
+                {{ formatAmount(periodicExpenses.expenses.total) }}
+              </span>
+            </div>
+          </div>
+          <div v-else class="empty-state compact-empty-state">
+            Aucune dépense périodique marquée. Coche "Périodique" sur une transaction récurrente
+            (loyer, abonnement...) dans l'onglet Transactions, ou regarde l'onglet "Périodiques"
+            pour des suggestions automatiques.
           </div>
         </div>
-        <div v-else class="empty-state">
-          Aucune dépense périodique marquée. Coche "Périodique" sur une transaction récurrente
-          (loyer, abonnement...) dans l'onglet Transactions, ou regarde l'onglet "Périodiques"
-          pour des suggestions automatiques.
-        </div>
-      </div>
 
-      <div class="card">
-        <div class="stat-label" style="margin-bottom: 16px;">Revenus périodiques</div>
-        <div v-if="periodicExpenses.revenues.items.length">
-          <table class="plain-table">
-            <tbody>
-              <tr v-for="item in periodicExpenses.revenues.items" :key="item.payee">
-                <td>{{ item.payee || 'Sans nom' }}</td>
-                <td class="num amount positive"
-                    @mouseenter="scheduleHover($event, item.payee || 'Sans nom', () => periodicItemRows(item, 1))"
+        <div class="card compact-card">
+          <div class="stat-label" style="margin-bottom: 10px;">Revenus périodiques</div>
+          <div v-if="periodicExpenses.revenues.items.length">
+            <div class="periodic-table-wrap">
+              <table class="plain-table">
+                <tbody>
+                  <tr v-for="item in periodicExpenses.revenues.items" :key="item.payee">
+                    <td>{{ item.payee || 'Sans nom' }}</td>
+                    <td class="num amount positive"
+                        @mouseenter="scheduleHover($event, item.payee || 'Sans nom', () => periodicItemRows(item, 1))"
+                        @mouseleave="onCellLeave">
+                      {{ formatAmount(item.amount) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="periodic-total">
+              <span>Total</span>
+              <span class="amount positive"
+                    @mouseenter="scheduleHover($event, 'Revenus périodiques', () => periodicGroupRows(periodicExpenses.revenues, 1))"
                     @mouseleave="onCellLeave">
-                  {{ formatAmount(item.amount) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <div class="periodic-total">
-            <span>Total</span>
-            <span class="amount positive"
-                  @mouseenter="scheduleHover($event, 'Revenus périodiques', () => periodicGroupRows(periodicExpenses.revenues, 1))"
-                  @mouseleave="onCellLeave">
-              {{ formatAmount(periodicExpenses.revenues.total) }}
-            </span>
+                {{ formatAmount(periodicExpenses.revenues.total) }}
+              </span>
+            </div>
           </div>
-        </div>
-        <div v-else class="empty-state">
-          Aucun revenu périodique marqué. Coche "Périodique" sur une transaction récurrente
-          (salaire, remboursement régulier...) dans l'onglet Transactions.
+          <div v-else class="empty-state compact-empty-state">
+            Aucun revenu périodique marqué. Coche "Périodique" sur une transaction récurrente
+            (salaire, remboursement régulier...) dans l'onglet Transactions.
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="card" style="margin-bottom: 28px;">
+    <div class="card compact-card" style="margin-bottom: 28px;">
       <div class="stat-label" style="margin-bottom: 4px;">Où va mon argent ?</div>
-      <div style="color: var(--text-muted); font-size: 13px; margin-bottom: 20px;">
+      <div style="color: var(--text-muted); font-size: 12px; margin-bottom: 12px;">
         Répartition des dépenses sur les 12 derniers mois (les virements entre comptes ne sont pas comptés).
       </div>
       <div v-if="whereMoneyData.length" class="where-money-layout">
         <div class="donut-wrap">
-          <canvas ref="whereMoneyCanvas" width="200" height="200"></canvas>
+          <canvas ref="whereMoneyCanvas" width="150" height="150"></canvas>
           <div class="donut-center">
             <div class="donut-center-value">{{ formatAmountCompact(whereMoneyTotal) }}</div>
             <div class="donut-center-label">sur 12 mois</div>
@@ -185,7 +214,7 @@
       <div v-else class="empty-state">Aucune dépense sur les 12 derniers mois.</div>
     </div>
 
-    <div class="card monthly-analysis-card">
+    <div class="card monthly-analysis-card monthly-summary-card">
       <div class="stat-label" style="margin-bottom: 4px;">Résumé mensuel — 12 derniers mois</div>
       <div class="monthly-analysis-subtitle">
         Revenus, dépenses et solde par mois. Les 12 derniers mois entièrement terminés sont affichés.
@@ -199,6 +228,7 @@
               <th v-for="month in monthlyAnalysis.months" :key="month.key" class="num">
                 {{ month.label }}
               </th>
+              <th class="num summary-col">Moyenne</th>
               <th class="num summary-col">Total</th>
             </tr>
           </thead>
@@ -210,6 +240,11 @@
                   @mouseenter="scheduleHover($event, 'Revenus — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income'))"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(month.income) }}
+              </td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Revenus — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income'))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(monthlyAnalysis.incomeTotal.average) }}
               </td>
               <td class="num summary-col"
                   @mouseenter="scheduleHover($event, 'Revenus — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income'))"
@@ -227,6 +262,11 @@
               <td class="num summary-col"
                   @mouseenter="scheduleHover($event, 'Dépenses — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense'))"
                   @mouseleave="onCellLeave">
+                {{ formatAmount(monthlyAnalysis.expenseTotal.average) }}
+              </td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Dépenses — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense'))"
+                  @mouseleave="onCellLeave">
                 {{ formatAmount(monthlyAnalysis.expenseTotal.total) }}
               </td>
             </tr>
@@ -237,6 +277,11 @@
                   @mouseenter="scheduleHover($event, 'Solde — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, null))"
                   @mouseleave="onCellLeave">
                 <strong>{{ formatAmount(month.net) }}</strong>
+              </td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Solde — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, null))"
+                  @mouseleave="onCellLeave">
+                <strong>{{ formatAmount(Number(monthlyAnalysis.incomeTotal.average) - Number(monthlyAnalysis.expenseTotal.average)) }}</strong>
               </td>
               <td class="num summary-col"
                   @mouseenter="scheduleHover($event, 'Solde — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, null))"
@@ -269,60 +314,60 @@
             </tr>
           </thead>
 
-          <tbody>
-            <template v-for="group in incomeGroups" :key="'income-' + group.key">
-              <tr class="category-row">
-                <td class="category-sticky category-name">
-                  <button v-if="group.children.length" class="collapse-button"
-                          @click="toggleMonthlyGroup('income', group.key)"
-                          :title="isMonthlyGroupCollapsed('income', group.key) ? 'Développer' : 'Replier'">
-                    {{ isMonthlyGroupCollapsed('income', group.key) ? '▸' : '▾' }}
-                  </button>
-                  <span v-else class="collapse-placeholder"></span>
-                  <strong>{{ group.name }}</strong>
+          <tbody v-for="(group, i) in incomeGroups" :key="'income-' + group.key" :class="{ 'category-group-alt': i % 2 === 1 }">
+            <tr class="category-row">
+              <td class="category-sticky category-name">
+                <button v-if="group.children.length" class="collapse-button"
+                        @click="toggleMonthlyGroup('income', group.key)"
+                        :title="isMonthlyGroupCollapsed('income', group.key) ? 'Développer' : 'Replier'">
+                  {{ isMonthlyGroupCollapsed('income', group.key) ? '▸' : '▾' }}
+                </button>
+                <span v-else class="collapse-placeholder"></span>
+                <strong>{{ group.name }}</strong>
+              </td>
+              <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                  @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', groupCategoryFilter(group)))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(group.values[month.key]) }}
+              </td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', groupCategoryFilter(group)))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(group.average) }}
+              </td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', groupCategoryFilter(group)))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(group.total) }}
+              </td>
+            </tr>
+
+            <template v-if="!isMonthlyGroupCollapsed('income', group.key)">
+              <tr v-for="child in group.children" :key="'income-child-' + child.key"
+                  class="subcategory-row">
+                <td class="category-sticky category-name subcategory-name">
+                  └ {{ child.name }}
                 </td>
                 <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                    @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', groupCategoryFilter(group)))"
+                    @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', childCategoryFilter(child)))"
                     @mouseleave="onCellLeave">
-                  {{ formatAmount(group.values[month.key]) }}
+                  {{ formatAmount(child.values[month.key]) }}
                 </td>
                 <td class="num summary-col"
-                    @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', groupCategoryFilter(group)))"
+                    @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', childCategoryFilter(child)))"
                     @mouseleave="onCellLeave">
-                  {{ formatAmount(group.average) }}
+                  {{ formatAmount(child.average) }}
                 </td>
                 <td class="num summary-col"
-                    @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', groupCategoryFilter(group)))"
+                    @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', childCategoryFilter(child)))"
                     @mouseleave="onCellLeave">
-                  {{ formatAmount(group.total) }}
+                  {{ formatAmount(child.total) }}
                 </td>
               </tr>
-
-              <template v-if="!isMonthlyGroupCollapsed('income', group.key)">
-                <tr v-for="child in group.children" :key="'income-child-' + child.key"
-                    class="subcategory-row">
-                  <td class="category-sticky category-name subcategory-name">
-                    └ {{ child.name }}
-                  </td>
-                  <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                      @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', childCategoryFilter(child)))"
-                      @mouseleave="onCellLeave">
-                    {{ formatAmount(child.values[month.key]) }}
-                  </td>
-                  <td class="num summary-col"
-                      @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', childCategoryFilter(child)))"
-                      @mouseleave="onCellLeave">
-                    {{ formatAmount(child.average) }}
-                  </td>
-                  <td class="num summary-col"
-                      @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', childCategoryFilter(child)))"
-                      @mouseleave="onCellLeave">
-                    {{ formatAmount(child.total) }}
-                  </td>
-                </tr>
-              </template>
             </template>
+          </tbody>
 
+          <tbody>
             <tr class="total-row income-total-row">
               <td class="category-sticky"><strong>{{ monthlyAnalysis.incomeTotal.name }}</strong></td>
               <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
@@ -366,60 +411,60 @@
             </tr>
           </thead>
 
-          <tbody>
-            <template v-for="group in expenseGroups" :key="'expense-' + group.key">
-              <tr class="category-row">
-                <td class="category-sticky category-name">
-                  <button v-if="group.children.length" class="collapse-button"
-                          @click="toggleMonthlyGroup('expense', group.key)"
-                          :title="isMonthlyGroupCollapsed('expense', group.key) ? 'Développer' : 'Replier'">
-                    {{ isMonthlyGroupCollapsed('expense', group.key) ? '▸' : '▾' }}
-                  </button>
-                  <span v-else class="collapse-placeholder"></span>
-                  <strong>{{ group.name }}</strong>
+          <tbody v-for="(group, i) in expenseGroups" :key="'expense-' + group.key" :class="{ 'category-group-alt': i % 2 === 1 }">
+            <tr class="category-row">
+              <td class="category-sticky category-name">
+                <button v-if="group.children.length" class="collapse-button"
+                        @click="toggleMonthlyGroup('expense', group.key)"
+                        :title="isMonthlyGroupCollapsed('expense', group.key) ? 'Développer' : 'Replier'">
+                  {{ isMonthlyGroupCollapsed('expense', group.key) ? '▸' : '▾' }}
+                </button>
+                <span v-else class="collapse-placeholder"></span>
+                <strong>{{ group.name }}</strong>
+              </td>
+              <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                  @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', groupCategoryFilter(group)))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(group.values[month.key]) }}
+              </td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', groupCategoryFilter(group)))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(group.average) }}
+              </td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', groupCategoryFilter(group)))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(group.total) }}
+              </td>
+            </tr>
+
+            <template v-if="!isMonthlyGroupCollapsed('expense', group.key)">
+              <tr v-for="child in group.children" :key="'expense-child-' + child.key"
+                  class="subcategory-row">
+                <td class="category-sticky category-name subcategory-name">
+                  └ {{ child.name }}
                 </td>
                 <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                    @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', groupCategoryFilter(group)))"
+                    @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', childCategoryFilter(child)))"
                     @mouseleave="onCellLeave">
-                  {{ formatAmount(group.values[month.key]) }}
+                  {{ formatAmount(child.values[month.key]) }}
                 </td>
                 <td class="num summary-col"
-                    @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', groupCategoryFilter(group)))"
+                    @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', childCategoryFilter(child)))"
                     @mouseleave="onCellLeave">
-                  {{ formatAmount(group.average) }}
+                  {{ formatAmount(child.average) }}
                 </td>
                 <td class="num summary-col"
-                    @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', groupCategoryFilter(group)))"
+                    @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', childCategoryFilter(child)))"
                     @mouseleave="onCellLeave">
-                  {{ formatAmount(group.total) }}
+                  {{ formatAmount(child.total) }}
                 </td>
               </tr>
-
-              <template v-if="!isMonthlyGroupCollapsed('expense', group.key)">
-                <tr v-for="child in group.children" :key="'expense-child-' + child.key"
-                    class="subcategory-row">
-                  <td class="category-sticky category-name subcategory-name">
-                    └ {{ child.name }}
-                  </td>
-                  <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                      @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', childCategoryFilter(child)))"
-                      @mouseleave="onCellLeave">
-                    {{ formatAmount(child.values[month.key]) }}
-                  </td>
-                  <td class="num summary-col"
-                      @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', childCategoryFilter(child)))"
-                      @mouseleave="onCellLeave">
-                    {{ formatAmount(child.average) }}
-                  </td>
-                  <td class="num summary-col"
-                      @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', childCategoryFilter(child)))"
-                      @mouseleave="onCellLeave">
-                    {{ formatAmount(child.total) }}
-                  </td>
-                </tr>
-              </template>
             </template>
+          </tbody>
 
+          <tbody>
             <tr class="total-row expense-total-row">
               <td class="category-sticky"><strong>{{ monthlyAnalysis.expenseTotal.name }}</strong></td>
               <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
@@ -460,7 +505,7 @@
 
 <script setup>
 import { ref, onMounted, computed, nextTick } from 'vue'
-import { AccountsAPI, ReportsAPI, LoansAPI } from '../services/api'
+import { AccountsAPI, ReportsAPI, LoansAPI, ExportAPI } from '../services/api'
 import { formatAmount } from '../services/format'
 import CellTransactionsPopover from '../components/CellTransactionsPopover.vue'
 import Chart from 'chart.js/auto'
@@ -476,6 +521,36 @@ const savingsChart = ref(null)
 let forecastChartInstance = null
 let savingsChartInstance = null
 const hasLoans = ref(false)
+
+const exporting = ref(false)
+
+/** Export manuel du tableau de bord en PDF (voir aussi Transactions.vue#validateAll, qui déclenche le même export après validation en masse). */
+async function exportDashboard() {
+  exporting.value = true
+  try {
+    await ExportAPI.dashboardPdf()
+  } catch (e) {
+    alert('Export PDF échoué : ' + (e.response?.data?.error || e.message))
+  } finally {
+    exporting.value = false
+  }
+}
+
+/**
+ * Mode d'affichage du graphique "Évolution du solde" : 'combined' additionne
+ * solde et capital des prêts en une seule courbe (comportement historique),
+ * 'separate' affiche les deux courbes independamment. Bascule via le bouton
+ * toggleChartMode, sans recharger les donnees (voir lastForecastPoints/
+ * lastLoanOwnedSeries ci-dessous).
+ */
+const chartDisplayMode = ref('combined')
+let lastForecastPoints = []
+let lastLoanOwnedSeries = null
+
+function toggleChartMode() {
+  chartDisplayMode.value = chartDisplayMode.value === 'combined' ? 'separate' : 'combined'
+  renderForecastChart(lastForecastPoints, lastLoanOwnedSeries)
+}
 
 // --- "Où va mon argent ?" + tableaux d'analyse mensuelle (ex-page Rapports,
 // desormais integres au tableau de bord). Portee sur l'ensemble des comptes,
@@ -510,6 +585,35 @@ function positionFromEvent(event) {
 }
 
 /**
+ * Fusionne les lignes qui partagent le meme tiers en une seule (montant
+ * additionne, date la plus recente conservee) : sert surtout a recombiner
+ * les tranches d'une transaction annualisee (voir ServiceRapport#attributedTransactions),
+ * qui remontent sinon comme autant de lignes distinctes (une par mois de la
+ * fenetre de 12 mois couverte par la cellule survolee, meme id de
+ * transaction a chaque fois) pour ce qui est en realite UNE seule depense/
+ * revenu. Les lignes sans tiers ne sont jamais fusionnees entre elles
+ * (souvent des virements ou cas ponctuels sans rapport les uns aux autres).
+ */
+function mergeRowsByPayee(rows) {
+  const merged = new Map()
+  const withoutPayee = []
+  for (const row of rows) {
+    if (!row.payee) {
+      withoutPayee.push(row)
+      continue
+    }
+    const existing = merged.get(row.payee)
+    if (existing) {
+      existing.amount += Number(row.amount)
+      if (row.date > existing.date) existing.date = row.date
+    } else {
+      merged.set(row.payee, { ...row, amount: Number(row.amount) })
+    }
+  }
+  return [...merged.values(), ...withoutPayee]
+}
+
+/**
  * Declenche l'affichage du popover apres HOVER_DELAY_MS de survol continu de
  * la cellule (pour eviter l'apparition intempestive au simple passage de la
  * souris). `loadRows` doit renvoyer un tableau de { id, date, payee, amount }
@@ -527,7 +631,15 @@ function scheduleHover(event, title, loadRows) {
       const rows = await loadRows()
       if (token !== requestToken) return
       const total = rows.reduce((sum, r) => sum + Number(r.amount || 0), 0)
-      hover.value = { visible: true, loading: false, x, y, title, rows, total }
+      const mergedRows = mergeRowsByPayee(rows)
+      // Tri par montant decroissant en valeur ABSOLUE (pas juste par valeur
+      // signee) : sur une liste d'un seul sens (que des depenses, ex. "Alimentation :
+      // Courses"), trier par valeur signee decroissante mettait la plus PETITE
+      // depense en premier (-1,15€ avant -1,25€, puisque -1,15 > -1,25) — l'inverse
+      // de "decroissant" au sens ou l'utilisateur l'entend (la plus grosse
+      // transaction en premier, quel que soit le sens).
+      const sortedRows = mergedRows.sort((a, b) => Math.abs(Number(b.amount)) - Math.abs(Number(a.amount)))
+      hover.value = { visible: true, loading: false, x, y, title, rows: sortedRows, total }
     } catch {
       if (token !== requestToken) return
       hover.value = { ...hover.value, loading: false }
@@ -835,38 +947,130 @@ function buildLoanOwnedSeries(points, loansList, schedules) {
 }
 
 /**
+ * Couleur commune a toutes les portions "previsionnel" des courbes du
+ * tableau de bord : gris neutre, plutot qu'une teinte plus claire de la
+ * couleur "reelle" de chaque serie (essaye d'abord, voir historique du
+ * fichier) — a l'echelle fine d'une ligne de graphique, un simple
+ * eclaircissement restait trop proche du reel pour se voir sans zoomer,
+ * meme pousse. Un gris franc, lui, se distingue d'un coup d'œil quelle que
+ * soit la couleur "reelle" de la serie (indigo du solde, ambre du capital
+ * des prets...), au prix d'une petite concession en mode "courbes
+ * separees" : les deux previsionnels (solde et capital des prets) partagent
+ * alors ce meme gris plutot que de garder chacun leur teinte — mais restent
+ * distinguables par leur trajectoire, et surtout par le trait plein de
+ * meme couleur juste avant, dont ils prolongent directement la courbe.
+ */
+const FORECAST_COLOR = '#9AA3B5'
+
+/** Couleur hexadecimale -> rgba() avec une opacite donnee, pour les remplissages sous les courbes. */
+function hexToRgba(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16)
+  const r = (n >> 16) & 0xff
+  const g = (n >> 8) & 0xff
+  const b = n & 0xff
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+/**
+ * Construit, pour une serie de valeurs, la paire de datasets Chart.js
+ * "reel" (trait plein, couleur pleine) / "previsionnel" (pointille, couleur
+ * eclaircie) — meme principe que le graphique "Evolution du capital restant
+ * du" de la page Prets (voir Loans.vue#renderChart) : la distinction
+ * reel/previsionnel passe par une couleur ET un trait differents, pas
+ * seulement le trait comme avant ici (segment.borderDash sur un dataset
+ * unique). Les deux tableaux de donnees se chevauchent EXACTEMENT sur
+ * junctionIndex (meme valeur des deux cotes, le reste a null + spanGaps:
+ * false) pour que les deux segments se rejoignent visuellement sans coupure.
+ * `future.isForecastVariant` sert a exclure ce second dataset de la legende
+ * (voir plugins.legend.labels.filter plus bas) : une seule entree par serie
+ * logique, pas une par dataset Chart.js.
+ */
+function pastFutureDatasets(label, data, junctionIndex, color) {
+  const futureColor = FORECAST_COLOR
+  const pastData = data.map((v, i) => (i <= junctionIndex ? v : null))
+  const futureData = data.map((v, i) => (i >= junctionIndex ? v : null))
+  const pointRadiusAtJunction = (ctx) => (ctx.dataIndex === junctionIndex ? 4 : 0)
+
+  return [
+    {
+      label,
+      data: pastData,
+      borderColor: color,
+      backgroundColor: hexToRgba(color, 0.10),
+      fill: true,
+      tension: 0.25,
+      pointRadius: pointRadiusAtJunction,
+      pointBackgroundColor: color,
+      borderWidth: 2,
+      spanGaps: false
+    },
+    {
+      label: `${label} (prévisionnel)`,
+      isForecastVariant: true,
+      data: futureData,
+      borderColor: futureColor,
+      backgroundColor: hexToRgba(futureColor, 0.10),
+      borderDash: [6, 5],
+      fill: true,
+      tension: 0.25,
+      pointRadius: pointRadiusAtJunction,
+      pointBackgroundColor: futureColor,
+      borderWidth: 2,
+      spanGaps: false
+    }
+  ]
+}
+
+/**
  * Affiche le solde sur 12 mois historiques (deja termines) + 12 mois
- * prévisionnels a partir du mois en cours inclus, en une seule courbe (un
- * seul dataset/entree de legende) mais en pointille a partir du mois en
- * cours (voir "segment.borderDash") pour distinguer visuellement le
- * prévisionnel. Si l'utilisateur a des prets, le capital deja rembourse
- * (voir buildLoanOwnedSeries) est additionne au solde de chaque mois,
- * sinon la courbe correspond simplement au solde.
+ * prévisionnels a partir du mois en cours inclus, en couleur eclaircie et
+ * pointille a partir du mois en cours (voir pastFutureDatasets) pour
+ * distinguer visuellement le prévisionnel du reel. Si l'utilisateur a des
+ * prets, deux modes sont possibles (voir chartDisplayMode, bascule via
+ * toggleChartMode) : 'combined' additionne le capital deja rembourse (voir
+ * buildLoanOwnedSeries) au solde en une seule courbe (comportement
+ * historique), 'separate' affiche les deux courbes independamment. Sans
+ * pret, la courbe correspond simplement au solde quel que soit le mode.
  */
 function renderForecastChart(points, loanOwnedSeries) {
-  const data = points.map((p, i) => Number(p.balance) + (loanOwnedSeries ? Number(loanOwnedSeries[i]) : 0))
+  lastForecastPoints = points
+  lastLoanOwnedSeries = loanOwnedSeries
+
   const firstForecastIndex = points.findIndex(p => p.type === 'previsionnel')
   // Si aucun point previsionnel n'est visible (fenetre entierement passee,
   // navigation loin en arriere), pas de jonction : toute la courbe reste
   // pleine plutot que de tomber sur un index negatif qui pointillerait tout.
   const junctionIndex = firstForecastIndex === -1 ? points.length - 1 : firstForecastIndex - 1
 
-  const datasets = [
-    {
-      label: 'Solde',
-      data,
-      borderColor: '#5B4FCF',
-      backgroundColor: 'rgba(91, 79, 207, 0.10)',
-      fill: true,
-      tension: 0.25,
-      pointRadius: (ctx) => (ctx.dataIndex === junctionIndex ? 4 : 0),
-      pointBackgroundColor: '#5B4FCF',
-      borderWidth: 2,
-      segment: {
-        borderDash: (ctx) => (ctx.p1DataIndex > junctionIndex ? [6, 5] : undefined)
+  const showSeparate = !!loanOwnedSeries && chartDisplayMode.value === 'separate'
+
+  const datasets = showSeparate
+    ? [
+        ...pastFutureDatasets('Solde', points.map(p => Number(p.balance)), junctionIndex, '#5B4FCF'),
+        ...pastFutureDatasets('Capital des prêts', loanOwnedSeries.map(Number), junctionIndex, '#C98A1B')
+      ]
+    : pastFutureDatasets(
+        'Solde',
+        points.map((p, i) => Number(p.balance) + (loanOwnedSeries ? Number(loanOwnedSeries[i]) : 0)),
+        junctionIndex,
+        '#5B4FCF'
+      )
+
+  const tooltipLabel = showSeparate
+    ? (ctx) => `${ctx.dataset.label} : ${formatAmount(ctx.parsed.y)}`
+    : (ctx) => {
+        if (!loanOwnedSeries) return `Solde : ${formatAmount(ctx.parsed.y)}`
+        // Detail solde / capital prets / total meme si une seule courbe est
+        // affichee (voir "data" ci-dessus) : les deux composantes de la somme
+        // restent utiles au survol.
+        const balance = Number(points[ctx.dataIndex].balance)
+        const loanCapital = Number(loanOwnedSeries[ctx.dataIndex])
+        return [
+          `Solde : ${formatAmount(balance)}`,
+          `Capital des prêts : ${formatAmount(loanCapital)}`,
+          `Total : ${formatAmount(balance + loanCapital)}`
+        ]
       }
-    }
-  ]
 
   if (forecastChartInstance) forecastChartInstance.destroy()
   forecastChartInstance = new Chart(forecastChart.value, {
@@ -879,22 +1083,26 @@ function renderForecastChart(points, loanOwnedSeries) {
       responsive: true,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { display: false },
+        legend: {
+          display: showSeparate,
+          // Une seule entree de legende par serie logique (Solde, Capital
+          // des prets), pas une par dataset Chart.js : le dataset
+          // "previsionnel" (voir pastFutureDatasets) est exclu.
+          labels: {
+            filter: (legendItem, data) => !data.datasets[legendItem.datasetIndex]?.isForecastVariant
+          }
+        },
         tooltip: {
+          // Au point de jonction, le dataset "previsionnel" porte
+          // volontairement la meme valeur que le dataset "reel" (voir
+          // pastFutureDatasets, pour que les deux segments se rejoignent
+          // visuellement) : sans ce filtre, le survol de ce point precis
+          // affichait la meme ligne deux fois (une par dataset). On exclut
+          // donc la ligne du dataset "previsionnel" a cet index uniquement —
+          // le reel, deja identique a cet endroit precis, reste affiche seul.
+          filter: (item) => !(item.dataset.isForecastVariant && item.dataIndex === junctionIndex),
           callbacks: {
-            // Detail solde / capital prets / total meme si une seule courbe
-            // est affichee (voir "data" ci-dessus) : les deux composantes de
-            // la somme restent utiles au survol.
-            label: (ctx) => {
-              if (!loanOwnedSeries) return `Solde : ${formatAmount(ctx.parsed.y)}`
-              const balance = Number(points[ctx.dataIndex].balance)
-              const loanCapital = Number(loanOwnedSeries[ctx.dataIndex])
-              return [
-                `Solde : ${formatAmount(balance)}`,
-                `Capital des prêts : ${formatAmount(loanCapital)}`,
-                `Total : ${formatAmount(balance + loanCapital)}`
-              ]
-            }
+            label: tooltipLabel
           }
         }
       },
@@ -923,6 +1131,10 @@ function renderSavingsChart(points) {
     },
     options: {
       responsive: true,
+      // Le canevas doit remplir toute la hauteur de .savings-chart-wrap
+      // (voir Dashboard.vue : carte étirée à la même hauteur que "Dépenses/
+      // Revenus périodiques"), pas un ratio largeur/hauteur fixe.
+      maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -986,6 +1198,62 @@ onMounted(loadDashboard)
   margin: 12px 0 0;
   font-size: 12px;
   color: var(--text-faint);
+}
+
+.chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.chart-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: var(--ink-800);
+  border-radius: var(--radius-md);
+  padding: 4px 10px 4px 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.chart-mode-toggle:hover {
+  background: var(--ink-700);
+}
+.toggle-track {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--line);
+  flex-shrink: 0;
+  transition: background 0.2s ease;
+}
+.chart-mode-toggle.is-separate .toggle-track {
+  background: #5B4FCF;
+}
+.toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease;
+}
+.chart-mode-toggle.is-separate .toggle-thumb {
+  transform: translateX(16px);
+}
+.toggle-label {
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /*
@@ -1055,14 +1323,75 @@ onMounted(loadDashboard)
   cursor: default;
 }
 
-.dashboard-grid {
+/* Rangée "Épargne mensuelle" + "Dépenses/Revenus périodiques" sur la même
+   ligne à l'écran (demande : réduire la largeur de ces trois cartes) :
+   1 colonne pour l'épargne, 2 colonnes (via .periodic-grid imbriqué) pour les
+   périodiques, donc trois blocs de largeur comparable. En impression, cette
+   grille est désactivée (voir @media print plus bas) pour retrouver la mise
+   en page d'origine (épargne pleine largeur en page 1, périodiques en page 2
+   — .periodic-grid garde son saut de page dédié, inchangé).
+   Pas d'align-items: la valeur par défaut (stretch) étire la carte épargne
+   (moins haute) à la même hauteur que la colonne périodiques : demande
+   explicite de faire correspondre les hauteurs. */
+.top-row-grid {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr;
+  grid-template-columns: 1fr 2fr;
   gap: 20px;
   margin-bottom: 28px;
 }
+@media (max-width: 1100px) {
+  .top-row-grid { grid-template-columns: 1fr; }
+}
+
+/* La carte "Épargne mensuelle" est étirée à la hauteur des cartes
+   périodiques voisines (stretch de .top-row-grid) ; ici, le graphique
+   lui-même remplit cet espace au lieu de laisser du vide sous la légende.
+   Colonne flex : le label et la note gardent leur taille naturelle,
+   .savings-chart-wrap absorbe tout l'espace restant (flex: 1). min-height
+   sert de repli quand la carte n'est pas étirée (ex. impression, voir
+   @media print plus bas : .top-row-grid y redevient display:block). */
+.savings-card {
+  display: flex;
+  flex-direction: column;
+}
+.savings-chart-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 160px;
+}
+.savings-chart-wrap canvas {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.periodic-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
 @media (max-width: 860px) {
-  .dashboard-grid { grid-template-columns: 1fr; }
+  .periodic-grid { grid-template-columns: 1fr; }
+}
+
+/* Cartes "Épargne mensuelle", "Dépenses/Revenus périodiques" et "Où va mon
+   argent ?" : padding réduit par rapport à .card par défaut (22px) pour que
+   ces trois cartes prennent moins de place à l'écran (l'export PDF n'est pas
+   concerné, voir la règle @media print de .card qui repasse à 16px). */
+.compact-card {
+  padding: 16px 18px;
+}
+
+/* Au-delà de quelques tiers, la liste défile plutôt que d'agrandir la carte
+   (même logique que .where-table-wrap juste en dessous). scrollbar-gutter
+   réserve la place de la barre de défilement même quand elle n'est pas
+   affichée, pour que le montant ne saute pas d'une position à l'autre selon
+   le nombre de lignes. */
+.periodic-table-wrap {
+  max-height: 190px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .plain-table {
@@ -1070,9 +1399,14 @@ onMounted(loadDashboard)
   border-collapse: collapse;
 }
 .plain-table td {
-  padding: 8px 0;
+  padding: 6px 0;
   border-bottom: 1px solid var(--line);
-  font-size: 14px;
+  font-size: 13px;
+}
+/* Montant décalé de la bordure droite : sinon collé à la barre de
+   défilement quand la liste dépasse les 190px de .periodic-table-wrap. */
+.plain-table td.num {
+  padding-right: 6px;
 }
 .plain-table tr:last-child td {
   border-bottom: none;
@@ -1082,10 +1416,15 @@ onMounted(loadDashboard)
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 14px;
-  padding-top: 12px;
+  margin-top: 10px;
+  padding-top: 8px;
   border-top: 2px solid var(--line);
   font-weight: 700;
+  font-size: 14px;
+}
+
+.compact-empty-state {
+  padding: 24px 16px;
 }
 
 .legend-dot {
@@ -1099,8 +1438,8 @@ onMounted(loadDashboard)
 /* --- "Où va mon argent ?" : donut compact à gauche + tableau détaillé à droite --- */
 .where-money-layout {
   display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 32px;
+  grid-template-columns: 150px 1fr;
+  gap: 24px;
   align-items: center;
 }
 @media (max-width: 640px) {
@@ -1112,8 +1451,8 @@ onMounted(loadDashboard)
 
 .donut-wrap {
   position: relative;
-  width: 200px;
-  height: 200px;
+  width: 150px;
+  height: 150px;
   margin: 0 auto;
 }
 .donut-center {
@@ -1127,40 +1466,40 @@ onMounted(loadDashboard)
   pointer-events: none;
 }
 .donut-center-value {
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 800;
   color: var(--text-primary);
   line-height: 1.2;
 }
 .donut-center-label {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-faint);
   margin-top: 2px;
 }
 
 .where-table-wrap {
-  max-height: 260px;
+  max-height: 190px;
   overflow-y: auto;
 }
 .where-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
 }
 .where-table th {
   position: sticky;
   top: 0;
   background: var(--ink-900);
   text-align: left;
-  padding: 0 0 8px;
-  font-size: 11px;
+  padding: 0 0 6px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: .06em;
   color: var(--text-faint);
   font-weight: 700;
 }
 .where-table td {
-  padding: 7px 0;
+  padding: 5px 0;
   border-bottom: 1px solid var(--line);
 }
 .where-table tbody tr:hover td {
@@ -1204,12 +1543,12 @@ onMounted(loadDashboard)
   min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 11px;
+  font-size: 12.5px;
 }
 
 .monthly-analysis-table th,
 .monthly-analysis-table td {
-  padding: 6px 5px;
+  padding: 8px 8px;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
@@ -1220,16 +1559,20 @@ onMounted(loadDashboard)
   z-index: 4;
   background: var(--ink-900);
   color: var(--text-faint);
-  font-size: 9px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: .05em;
+  /* Ligne de separation nette entre l'entete fige et le contenu qui defile
+     dessous (le simple border-bottom des cellules ne suffit pas a se voir
+     une fois l'entete "detache" visuellement par le scroll). */
+  box-shadow: 0 1px 0 var(--line);
 }
 
 .monthly-analysis-table .category-sticky {
   position: sticky;
   left: 0;
   z-index: 3;
-  min-width: 120px;
+  min-width: 160px;
   text-align: left;
   background: var(--ink-900);
   border-right: 1px solid var(--line);
@@ -1240,19 +1583,67 @@ onMounted(loadDashboard)
 }
 
 .monthly-analysis-table .num {
-  min-width: 58px;
+  min-width: 68px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.monthly-analysis-table .summary-col {
+/*
+ * "Moyenne"/"Total" : colonnes d'agregat distinguees du detail mensuel par
+ * un fond gris et une bordure epaisse a gauche (repere visuel net avec 12
+ * colonnes de mois entre elles et la categorie). Selecteur a DEUX classes
+ * (".num.summary-col", combinaison presente sur chaque cellule concernee,
+ * voir le template) plutot qu'une seule (".summary-col") : une regle a une
+ * seule classe a specificite CSS egale a ".category-row td" en nombre de
+ * classes (une chacune), donc c'est le nombre de balises (3 pour "tbody tr td")
+ * qui tranchait alors en faveur du fond blanc de la ligne — a tort, ca
+ * ecrasait le gris voulu sur cette colonne dans les lignes de categorie
+ * racine. Deux classes ici suffit a l'emporter d'entree, quelle que soit la
+ * ligne.
+ */
+.monthly-analysis-table .num.summary-col {
   background: var(--ink-800);
   font-weight: 600;
+}
+.monthly-analysis-table .summary-col:nth-last-child(2) {
+  border-left: 2px solid var(--line);
+}
+/*
+ * "Total" (derniere colonne) reste visible en permanence pendant le
+ * defilement horizontal, meme avec 12 mois affiches entre la categorie et
+ * lui : c'etait le principal reproche de lisibilite sur ces tableaux (il
+ * fallait defiler jusqu'au bout pour comparer le total de plusieurs lignes).
+ * Meme principe que la colonne Actions de l'onglet Transactions.
+ */
+.monthly-analysis-table td.summary-col:last-child {
+  position: sticky;
+  right: 0;
+  box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
+}
+.monthly-analysis-table th.summary-col:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 7;
+  box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
 }
 
 .monthly-analysis-table tbody tr.category-row td {
   background: var(--ink-900);
   font-weight: 600;
+}
+
+/* Alternance de fond par groupe categorie + sous-categories (voir
+   category-group-alt sur le <tbody>, un par groupe) : repere visuel pour
+   suivre une ligne sur toute sa largeur au milieu de 12 colonnes de mois,
+   sans devoir se fier uniquement au trait de separation horizontal. */
+.monthly-analysis-table tbody.category-group-alt tr.category-row td {
+  background: var(--ink-950);
+}
+.monthly-analysis-table tbody.category-group-alt tr.subcategory-row td {
+  background: var(--ink-950);
+}
+.monthly-analysis-table tbody.category-group-alt .num.summary-col {
+  background: var(--ink-800);
 }
 
 .monthly-analysis-table tbody tr.category-row:hover td,
@@ -1265,7 +1656,7 @@ onMounted(loadDashboard)
 }
 
 .monthly-analysis-table tbody tr.subcategory-row .category-sticky {
-  padding-left: 18px;
+  padding-left: 22px;
 }
 
 .monthly-analysis-table .total-row td {
@@ -1292,18 +1683,134 @@ onMounted(loadDashboard)
 }
 
 .collapse-button {
-  width: 16px;
+  width: 18px;
+  height: 18px;
   padding: 0;
-  margin-right: 2px;
+  margin-right: 4px;
   border: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
+}
+.collapse-button:hover {
+  background: var(--ink-700);
+  color: var(--text-primary);
 }
 
 .collapse-placeholder {
   display: inline-block;
   width: 18px;
 }
+
+/* --- Export PDF (voir export/export-dashboard.mjs) ---
+   Placees en fin de fichier pour gagner la cascade face aux regles ci-dessus
+   (meme specificite, media print inclus) : une regle @media print definie
+   plus haut dans ce fichier serait ecrasee par la regle non conditionnelle
+   qui la suit, puisque toutes deux s'appliquent pendant l'impression. */
+
+/* Le position:fixed de .month-nav se repete sur chaque page imprimee et
+   chevauche l'entete — on le desactive pour qu'il rejoigne le flux normal
+   du .page-header, et on masque les boutons interactifs (fleches, export),
+   inutiles sur un PDF. */
+@media print {
+  .month-nav {
+    position: static;
+    box-shadow: none;
+    background: transparent;
+    border: none;
+    padding: 0;
+  }
+  .month-nav-btn,
+  .export-btn {
+    display: none;
+  }
+}
+
+/* .monthly-analysis-wrap plafonne la hauteur a 720px avec defilement pour
+   l'usage a l'ecran — on retire le plafond pour laisser le tableau s'etaler
+   sur plusieurs pages (le thead se repete naturellement a chaque saut de
+   page). Le position:sticky (pense pour le defilement a l'ecran) n'a plus de
+   sens sans conteneur qui scrolle : on repasse en position statique (colonne
+   "Total" comprise, sticky a droite a l'ecran depuis l'amelioration de
+   lisibilite de ces tableaux). Et avec 14 colonnes (12 mois + moyenne +
+   total), le padding ecran (8px 8px) fait deborder la derniere colonne meme
+   en paysage — on resserre. */
+@media print {
+  .monthly-analysis-wrap {
+    max-height: none;
+    overflow: visible;
+  }
+  .monthly-analysis-table thead th,
+  .monthly-analysis-table .category-sticky,
+  .monthly-analysis-table .summary-col {
+    position: static;
+    box-shadow: none;
+  }
+  .monthly-analysis-table th,
+  .monthly-analysis-table td {
+    padding: 4px 3px;
+  }
+}
+
+/* Tableau du graphique "Ou va mon argent ?" : contrairement aux tableaux
+   d'analyse mensuelle, on VEUT que cette carte tienne sur une seule page —
+   donc on garde une hauteur plafonnee (plus genereuse que les 260px ecran,
+   pour montrer davantage de categories, mais bornee pour que carte
+   (titre + donut + tableau) reste sous la hauteur d'une page A4 paysage).
+   Le position:sticky de l'entete de colonne, lui, doit etre desactive dans
+   tous les cas : meme sans defilement possible en PDF, il produit un
+   artefact d'impression qui tronque le debut du texte de l'entete (le "C"
+   de "Categorie" coupe). */
+@media print {
+  .where-table-wrap {
+    max-height: 460px;
+    overflow: hidden;
+  }
+  .where-table th {
+    position: static;
+  }
+}
+
+/* Page 1 de l'export : cartes de solde/revenus/depenses/net, evolution du
+   solde, puis depenses/revenus periodiques a la suite si la place le permet
+   (demande explicite : plus de saut de page force vers la page 2 — chaque
+   carte garde juste son "avoid" habituel, voir .card dans style.css, pour ne
+   jamais etre coupee en deux si elle doit basculer sur la page suivante).
+   Le graphique "Epargne mensuelle" est exclu de l'export (demande
+   explicite) : masque uniquement a l'impression, il reste visible a l'ecran
+   — ca degage justement la place qui permet aux periodiques de remonter en
+   page 1. .top-row-grid (epargne + periodiques cote a cote a l'ecran, voir
+   plus haut) repasse en bloc simple : .periodic-grid retrouve sa pleine
+   largeur juste apres, dans le flux normal. */
+@media print {
+  .top-row-grid {
+    display: block;
+    margin-bottom: 0;
+  }
+  .savings-card {
+    display: none;
+  }
+  .periodic-grid {
+    margin-bottom: 28px;
+  }
+}
+
+/* .compact-card et .periodic-table-wrap reduisent la place a l'ecran
+   (voir plus haut) mais ne doivent pas affecter le PDF : la specificite du
+   selecteur scope (attribut ajoute par Vue) l'emporterait sinon sur le
+   padding de .card defini dans style.css pour l'impression, et le defilement
+   de la liste des periodiques n'a pas de sens sur une page imprimee (pas de
+   scrollbar : le contenu serait simplement tronque). */
+@media print {
+  .compact-card {
+    padding: 16px;
+  }
+  .periodic-table-wrap {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
 </style>

@@ -4,6 +4,7 @@ import com.homebank.dto.GroupeDoublonDTO;
 import com.homebank.dto.SuggestionPeriodiqueDTO;
 import com.homebank.dto.TransactionBulkUpdateDTO;
 import com.homebank.dto.TransactionDTO;
+import com.homebank.dto.DemandeDivisionDTO;
 import com.homebank.dto.DemandeVirementDTO;
 import com.homebank.service.ServiceTransaction;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -62,9 +63,9 @@ public class ControleurTransaction {
         return transactionService.togglePeriodicExpense(id);
     }
 
-    @PostMapping("/{id}/toggle-annualized")
-    public TransactionDTO toggleAnnualized(@PathVariable Long id) {
-        return transactionService.toggleAnnualized(id);
+    @PostMapping("/{id}/toggle-exceptional")
+    public TransactionDTO toggleExceptional(@PathVariable Long id) {
+        return transactionService.toggleExceptional(id);
     }
 
     /**
@@ -78,12 +79,34 @@ public class ControleurTransaction {
     }
 
     /**
+     * Ignore durablement une suggestion de transactions periodiques, pour
+     * qu'elle ne revienne plus a chaque visite de l'onglet "Periodiques"
+     * (voir ServiceTransaction#ignorePeriodicSuggestion).
+     */
+    @PostMapping("/ignore-periodic-suggestion")
+    public ResponseEntity<Void> ignorePeriodicSuggestion(@RequestBody List<Long> ids) {
+        transactionService.ignorePeriodicSuggestion(ids);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
      * Groupes de transactions deja en base qui semblent doublonnees (voir
      * ServiceTransaction#findDuplicateGroups), pour l'onglet "Doublons".
      */
     @GetMapping("/duplicates")
     public List<GroupeDoublonDTO> duplicates() {
         return transactionService.findDuplicateGroups();
+    }
+
+    /**
+     * Marque une ou plusieurs transactions comme n'etant pas des doublons,
+     * pour les exclure de l'onglet "Doublons" (voir
+     * ServiceTransaction#markAsNotDuplicate).
+     */
+    @PostMapping("/mark-not-duplicate")
+    public ResponseEntity<Void> markNotDuplicate(@RequestBody List<Long> ids) {
+        transactionService.markAsNotDuplicate(ids);
+        return ResponseEntity.noContent().build();
     }
 
     /**
@@ -102,6 +125,14 @@ public class ControleurTransaction {
     @PutMapping("/{id}")
     public TransactionDTO update(@PathVariable Long id, @RequestBody TransactionDTO transaction) {
         return transactionService.update(id, transaction);
+    }
+
+    /**
+     * Divise une transaction en deux (voir ServiceTransaction#splitTransaction).
+     */
+    @PostMapping("/{id}/split")
+    public List<TransactionDTO> split(@PathVariable Long id, @RequestBody DemandeDivisionDTO payload) {
+        return transactionService.splitTransaction(id, payload);
     }
 
     /**

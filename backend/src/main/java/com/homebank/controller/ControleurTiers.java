@@ -1,5 +1,6 @@
 package com.homebank.controller;
 
+import com.homebank.dto.CategorisationAutoResultatDTO;
 import com.homebank.dto.DemandeFusionDTO;
 import com.homebank.dto.TiersDTO;
 import com.homebank.service.ServiceTiers;
@@ -49,5 +50,16 @@ public class ControleurTiers {
     @PostMapping("/merge")
     public TiersDTO merge(@RequestBody DemandeFusionDTO request) {
         return payeeService.merge(request.getSourceIds(), request.getTargetId(), request.getPattern());
+    }
+
+    /**
+     * Categorise automatiquement chaque tiers sans categorie dont toutes les
+     * transactions deja categorisees s'accordent sur une seule categorie, et
+     * propage cette categorie a leurs transactions encore sans categorie.
+     * Voir ServiceTiers#autoCategorize.
+     */
+    @PostMapping("/auto-categorize")
+    public CategorisationAutoResultatDTO autoCategorize() {
+        return payeeService.autoCategorize();
     }
 }

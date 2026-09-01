@@ -28,7 +28,9 @@
           <button class="btn secondary" :disabled="marking === groupKey(group)" @click="markPeriodic(group)">
             {{ marking === groupKey(group) ? 'Marquage…' : '✓ Marquer périodique' }}
           </button>
-          <button class="btn secondary" @click="ignoreGroup(group)">Ignorer</button>
+          <button class="btn secondary" :disabled="ignoring === groupKey(group)" @click="ignoreGroup(group)">
+            {{ ignoring === groupKey(group) ? 'Marquage…' : 'Ignorer' }}
+          </button>
         </div>
       </div>
     </div>
@@ -44,33 +46,36 @@
 /**
  * Suggestions calculees cote backend (TransactionService#findPeriodicSuggestions) :
  * meme tiers + montant proche, au moins 3 occurrences, pas deja marquees
- * periodiques. "Ignorer" est purement local a la session : la suggestion
- * reapparaitra a la prochaine visite tant qu'elle n'a pas ete acceptee.
+ * periodiques. "Ignorer" marque durablement les transactions concernees
+ * (voir Transaction#periodicSuggestionIgnored / TransactionsAPI.ignorePeriodicSuggestion) :
+ * une suggestion refusee ne revient plus a la prochaine visite.
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { TransactionsAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { formatAmount, formatDate } from '../services/format'
 import TransactionsSubNav from './TransactionsSubNav.vue'
 
-const rawSuggestions = ref([])
-const ignoredKeys = ref(new Set())
+const suggestions = ref([])
 const marking = ref(null)
+const ignoring = ref(null)
 
 function groupKey(group) {
   return group.payee + '|' + (group.transactions[0]?.id ?? group.averageAmount)
 }
 
-const suggestions = computed(() =>
-  rawSuggestions.value.filter(g => !ignoredKeys.value.has(groupKey(g)))
-)
-
 async function load() {
-  rawSuggestions.value = await TransactionsAPI.periodicSuggestions()
+  suggestions.value = await TransactionsAPI.periodicSuggestions()
 }
 
-function ignoreGroup(group) {
-  ignoredKeys.value = new Set([...ignoredKeys.value, groupKey(group)])
+async function ignoreGroup(group) {
+  ignoring.value = groupKey(group)
+  try {
+    await TransactionsAPI.ignorePeriodicSuggestion(group.transactions.map(t => t.id))
+    await load()
+  } finally {
+    ignoring.value = null
+  }
 }
 
 async function markPeriodic(group) {

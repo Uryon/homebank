@@ -5,6 +5,7 @@ import com.homebank.mapper.MappeurTransaction;
 import com.homebank.model.Tiers;
 import com.homebank.model.Transaction;
 import com.homebank.repository.DepotTransaction;
+import com.homebank.repository.DepotTransactionSupprimee;
 import com.homebank.utils.ModePaiement;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,8 @@ class ServiceTransactionTest {
     @Mock
     private DepotTransaction transactionRepository;
     @Mock
+    private DepotTransactionSupprimee deletedTransactionRepository;
+    @Mock
     private ServiceCompte accountService;
     @Mock
     private ServiceCategorie categoryService;
@@ -41,7 +44,7 @@ class ServiceTransactionTest {
 
     @BeforeEach
     void setUp() {
-        service = new ServiceTransaction(transactionRepository, accountService, categoryService, payeeService, new MappeurTransaction());
+        service = new ServiceTransaction(transactionRepository, deletedTransactionRepository, accountService, categoryService, payeeService, new MappeurTransaction());
     }
 
     private static Tiers payee(Long id, String name) {

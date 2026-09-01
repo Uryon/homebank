@@ -91,6 +91,18 @@ public class ServiceCategorie {
     }
 
     /**
+     * Bascule le statut "annuelle" d'une categorie (voir Categorie#annualized) :
+     * toute transaction qui lui est affectee sera desormais (ou ne sera plus)
+     * lissee sur 12 mois dans les rapports, sans avoir a le cocher transaction
+     * par transaction.
+     */
+    public Categorie toggleAnnualized(Long id) {
+        Categorie existing = findById(id);
+        existing.setAnnualized(!existing.isAnnualized());
+        return categoryRepository.save(existing);
+    }
+
+    /**
      * Fusionne plusieurs categories (sourceIds) dans une categorie cible (targetId) :
      * - toutes les transactions des categories source sont reaffectees a la cible ;
      * - tous les tiers dont la categorie par defaut etait une source sont reaffectes a la cible ;

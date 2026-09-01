@@ -66,11 +66,13 @@
                   <strong>{{ root.name }}</strong>
                   <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
                   <span v-if="root.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
+                  <span v-if="root.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
-                <div @click.stop>
-                  <button class="btn secondary" style="margin-right:6px;" @click="openCreate(root)">+ Sous-catégorie</button>
-                  <button class="btn secondary" style="margin-right:6px;" @click="toggleHidden(root)">{{ root.hidden ? 'Réafficher' : 'Masquer' }}</button>
-                  <button class="btn danger" @click="remove(root)">Supprimer</button>
+                <div class="cat-actions" @click.stop>
+                  <button class="btn secondary cat-btn" @click="openCreate(root)">+ Sous-catégorie</button>
+                  <button class="btn secondary cat-btn" @click="toggleAnnualized(root)" title="Lisser les transactions de cette catégorie sur 12 mois dans les rapports (ex : taxe foncière, assurance annuelle)">{{ root.annualized ? 'Annuelle ✓' : 'Annuelle' }}</button>
+                  <button class="btn secondary cat-btn" @click="toggleHidden(root)">{{ root.hidden ? 'Réafficher' : 'Masquer' }}</button>
+                  <button class="btn danger cat-btn" @click="remove(root)">Supprimer</button>
                 </div>
               </template>
             </div>
@@ -104,10 +106,12 @@
                   <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
                   <span>{{ child.name }}</span>
                   <span v-if="child.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
+                  <span v-if="child.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
-                <div @click.stop>
-                  <button class="btn secondary" style="margin-right:6px;" @click="toggleHidden(child)">{{ child.hidden ? 'Réafficher' : 'Masquer' }}</button>
-                  <button class="btn danger" @click="remove(child)">Supprimer</button>
+                <div class="cat-actions" @click.stop>
+                  <button class="btn secondary cat-btn" @click="toggleAnnualized(child)" title="Lisser les transactions de cette catégorie sur 12 mois dans les rapports (ex : taxe foncière, assurance annuelle)">{{ child.annualized ? 'Annuelle ✓' : 'Annuelle' }}</button>
+                  <button class="btn secondary cat-btn" @click="toggleHidden(child)">{{ child.hidden ? 'Réafficher' : 'Masquer' }}</button>
+                  <button class="btn danger cat-btn" @click="remove(child)">Supprimer</button>
                 </div>
               </template>
             </div>
@@ -157,11 +161,13 @@
                   <strong>{{ root.name }}</strong>
                   <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
                   <span v-if="root.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
+                  <span v-if="root.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
-                <div @click.stop>
-                  <button class="btn secondary" style="margin-right:6px;" @click="openCreate(root)">+ Sous-catégorie</button>
-                  <button class="btn secondary" style="margin-right:6px;" @click="toggleHidden(root)">{{ root.hidden ? 'Réafficher' : 'Masquer' }}</button>
-                  <button class="btn danger" @click="remove(root)">Supprimer</button>
+                <div class="cat-actions" @click.stop>
+                  <button class="btn secondary cat-btn" @click="openCreate(root)">+ Sous-catégorie</button>
+                  <button class="btn secondary cat-btn" @click="toggleAnnualized(root)" title="Lisser les transactions de cette catégorie sur 12 mois dans les rapports (ex : taxe foncière, assurance annuelle)">{{ root.annualized ? 'Annuelle ✓' : 'Annuelle' }}</button>
+                  <button class="btn secondary cat-btn" @click="toggleHidden(root)">{{ root.hidden ? 'Réafficher' : 'Masquer' }}</button>
+                  <button class="btn danger cat-btn" @click="remove(root)">Supprimer</button>
                 </div>
               </template>
             </div>
@@ -195,10 +201,12 @@
                   <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
                   <span>{{ child.name }}</span>
                   <span v-if="child.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
+                  <span v-if="child.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
-                <div @click.stop>
-                  <button class="btn secondary" style="margin-right:6px;" @click="toggleHidden(child)">{{ child.hidden ? 'Réafficher' : 'Masquer' }}</button>
-                  <button class="btn danger" @click="remove(child)">Supprimer</button>
+                <div class="cat-actions" @click.stop>
+                  <button class="btn secondary cat-btn" @click="toggleAnnualized(child)" title="Lisser les transactions de cette catégorie sur 12 mois dans les rapports (ex : taxe foncière, assurance annuelle)">{{ child.annualized ? 'Annuelle ✓' : 'Annuelle' }}</button>
+                  <button class="btn secondary cat-btn" @click="toggleHidden(child)">{{ child.hidden ? 'Réafficher' : 'Masquer' }}</button>
+                  <button class="btn danger cat-btn" @click="remove(child)">Supprimer</button>
                 </div>
               </template>
             </div>
@@ -440,6 +448,17 @@ async function toggleHidden(category) {
   await load()
 }
 
+/**
+ * Bascule le caractere "annuel" d'une categorie : toute transaction qui lui
+ * est affectee sera desormais (ou ne sera plus) lissee sur 12 mois dans les
+ * rapports du tableau de bord (voir ServiceRapport#attributedTransactions),
+ * sans avoir a le cocher transaction par transaction.
+ */
+async function toggleAnnualized(category) {
+  await CategoriesAPI.toggleAnnualized(category.id)
+  await load()
+}
+
 /* --- Édition inline --- */
 
 function startEdit(category) {
@@ -548,7 +567,29 @@ onMounted(load)
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 6px;
   cursor: pointer;
+}
+
+/* Boutons d'action d'une ligne (categorie/sous-categorie) : en flex-wrap
+   plutot que de laisser les <button> deborder en incrementant .cat-row en
+   hauteur de facon desordonnee (constate avec 4 boutons sur une ligne de
+   categorie racine, voir "Marquer annuelle" ajoute recemment) — s'ils ne
+   tiennent pas sur une ligne, ils repassent proprement a la ligne, alignes
+   a droite. */
+.cat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+/* Gabarit reduit par rapport a .btn par defaut (10px 16px / 14px) : quatre
+   boutons cote a cote sur une ligne de categorie n'ont pas besoin d'etre
+   aussi imposants qu'un bouton de page (ex : "+ Nouvelle categorie"). */
+.cat-btn {
+  padding: 5px 10px;
+  font-size: 12px;
 }
 .cat-row-editing {
   cursor: default;

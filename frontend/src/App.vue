@@ -45,7 +45,7 @@
         </button>
       </div>
     </aside>
-    <main class="main-content">
+    <main class="main-content" :class="{ 'main-content-wide': $route.name === 'transactions' }">
       <RouterView />
     </main>
 

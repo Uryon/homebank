@@ -32,8 +32,8 @@ public class TransactionBulkUpdateDTO {
     private boolean periodicExpenseProvided;
     private boolean periodicExpense;
 
-    private boolean annualizedProvided;
-    private boolean annualized;
+    private boolean exceptionalProvided;
+    private boolean exceptional;
 
     private boolean validatedProvided;
     private boolean validated;

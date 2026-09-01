@@ -43,6 +43,19 @@ public class Categorie {
     @Column(nullable = false, columnDefinition = "boolean not null default false")
     private boolean hidden = false;
 
+    /**
+     * Categorie "annuelle" : toute transaction qui lui est affectee est
+     * automatiquement lissee sur les 12 mois suivant (et incluant) son mois
+     * de paiement dans les rapports (voir ServiceRapport#attributedTransactions),
+     * plutot que comptee en une fois sur ce seul mois — ex : taxe fonciere,
+     * assurance annuelle. Remplace l'ancien marquage par transaction
+     * (Transaction#annualized, supprime) : la granularite est desormais la
+     * categorie entiere, pas transaction par transaction. N'affecte jamais le
+     * solde reel des comptes, qui reste base sur la date et le montant reels.
+     */
+    @Column(nullable = false, columnDefinition = "boolean not null default false")
+    private boolean annualized = false;
+
     public enum TypeCategorie {
         INCOME, EXPENSE, BOTH
     }

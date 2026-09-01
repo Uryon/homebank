@@ -23,19 +23,14 @@
       </div>
 
       <div class="form-field">
-        <label>Mois</label>
-        <select v-model="filterMonth">
-          <option :value="null">Tous</option>
-          <option v-for="m in MONTHS" :key="m.value" :value="m.value">{{ m.label }}</option>
-        </select>
-      </div>
-
-      <div class="form-field">
-        <label>Année</label>
-        <select v-model="filterYear">
-          <option :value="null">Toutes</option>
-          <option v-for="y in availableYears" :key="y" :value="y">{{ y }}</option>
-        </select>
+        <label>Période</label>
+        <MonthYearFilter
+          :month="filterMonth"
+          :year="filterYear"
+          :available-years="availableYears"
+          @update:month="filterMonth = $event"
+          @update:year="filterYear = $event"
+        />
       </div>
 
       <div class="form-field" style="align-self: flex-end;">
@@ -52,6 +47,17 @@
       <div class="form-field" style="align-self: flex-end;">
         <button
           class="btn"
+          :class="{ secondary: !uncategorizedOnly }"
+          @click="uncategorizedOnly = !uncategorizedOnly"
+          :title="uncategorizedOnly ? 'Revenir à toutes les transactions' : 'N\'afficher que les transactions sans catégorie'"
+        >
+          Non catégorisées ({{ uncategorizedCount }})
+        </button>
+      </div>
+
+      <div class="form-field" style="align-self: flex-end;">
+        <button
+          class="btn"
           :class="{ secondary: pendingCount === 0 }"
           :disabled="pendingCount === 0 || validating"
           @click="validateAll"
@@ -61,8 +67,8 @@
       </div>
 
       <div class="form-field" style="margin-left: auto;">
-        <label>Recherche (tiers, montant, ou &gt; / &lt; / = un montant)</label>
-        <input v-model="searchQuery" placeholder="Ex : Carrefour, 42,50 ou > 100" style="min-width: 260px;" />
+        <label>Recherche (tiers, catégorie, montant, ou &gt; / &lt; / = un montant)</label>
+        <input v-model="searchQuery" placeholder="Ex : Carrefour, Salaire, 42,50 ou > 100" style="min-width: 260px;" />
         <div v-if="amountQuery" class="text-hint">
           {{ amountSearchLoading ? 'Recherche…' : `${filteredTransactions.length} transaction(s) trouvée(s)` }}
         </div>
@@ -71,6 +77,9 @@
 
     <div v-if="selectedIds.size" class="bulk-bar">
       <span>{{ selectedIds.size }} transaction(s) sélectionnée(s)</span>
+      <span class="bulk-total amount" :class="selectedTotal >= 0 ? 'positive' : 'negative'">
+        Total : {{ formatAmount(selectedTotal) }}
+      </span>
       <button class="btn" @click="openBulkEdit">Modifier en masse</button>
       <button class="btn secondary" @click="clearSelection">Désélectionner tout</button>
     </div>
@@ -110,7 +119,7 @@
             <th class="num">Dépense</th>
             <th class="num">Revenu</th>
             <th class="num" title="Dépense périodique récurrente">Périodique</th>
-            <th class="num" title="Lisser sur les 12 mois suivant le paiement, dans les rapports (ex : taxe foncière)">Annualisée</th>
+            <th class="num" title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)">Except.</th>
             <th></th>
           </tr>
         </thead>
@@ -134,9 +143,10 @@
             @confirm-edit="confirmEdit"
             @toggle-validated="toggleValidated"
             @toggle-periodic="togglePeriodic"
-            @toggle-annualized="toggleAnnualized"
+            @toggle-exceptional="toggleExceptional"
             @toggle-select="toggleSelect"
             @remove="remove"
+            @split="openSplit"
           />
         </tbody>
       </table>
@@ -229,8 +239,8 @@
           </div>
 
           <div class="form-field" style="grid-column: span 2; flex-direction: row; align-items: center; gap: 8px;">
-            <input type="checkbox" v-model="form.annualized" id="new-annualized" style="width: auto;" />
-            <label for="new-annualized" style="margin: 0;">Lisser sur les 12 mois suivant le paiement, dans les rapports (ex : taxe foncière)</label>
+            <input type="checkbox" v-model="form.exceptional" id="new-exceptional" style="width: auto;" />
+            <label for="new-exceptional" style="margin: 0;">Transaction exceptionnelle (exclue des tableaux de bord, ex : achat d'une voiture)</label>
           </div>
         </div>
 
@@ -243,85 +253,179 @@
 
     <!-- Modal : édition en masse des transactions sélectionnées -->
     <div v-if="showBulkEditModal" class="modal-overlay" @click.self="showBulkEditModal = false">
-      <div class="modal">
+      <div class="modal bulk-edit-modal">
         <h2>Modifier {{ selectedIds.size }} transaction(s)</h2>
-        <div class="text-hint" style="margin-bottom: 16px;">
-          Cochez uniquement les champs à modifier : les autres resteront inchangés sur chaque transaction.
+        <div class="text-hint" style="margin-bottom: 20px;">
+          Modifiez uniquement les champs à changer : un champ non touché reste inchangé sur chaque transaction.
         </div>
 
-        <div class="bulk-field">
-          <label class="bulk-field-toggle">
-            <input type="checkbox" v-model="bulkForm.categoryEnabled" />
-            Catégorie
-          </label>
-          <CategoryAutocomplete
-            v-model="bulkForm.categoryId"
-            :categories="flatCategories"
-            placeholder="Aucune"
-          />
+        <div class="bulk-section">
+          <div class="bulk-section-title">Catégorisation</div>
+
+          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.categoryTouched }">
+            <div class="bulk-field-label">Catégorie</div>
+            <div class="bulk-field-control">
+              <CategoryAutocomplete
+                :model-value="bulkForm.categoryId"
+                @update:model-value="onBulkCategoryChange"
+                :categories="flatCategories"
+                placeholder="Ne pas modifier"
+              />
+            </div>
+            <span v-if="bulkForm.categoryTouched" class="bulk-field-check">✓</span>
+          </div>
+
+          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.payeeTouched }">
+            <div class="bulk-field-label">Tiers</div>
+            <div class="bulk-field-control">
+              <PayeeAutocomplete
+                :model-value="bulkForm.payee"
+                @update:model-value="onBulkPayeeChange"
+                :payees="payees"
+                placeholder="Ne pas modifier"
+              />
+            </div>
+            <span v-if="bulkForm.payeeTouched" class="bulk-field-check">✓</span>
+          </div>
+
+          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.paymentMode !== null }">
+            <div class="bulk-field-label">Mode de paiement</div>
+            <div class="bulk-field-control">
+              <select v-model="bulkForm.paymentMode">
+                <option :value="null">Ne pas modifier</option>
+                <option value="NONE">Aucun</option>
+                <option value="CASH">Espèces</option>
+                <option value="CHEQUE">Chèque</option>
+                <option value="TRANSFER">Virement</option>
+                <option value="CARD">Carte</option>
+                <option value="DIRECT_DEBIT">Prélèvement</option>
+                <option value="STANDING_ORDER">Virement permanent</option>
+              </select>
+            </div>
+            <span v-if="bulkForm.paymentMode !== null" class="bulk-field-check">✓</span>
+          </div>
         </div>
 
-        <div class="bulk-field">
-          <label class="bulk-field-toggle">
-            <input type="checkbox" v-model="bulkForm.payeeEnabled" />
-            Tiers
-          </label>
-          <PayeeAutocomplete v-model="bulkForm.payee" :payees="payees" placeholder="Ex : Supermarché" />
+        <div class="bulk-section">
+          <div class="bulk-section-title">Marqueurs</div>
+
+          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.periodicExpense !== null }">
+            <div class="bulk-field-label">Dépense périodique</div>
+            <div class="bulk-field-control">
+              <select v-model="bulkForm.periodicExpense">
+                <option :value="null">Ne pas modifier</option>
+                <option :value="true">Oui</option>
+                <option :value="false">Non</option>
+              </select>
+            </div>
+            <span v-if="bulkForm.periodicExpense !== null" class="bulk-field-check">✓</span>
+          </div>
+
+          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.exceptional !== null }">
+            <div class="bulk-field-label">Exceptionnelle</div>
+            <div class="bulk-field-control">
+              <select v-model="bulkForm.exceptional">
+                <option :value="null">Ne pas modifier</option>
+                <option :value="true">Oui</option>
+                <option :value="false">Non</option>
+              </select>
+            </div>
+            <span v-if="bulkForm.exceptional !== null" class="bulk-field-check">✓</span>
+          </div>
         </div>
 
-        <div class="bulk-field">
-          <label class="bulk-field-toggle">
-            <input type="checkbox" v-model="bulkForm.paymentModeEnabled" />
-            Mode de paiement
-          </label>
-          <select v-model="bulkForm.paymentMode">
-            <option value="NONE">Aucun</option>
-            <option value="CASH">Espèces</option>
-            <option value="CHEQUE">Chèque</option>
-            <option value="TRANSFER">Virement</option>
-            <option value="CARD">Carte</option>
-            <option value="DIRECT_DEBIT">Prélèvement</option>
-            <option value="STANDING_ORDER">Virement permanent</option>
-          </select>
+        <div class="bulk-section">
+          <div class="bulk-section-title">Statut</div>
+
+          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.validated !== null }">
+            <div class="bulk-field-label">Validée / en attente</div>
+            <div class="bulk-field-control">
+              <select v-model="bulkForm.validated">
+                <option :value="null">Ne pas modifier</option>
+                <option :value="true">Validée</option>
+                <option :value="false">En attente</option>
+              </select>
+            </div>
+            <span v-if="bulkForm.validated !== null" class="bulk-field-check">✓</span>
+          </div>
         </div>
 
-        <div class="bulk-field">
-          <label class="bulk-field-toggle">
-            <input type="checkbox" v-model="bulkForm.periodicExpenseEnabled" />
-            Dépense périodique
-          </label>
-          <select v-model="bulkForm.periodicExpense">
-            <option :value="true">Oui</option>
-            <option :value="false">Non</option>
-          </select>
+        <div class="bulk-footer">
+          <button
+            v-if="bulkHasAnyFieldEnabled"
+            type="button"
+            class="bulk-clear-link"
+            @click="resetBulkForm"
+          >
+            Réinitialiser ({{ bulkTouchedFieldCount }} champ{{ bulkTouchedFieldCount > 1 ? 's' : '' }} modifié{{ bulkTouchedFieldCount > 1 ? 's' : '' }})
+          </button>
+          <span v-else class="text-hint">Aucune modification pour l'instant</span>
+
+          <div class="bulk-footer-actions">
+            <button class="btn secondary" @click="showBulkEditModal = false">Annuler</button>
+            <button class="btn" :disabled="!bulkHasAnyFieldEnabled || bulkSaving" @click="saveBulkEdit">
+              {{ bulkSaving ? 'Application…' : `Appliquer à ${selectedIds.size} transaction(s)` }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal : division d'une transaction en deux -->
+    <div v-if="showSplitModal" class="modal-overlay" @click.self="closeSplitModal">
+      <div class="modal">
+        <h2>Diviser la transaction</h2>
+        <div class="text-hint" style="margin-bottom: 20px;">
+          {{ splitTransaction?.payee || 'Sans tiers' }} · {{ formatDate(splitTransaction?.date) }} ·
+          Montant total : {{ formatAmount(splitTransaction?.amount) }}
         </div>
 
-        <div class="bulk-field">
-          <label class="bulk-field-toggle">
-            <input type="checkbox" v-model="bulkForm.annualizedEnabled" />
-            Annualisée
-          </label>
-          <select v-model="bulkForm.annualized">
-            <option :value="true">Oui</option>
-            <option :value="false">Non</option>
-          </select>
+        <div class="form-grid">
+          <div class="form-field">
+            <label>Montant — 1ère partie</label>
+            <AmountInput v-model="splitForm.firstAmount" />
+          </div>
+          <div class="form-field">
+            <label>Catégorie — 1ère partie</label>
+            <CategoryAutocomplete
+              v-model="splitForm.firstCategoryId"
+              :categories="flatCategories"
+              :transaction-type="splitAmountType"
+              placeholder="Aucune"
+            />
+          </div>
+          <div class="form-field" style="grid-column: span 2;">
+            <label>Mémo — 1ère partie</label>
+            <input v-model="splitForm.firstMemo" placeholder="Note libre" />
+          </div>
+
+          <div class="form-field">
+            <label>Montant — 2e partie</label>
+            <div class="split-second-amount amount" :class="secondAmount >= 0 ? 'positive' : 'negative'">
+              {{ formatAmount(secondAmount) }}
+            </div>
+          </div>
+          <div class="form-field">
+            <label>Catégorie — 2e partie</label>
+            <CategoryAutocomplete
+              v-model="splitForm.secondCategoryId"
+              :categories="flatCategories"
+              :transaction-type="splitAmountType"
+              placeholder="Aucune"
+            />
+          </div>
+          <div class="form-field" style="grid-column: span 2;">
+            <label>Mémo — 2e partie</label>
+            <input v-model="splitForm.secondMemo" placeholder="Note libre" />
+          </div>
         </div>
 
-        <div class="bulk-field">
-          <label class="bulk-field-toggle">
-            <input type="checkbox" v-model="bulkForm.validatedEnabled" />
-            Statut
-          </label>
-          <select v-model="bulkForm.validated">
-            <option :value="true">Validée</option>
-            <option :value="false">En attente</option>
-          </select>
-        </div>
+        <p v-if="splitError" class="split-error">{{ splitError }}</p>
 
         <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-          <button class="btn secondary" @click="showBulkEditModal = false">Annuler</button>
-          <button class="btn" :disabled="!bulkHasAnyFieldEnabled || bulkSaving" @click="saveBulkEdit">
-            {{ bulkSaving ? 'Application…' : 'Appliquer' }}
+          <button class="btn secondary" @click="closeSplitModal">Annuler</button>
+          <button class="btn" :disabled="splitSaving" @click="saveSplit">
+            {{ splitSaving ? 'Division…' : 'Diviser' }}
           </button>
         </div>
       </div>
@@ -330,7 +434,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   TransactionsAPI
@@ -342,8 +446,9 @@ import PayeeAutocomplete from '../components/PayeeAutocomplete.vue'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import TransactionRow from '../components/TransactionRow.vue'
 import AmountInput from '../components/AmountInput.vue'
+import MonthYearFilter from '../components/MonthYearFilter.vue'
 import TransactionsSubNav from './TransactionsSubNav.vue'
-import { formatAmount } from '../services/format'
+import { formatAmount, formatDate } from '../services/format'
 
 const route = useRoute()
 
@@ -351,22 +456,8 @@ const filterAccount = ref(null)
 const filterMonth = ref(null)
 const filterYear = ref(null)
 const pendingOnly = ref(false)
+const uncategorizedOnly = ref(false)
 const searchQuery = ref('')
-
-const MONTHS = [
-  { value: 1, label: 'Janvier' },
-  { value: 2, label: 'Février' },
-  { value: 3, label: 'Mars' },
-  { value: 4, label: 'Avril' },
-  { value: 5, label: 'Mai' },
-  { value: 6, label: 'Juin' },
-  { value: 7, label: 'Juillet' },
-  { value: 8, label: 'Août' },
-  { value: 9, label: 'Septembre' },
-  { value: 10, label: 'Octobre' },
-  { value: 11, label: 'Novembre' },
-  { value: 12, label: 'Décembre' }
-]
 
 // Donnees issues du cache partage (deja precharge au demarrage de l'app,
 // voir App.vue / dataStore.js) : s'affichent instantanement sans attendre
@@ -413,13 +504,28 @@ const editingId = ref(null)
  */
 const selectedIds = ref(new Set())
 
+/**
+ * Derniere transaction cochee (voir toggleSelect) : utilisee pour recentrer
+ * la page dessus quand la recherche se ferme (voir le watcher de
+ * searchQuery plus bas et goToSelectedTransactionPage), pour qu'on retrouve
+ * une transaction reperee pendant une recherche avec son contexte (les
+ * transactions voisines) une fois la recherche fermee.
+ */
+const lastSelectedId = ref(null)
+
 function toggleSelect(transaction) {
-  if (selectedIds.value.has(transaction.id)) selectedIds.value.delete(transaction.id)
-  else selectedIds.value.add(transaction.id)
+  if (selectedIds.value.has(transaction.id)) {
+    selectedIds.value.delete(transaction.id)
+    if (lastSelectedId.value === transaction.id) lastSelectedId.value = null
+  } else {
+    selectedIds.value.add(transaction.id)
+    lastSelectedId.value = transaction.id
+  }
 }
 
 function clearSelection() {
   selectedIds.value.clear()
+  lastSelectedId.value = null
 }
 
 const allPagedSelected = computed(() =>
@@ -434,21 +540,50 @@ function toggleSelectAllPaged() {
   }
 }
 
-/** État du formulaire d'édition en masse : voir modal correspondant. */
+/**
+ * Montant par id sur la liste complete (tous comptes, voir dataStore) plutot
+ * que sur `transactions` (potentiellement filtree par compte) : la selection
+ * persiste a travers les filtres (voir selectedIds plus haut), le total doit
+ * donc rester juste meme si une transaction selectionnee n'appartient plus
+ * au compte actuellement filtre.
+ */
+const amountById = computed(() => {
+  const map = new Map()
+  for (const t of dataStore.state.transactions) map.set(t.id, Number(t.amount || 0))
+  return map
+})
+
+/** Somme des transactions selectionnees, affichee dans la barre de selection multiple. */
+const selectedTotal = computed(() => {
+  const amounts = amountById.value
+  let sum = 0
+  for (const id of selectedIds.value) sum += amounts.get(id) || 0
+  return sum
+})
+
+/**
+ * État du formulaire d'édition en masse : plus de case à cocher par champ
+ * (voir modal correspondant) — modifier un champ suffit a le marquer comme
+ * "a appliquer". Categorie/Tiers utilisent un drapeau *Touched explicite
+ * (mis a true par onBulkCategoryChange/onBulkPayeeChange ci-dessous), car
+ * leur valeur "non renseignee" (null / chaine vide) est aussi une valeur
+ * metier legitime ("aucune categorie", tiers vide) qu'on doit pouvoir
+ * distinguer de "champ pas touche". Les select simples (mode de paiement,
+ * marqueurs, statut) n'ont pas ce probleme : ils demarrent a `null`, une
+ * valeur qui n'existe dans aucune de leurs <option> reelles, donc "valeur
+ * !== null" suffit a la fois a savoir si le champ est actif ET a construire
+ * le payload, sans etat separe a synchroniser.
+ */
 function emptyBulkForm() {
   return {
-    categoryEnabled: false,
+    categoryTouched: false,
     categoryId: null,
-    payeeEnabled: false,
+    payeeTouched: false,
     payee: '',
-    paymentModeEnabled: false,
-    paymentMode: 'NONE',
-    periodicExpenseEnabled: false,
-    periodicExpense: false,
-    annualizedEnabled: false,
-    annualized: false,
-    validatedEnabled: false,
-    validated: true
+    paymentMode: null,
+    periodicExpense: null,
+    exceptional: null,
+    validated: null
   }
 }
 
@@ -456,45 +591,62 @@ const showBulkEditModal = ref(false)
 const bulkForm = ref(emptyBulkForm())
 const bulkSaving = ref(false)
 
-const bulkHasAnyFieldEnabled = computed(() =>
-  bulkForm.value.categoryEnabled ||
-  bulkForm.value.payeeEnabled ||
-  bulkForm.value.paymentModeEnabled ||
-  bulkForm.value.periodicExpenseEnabled ||
-  bulkForm.value.annualizedEnabled ||
-  bulkForm.value.validatedEnabled
-)
+const bulkTouchedFieldCount = computed(() => [
+  bulkForm.value.categoryTouched,
+  bulkForm.value.payeeTouched,
+  bulkForm.value.paymentMode !== null,
+  bulkForm.value.periodicExpense !== null,
+  bulkForm.value.exceptional !== null,
+  bulkForm.value.validated !== null
+].filter(Boolean).length)
+
+const bulkHasAnyFieldEnabled = computed(() => bulkTouchedFieldCount.value > 0)
 
 function openBulkEdit() {
   bulkForm.value = emptyBulkForm()
   showBulkEditModal.value = true
 }
 
+/** Reinitialise tous les champs (revient a l'etat "aucune modification"), sans fermer la modale. */
+function resetBulkForm() {
+  bulkForm.value = emptyBulkForm()
+}
+
+function onBulkCategoryChange(value) {
+  bulkForm.value.categoryId = value
+  bulkForm.value.categoryTouched = true
+}
+
+function onBulkPayeeChange(value) {
+  bulkForm.value.payee = value
+  bulkForm.value.payeeTouched = true
+}
+
 async function saveBulkEdit() {
   if (!bulkHasAnyFieldEnabled.value || !selectedIds.value.size) return
 
   const payload = { ids: Array.from(selectedIds.value) }
-  if (bulkForm.value.categoryEnabled) {
+  if (bulkForm.value.categoryTouched) {
     payload.categoryIdProvided = true
     payload.categoryId = bulkForm.value.categoryId
   }
-  if (bulkForm.value.payeeEnabled) {
+  if (bulkForm.value.payeeTouched) {
     payload.payeeProvided = true
     payload.payee = bulkForm.value.payee
   }
-  if (bulkForm.value.paymentModeEnabled) {
+  if (bulkForm.value.paymentMode !== null) {
     payload.paymentModeProvided = true
     payload.paymentMode = bulkForm.value.paymentMode
   }
-  if (bulkForm.value.periodicExpenseEnabled) {
+  if (bulkForm.value.periodicExpense !== null) {
     payload.periodicExpenseProvided = true
     payload.periodicExpense = bulkForm.value.periodicExpense
   }
-  if (bulkForm.value.annualizedEnabled) {
-    payload.annualizedProvided = true
-    payload.annualized = bulkForm.value.annualized
+  if (bulkForm.value.exceptional !== null) {
+    payload.exceptionalProvided = true
+    payload.exceptional = bulkForm.value.exceptional
   }
-  if (bulkForm.value.validatedEnabled) {
+  if (bulkForm.value.validated !== null) {
     payload.validatedProvided = true
     payload.validated = bulkForm.value.validated
   }
@@ -522,7 +674,7 @@ function emptyForm() {
     tags: '',
     transferTransactionId: null,
     periodicExpense: false,
-    annualized: false,
+    exceptional: false,
     validated: true
   }
 }
@@ -541,21 +693,39 @@ const pendingCount = computed(() =>
   transactions.value.filter(t => !t.validated).length
 )
 
+const uncategorizedCount = computed(() =>
+  transactions.value.filter(t => !t.categoryId).length
+)
+
 /**
- * Champs de recherche normalises (tiers, montant formate) par transaction,
- * precalcules en Map une seule fois quand la liste de transactions change
- * (chargement, changement de filtre compte...), et non recalcules a chaque
- * frappe dans la recherche : formatAmount + normalizeSearch sur plusieurs
- * milliers de transactions a chaque caractere tape est ce qui avait deja
- * rendu la recherche lente une premiere fois sur ce projet (voir CLAUDE.md).
- * filteredTransactions ci-dessous ne fait plus que des comparaisons de
- * chaines deja normalisees.
+ * Libelle categorie ("Parent : Enfant", meme format que CategoryAutocomplete
+ * — voir flattenCategories) par id, pour que la recherche retrouve aussi une
+ * transaction par sa categorie (ex: "Traitements et salaires : Salaire"),
+ * pas seulement par tiers/montant.
+ */
+const categoryLabelById = computed(() => {
+  const map = new Map()
+  for (const c of flattenCategories(categories.value)) map.set(c.id, c.label)
+  return map
+})
+
+/**
+ * Champs de recherche normalises (tiers, categorie, montant formate) par
+ * transaction, precalcules en Map une seule fois quand la liste de
+ * transactions change (chargement, changement de filtre compte...), et non
+ * recalcules a chaque frappe dans la recherche : formatAmount +
+ * normalizeSearch sur plusieurs milliers de transactions a chaque caractere
+ * tape est ce qui avait deja rendu la recherche lente une premiere fois sur
+ * ce projet (voir CLAUDE.md). filteredTransactions ci-dessous ne fait plus
+ * que des comparaisons de chaines deja normalisees.
  */
 const searchIndexById = computed(() => {
   const index = new Map()
+  const labels = categoryLabelById.value
   for (const t of transactions.value) {
     index.set(t.id, {
       payeeNormalized: normalizeSearch(t.payee),
+      categoryNormalized: normalizeSearch(labels.get(t.categoryId) || ''),
       rawAmount: String(t.amount ?? '').toLowerCase(),
       absAmount: String(Math.abs(t.amount ?? 0)),
       amountFormattedNormalized: normalizeSearch(formatAmount(t.amount))
@@ -575,13 +745,17 @@ const statusAndDateFiltered = computed(() => {
     ? (amountSearchResults.value ?? [])
     : transactions.value
 
-  const statusFiltered = pendingOnly.value
+  let filtered = pendingOnly.value
     ? baseTransactions.filter(t => !t.validated)
     : baseTransactions
 
-  if (filterMonth.value == null && filterYear.value == null) return statusFiltered
+  if (uncategorizedOnly.value) {
+    filtered = filtered.filter(t => !t.categoryId)
+  }
 
-  return statusFiltered.filter(t => {
+  if (filterMonth.value == null && filterYear.value == null) return filtered
+
+  return filtered.filter(t => {
     if (!t.date) return false
     if (filterYear.value != null && Number(t.date.slice(0, 4)) !== filterYear.value) return false
     if (filterMonth.value != null && Number(t.date.slice(5, 7)) !== filterMonth.value) return false
@@ -601,13 +775,14 @@ const filteredTransactions = computed(() => {
     if (!idx) return false
 
     const payeeMatch = idx.payeeNormalized.includes(q)
+    const categoryMatch = idx.categoryNormalized.includes(q)
 
     const amountMatch =
       idx.rawAmount.includes(normalizedQuery) ||
       idx.absAmount.includes(normalizedQuery) ||
       idx.amountFormattedNormalized.includes(q)
 
-    return payeeMatch || amountMatch
+    return payeeMatch || categoryMatch || amountMatch
   })
 })
 
@@ -642,11 +817,43 @@ const amountSearchResults = ref(null)
 const amountSearchLoading = ref(false)
 let amountSearchTimer = null
 
+/**
+ * Place currentPage sur la page contenant la transaction cochee `id` (voir
+ * lastSelectedId), puis fait defiler la ligne correspondante jusqu'au centre
+ * de l'ecran une fois le DOM a jour — pour la retrouver avec les
+ * transactions voisines visibles autour d'elle. Si la transaction n'est plus
+ * dans la liste filtree courante (ex : filtre "À traiter" actif et
+ * transaction validee), retombe simplement sur la page 1.
+ */
+function goToSelectedTransactionPage(id) {
+  const index = filteredTransactions.value.findIndex(t => t.id === id)
+  if (index === -1) {
+    currentPage.value = 1
+    return
+  }
+  currentPage.value = Math.floor(index / PAGE_SIZE) + 1
+  nextTick(() => {
+    document.querySelector(`tr[data-transaction-id="${id}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+
 // Revenir en page 1 des qu'un filtre change le resultat, pour ne jamais
-// rester bloque sur une page devenue vide ou hors bornes.
-watch([searchQuery, filterAccount, filterMonth, filterYear, pendingOnly, amountSearchResults], () => {
-  currentPage.value = 1
-})
+// rester bloque sur une page devenue vide ou hors bornes — sauf quand la
+// recherche vient tout juste de se fermer (texte redevenu vide) alors qu'une
+// transaction est cochee : on se repositionne alors sur elle plutot que de
+// revenir en page 1 (voir goToSelectedTransactionPage ci-dessus).
+watch(
+  [searchQuery, filterAccount, filterMonth, filterYear, pendingOnly, uncategorizedOnly, amountSearchResults],
+  ([newSearch], [oldSearch]) => {
+    const searchJustClosed = !!(oldSearch && oldSearch.trim()) && !(newSearch && newSearch.trim())
+    if (searchJustClosed && lastSelectedId.value) {
+      goToSelectedTransactionPage(lastSelectedId.value)
+      return
+    }
+    currentPage.value = 1
+  }
+)
 
 watch([amountQuery, filterAccount], ([query, accountId]) => {
   clearTimeout(amountSearchTimer)
@@ -712,36 +919,67 @@ async function load() {
 /**
  * Categorisation automatique par tiers : un tiers connu (page "Tiers") peut
  * avoir une seule categorie par defaut (Payee#category cote backend). Quand
- * l'utilisateur saisit/selectionne un tiers reconnu dans le formulaire et
- * que le champ Categorie est encore vide, on pre-remplit ce champ avec la
- * categorie par defaut du tiers, SANS jamais ecraser une categorie deja
- * choisie (manuellement ou par un remplissage precedent). C'est un simple
- * confort d'affichage : la source de verite reste appliquee cote backend
- * (voir TransactionService#applyPayload) pour rester fiable meme si ce
- * pre-remplissage frontend echouait ou etait court-circuite.
+ * l'utilisateur saisit/selectionne un tiers reconnu dans le formulaire, ce
+ * champ est rempli avec la categorie par defaut du tiers — y COMPRIS si une
+ * categorie etait deja renseignee (ex : deja pre-remplie a tort par un tiers
+ * homonyme avant la desambiguisation par montant, voir findPayeeByName
+ * ci-dessous) : c'est le fait de choisir/changer explicitement le tiers qui
+ * declenche la mise a jour, jamais un rafraichissement en arriere-plan.
+ * Ce pre-remplissage est desormais la SEULE source de la categorie par
+ * defaut du tiers : le backend (TransactionService#applyPayload) applique la
+ * categorie du payload telle quelle, y compris null (transaction rendue non
+ * categorisee) — il ne la reapplique plus depuis le tiers, sans quoi effacer
+ * volontairement la categorie d'une transaction deja categorisee (bouton ✕ de
+ * CategoryAutocomplete) etait silencieusement annule des que son tiers avait
+ * une categorie par defaut.
  */
 // Indexe les tiers par nom normalise, memoise (recalcule uniquement quand
 // la liste des tiers change, pas a chaque frappe) : evite un scan lineaire
-// de tous les tiers a chaque caractere tape dans le champ Tiers.
+// de tous les tiers a chaque caractere tape dans le champ Tiers. Un nom peut
+// correspondre a PLUSIEURS tiers (voir Tiers#amount : "Bouygues" a 10€ et a
+// 20€ sont deux tiers distincts avec le meme nom affiche), d'ou le tableau
+// plutot qu'un seul tiers par nom — voir findPayeeByName ci-dessous, qui les
+// departage par montant.
 const payeeByNormalizedName = computed(() => {
   const map = new Map()
   for (const p of payees.value) {
-    if (p.name) map.set(p.name.trim().toLowerCase(), p)
+    if (!p.name) continue
+    const key = p.name.trim().toLowerCase()
+    const list = map.get(key)
+    if (list) list.push(p)
+    else map.set(key, [p])
   }
   return map
 })
 
-function findPayeeByName(name) {
+/**
+ * Parmi les tiers partageant ce nom, celui dont le montant de reference
+ * correspond exactement (en valeur absolue) au montant de la transaction —
+ * meme logique que ServiceTiers#matchPayee cote backend — sinon un tiers
+ * "generique" (sans montant de reference) s'il en existe un, sinon le
+ * premier. Sans cette distinction par montant, la categorisation automatique
+ * pouvait proposer le mauvais tiers (et donc la mauvaise categorie) parmi
+ * plusieurs homonymes (ex : plusieurs "Bouygues" a des montants differents).
+ */
+function findPayeeByName(name, amount) {
   if (!name || !name.trim()) return null
-  return payeeByNormalizedName.value.get(name.trim().toLowerCase()) || null
+  const candidates = payeeByNormalizedName.value.get(name.trim().toLowerCase())
+  if (!candidates?.length) return null
+  if (candidates.length === 1) return candidates[0]
+
+  if (amount != null && amount !== '') {
+    const absAmount = Math.abs(Number(amount))
+    const exactAmountMatch = candidates.find(p => p.amount != null && Math.abs(Number(p.amount)) === absAmount)
+    if (exactAmountMatch) return exactAmountMatch
+  }
+  return candidates.find(p => p.amount == null) || candidates[0]
 }
 
 // L'edition inline applique la meme logique localement, voir
 // TransactionRow.vue (elle y a besoin de sa propre copie car editForm n'est
 // plus accessible depuis ce composant).
 function applyDefaultCategoryFromPayee(payeeName) {
-  if (form.value.categoryId) return
-  const payee = findPayeeByName(payeeName)
+  const payee = findPayeeByName(payeeName, form.value.amount)
   if (payee?.categoryId) form.value.categoryId = payee.categoryId
 }
 
@@ -770,7 +1008,7 @@ async function save() {
     tags: form.value.tags,
     transferTransactionId: form.value.transferTransactionId,
     periodicExpense: form.value.periodicExpense,
-    annualized: form.value.annualized,
+    exceptional: form.value.exceptional,
     validated: form.value.validated
   }
 
@@ -804,15 +1042,87 @@ async function remove(transaction) {
   await load()
 }
 
+/* --- Division d'une transaction en deux --- */
+
+const showSplitModal = ref(false)
+const splitTransaction = ref(null)
+const splitForm = ref({ firstAmount: 0, firstCategoryId: null, firstMemo: '', secondCategoryId: null, secondMemo: '' })
+const splitSaving = ref(false)
+const splitError = ref('')
+
+/** Montant de la 2e partie, calculé côté client pour l'affichage seul (la valeur qui compte est recalculée côté backend, voir ServiceTransaction#splitTransaction). */
+const secondAmount = computed(() => {
+  if (!splitTransaction.value) return 0
+  return Number(splitTransaction.value.amount) - Number(splitForm.value.firstAmount || 0)
+})
+
+// Même logique que formAmountType/editAmountType : ne proposer que des
+// catégories du bon sens (dépense/revenu) selon le signe du montant d'origine.
+const splitAmountType = computed(() => {
+  const amount = splitTransaction.value?.amount
+  if (amount == null || amount === 0) return null
+  return amount < 0 ? 'EXPENSE' : 'INCOME'
+})
+
+function openSplit(transaction) {
+  if (transaction.paymentMode === 'TRANSFER' || transaction.transferTransactionId) {
+    alert('Un virement ne peut pas être divisé.')
+    return
+  }
+  splitTransaction.value = transaction
+  // Moitié par défaut, arrondie au centime, modifiable avant validation.
+  const half = Math.round((Number(transaction.amount) / 2) * 100) / 100
+  splitForm.value = {
+    firstAmount: half,
+    firstCategoryId: transaction.categoryId ?? null,
+    firstMemo: transaction.memo || '',
+    secondCategoryId: transaction.categoryId ?? null,
+    secondMemo: ''
+  }
+  splitError.value = ''
+  showSplitModal.value = true
+}
+
+function closeSplitModal() {
+  showSplitModal.value = false
+  splitTransaction.value = null
+}
+
+async function saveSplit() {
+  splitError.value = ''
+  const total = Number(splitTransaction.value.amount)
+  const first = Number(splitForm.value.firstAmount)
+  const sameSign = first !== 0 && (total >= 0) === (first >= 0)
+  if (!first || !sameSign || Math.abs(first) >= Math.abs(total)) {
+    splitError.value = 'Le montant de la 1ère partie doit être non nul, de même signe que le montant total, et inférieur à lui en valeur absolue.'
+    return
+  }
+
+  splitSaving.value = true
+  try {
+    await TransactionsAPI.split(splitTransaction.value.id, {
+      firstAmount: first,
+      firstCategoryId: splitForm.value.firstCategoryId,
+      firstMemo: splitForm.value.firstMemo,
+      secondCategoryId: splitForm.value.secondCategoryId,
+      secondMemo: splitForm.value.secondMemo
+    })
+    closeSplitModal()
+    await load()
+  } finally {
+    splitSaving.value = false
+  }
+}
+
 /** Bascule directement le statut "dépense périodique" sans passer par l'édition complète. */
 async function togglePeriodic(transaction) {
   await TransactionsAPI.togglePeriodicExpense(transaction.id)
   await load()
 }
 
-/** Bascule directement le statut "annualisée" sans passer par l'édition complète. */
-async function toggleAnnualized(transaction) {
-  await TransactionsAPI.toggleAnnualized(transaction.id)
+/** Bascule directement le statut "exceptionnelle" sans passer par l'édition complète. */
+async function toggleExceptional(transaction) {
+  await TransactionsAPI.toggleExceptional(transaction.id)
   await load()
 }
 
@@ -893,7 +1203,7 @@ onMounted(async () => {
 .col-memo { width: 140px; }
 .col-amount { width: 110px; }
 .col-monthly { width: 70px; }
-.col-actions { width: 90px; }
+.col-actions { width: 68px; }
 
 .transactions-table th {
   white-space: nowrap;
@@ -943,27 +1253,111 @@ onMounted(async () => {
   border-radius: var(--radius-md);
 }
 
+/* Modale un peu plus large que le gabarit standard (520px) : les lignes
+   label + champ + pastille ont besoin de plus de place pour respirer. */
+.bulk-edit-modal {
+  width: 600px;
+}
+
+/*
+ * Chaque groupe de champs est une "carte" en creux (fond ink-950, le fond de
+ * page, plus sombre que le blanc de la modale) plutot qu'une simple liste
+ * separee par des traits : lisibilite et coherence avec le reste de l'appli
+ * (cartes du tableau de bord, etc.), voir CLAUDE.md.
+ */
+.bulk-section {
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  background: var(--ink-950);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+.bulk-section-title {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-faint);
+  margin-bottom: 10px;
+}
+
+/*
+ * Plus de case a cocher : modifier un champ (select ou autocomplete) suffit
+ * a le marquer "a appliquer" (voir bulkForm dans le script — *Touched pour
+ * Categorie/Tiers, valeur !== null pour les select). bulk-field-active
+ * met alors la ligne en evidence (fond blanc + liseré azur + pastille ✓),
+ * pour que l'utilisateur voie d'un coup d'œil ce qui sera reellement
+ * applique avant de cliquer sur "Appliquer".
+ */
 .bulk-field {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 14px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  transition: background 0.12s, border-color 0.12s;
 }
-.bulk-field > *:last-child {
+.bulk-field:last-child {
+  margin-bottom: 0;
+}
+.bulk-field-active {
+  background: var(--ink-900);
+  border-color: var(--azure);
+  box-shadow: var(--shadow-sm);
+}
+.bulk-field-label {
+  flex: 0 0 150px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.bulk-field-active .bulk-field-label {
+  color: var(--azure);
+}
+.bulk-field-control {
   flex: 1;
   min-width: 0;
 }
-.bulk-field-toggle {
+.bulk-field-check {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex: 0 0 170px;
-  font-size: 14px;
-  color: var(--text-primary);
-  cursor: pointer;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--azure);
+  color: #FFFFFF;
+  font-size: 11px;
+  font-weight: 700;
 }
-.bulk-field-toggle input {
-  width: auto;
+
+.bulk-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 20px;
+}
+.bulk-footer-actions {
+  display: flex;
+  gap: 10px;
+}
+.bulk-clear-link {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.bulk-clear-link:hover {
+  color: var(--text-primary);
 }
 
 .pagination {
@@ -975,5 +1369,26 @@ onMounted(async () => {
 .pagination-buttons {
   display: flex;
   gap: 8px;
+}
+
+/* Montant de la 2e partie (modale de division) : lecture seule, calcule a
+   partir du montant total et de la 1ere partie (voir secondAmount) — meme
+   gabarit qu'un champ input pour rester aligne avec les autres champs du
+   formulaire, mais non editable directement. */
+.split-second-amount {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--ink-950);
+  font-weight: 700;
+}
+
+.split-error {
+  color: var(--coral);
+  font-size: 13px;
+  margin-top: 12px;
 }
 </style>

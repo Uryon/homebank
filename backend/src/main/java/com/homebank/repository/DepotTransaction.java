@@ -39,14 +39,26 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
     List<Transaction> findByPeriodicExpenseTrueOrderByDateDescIdDesc();
 
     /**
-     * Transactions marquees "annualisee" (lissees sur 12 mois dans les
-     * rapports, voir Transaction#annualized / ServiceRapport#attributedTransactions).
-     * Chargees a part de findByDateBetween : une annualisee doit compter
-     * dans un rapport meme sur un mois different de sa date reelle de
-     * paiement, tant que ce mois appartient a la fenetre glissante de 12
-     * mois qui demarre a son propre mois de paiement.
+     * Transactions dont la categorie est marquee "annuelle" (lissees sur 12
+     * mois dans les rapports, voir Categorie#annualized /
+     * ServiceRapport#attributedTransactions). Chargees a part de
+     * findByDateBetween : une transaction annuelle doit compter dans un
+     * rapport meme sur un mois different de sa date reelle de paiement, tant
+     * que ce mois appartient a la fenetre glissante de 12 mois qui demarre a
+     * son propre mois de paiement.
      */
-    List<Transaction> findByAnnualizedTrue();
+    List<Transaction> findByCategory_AnnualizedTrue();
+
+    /**
+     * Toutes les transactions, tiers et categorie deja charges (fetch join) :
+     * utilise par la categorisation automatique en masse (voir
+     * ServiceTiers#autoCategorize), qui doit lire le tiers et la categorie de
+     * CHAQUE transaction pour les regrouper par tiers — un simple findAll()
+     * les chargerait un par un a l'acces (LAZY), soit potentiellement des
+     * milliers de requetes N+1.
+     */
+    @Query("select t from Transaction t left join fetch t.payee left join fetch t.category")
+    List<Transaction> findAllWithPayeeAndCategory();
 
     @Query("select coalesce(sum(t.amount), 0) from Transaction t where t.account.id = :accountId and t.date <= :asOf")
     BigDecimal sumAmountByAccountIdAsOf(@Param("accountId") Long accountId, @Param("asOf") LocalDate asOf);
@@ -118,5 +130,44 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
               and payment_mode <> 'TRANSFER'
             """, nativeQuery = true)
     List<Object[]> findLegacyPayeeTextForMigration();
+
+    /**
+     * Vrai si l'ancienne colonne "transactions.annualized" (marquage par
+     * transaction, remplace par Categorie#annualized) existe encore en base —
+     * absente sur un schema fraichement cree par Hibernate une fois l'entite
+     * Transaction#annualized supprimee. Verifiee avant
+     * findCategoryIdsWithLegacyAnnualizedTransactions()/clearLegacyAnnualizedColumn(),
+     * qui echoueraient sinon sur un schema qui n'a jamais connu cette colonne
+     * (meme raison que countLegacyPayeeColumn ci-dessus).
+     */
+    @Query(value = """
+            select count(*) from information_schema.columns
+            where lower(table_name) = 'transactions' and lower(column_name) = 'annualized'
+            """, nativeQuery = true)
+    long countLegacyAnnualizedColumn();
+
+    /**
+     * Categories ayant au moins une transaction marquee "annualized" dans
+     * l'ancienne colonne (SQL natif, plus mappee par l'entite JPA), pour la
+     * migration unique vers Categorie#annualized (voir
+     * config.CategoryAnnualizedMigration). N'appeler que si
+     * countLegacyAnnualizedColumn() > 0.
+     */
+    @Query(value = """
+            select distinct category_id from transactions
+            where annualized = true and category_id is not null
+            """, nativeQuery = true)
+    List<Long> findCategoryIdsWithLegacyAnnualizedTransactions();
+
+    /**
+     * Neutralise l'ancienne colonne "annualized" une fois la migration vers
+     * Categorie#annualized effectuee (voir config.CategoryAnnualizedMigration),
+     * pour que la migration reste un evenement unique : sans ca, elle
+     * re-forcerait "annuelle" sur une categorie que l'utilisateur aurait
+     * ensuite volontairement decochee, a chaque redemarrage.
+     */
+    @Modifying
+    @Query(value = "update transactions set annualized = false where annualized = true", nativeQuery = true)
+    void clearLegacyAnnualizedColumn();
 
 }

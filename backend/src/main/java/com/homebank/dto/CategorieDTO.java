@@ -15,4 +15,5 @@ public class CategorieDTO {
     private Long parentId;
     private TypeCategorie type;
     private boolean hidden;
+    private boolean annualized;
 }

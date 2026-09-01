@@ -6,6 +6,14 @@
         <div class="subtitle">Cliquez sur un tiers pour le modifier — catégorisation automatique à l'import</div>
       </div>
       <div style="display:flex; gap:10px;">
+        <button
+          class="btn secondary"
+          :disabled="autoCategorizing"
+          title="Categorise chaque tiers sans categorie dont toutes les transactions deja categorisees s'accordent sur une seule, puis applique cette categorie aux transactions de ce tiers encore sans categorie. Ne modifie jamais une categorie deja choisie."
+          @click="runAutoCategorize"
+        >
+          {{ autoCategorizing ? 'Catégorisation…' : 'Catégoriser automatiquement' }}
+        </button>
         <button class="btn" @click="openCreate">+ Nouveau tiers</button>
       </div>
     </div>
@@ -16,6 +24,17 @@
         <input v-model="searchQuery" placeholder="Ex : Carrefour ou Alimentation" style="min-width: 240px;" />
       </div>
 
+      <div class="form-field" style="align-self: flex-end;">
+        <button
+          class="btn"
+          :class="{ secondary: !withoutCategoryOnly }"
+          @click="withoutCategoryOnly = !withoutCategoryOnly"
+          :title="withoutCategoryOnly ? 'Revenir à tous les tiers' : 'N\'afficher que les tiers sans catégorie associée'"
+        >
+          Sans catégorie ({{ withoutCategoryCount }})
+        </button>
+      </div>
+
       <div v-if="selectedIds.length >= 2" class="form-field" style="align-self: flex-end;">
         <button class="btn" @click="openMergeModal">
           Fusionner ({{ selectedIds.length }} sélectionnés)
@@ -24,6 +43,13 @@
       <div v-if="selectedIds.length > 0" class="form-field" style="align-self: flex-end;">
         <button class="btn secondary" @click="selectedIds = []">Annuler la sélection</button>
       </div>
+    </div>
+
+    <div v-if="autoCategorizeResult" class="auto-categorize-result">
+      <span>
+        {{ autoCategorizeResult.payeesUpdated }} tiers catégorisé(s), {{ autoCategorizeResult.transactionsUpdated }} transaction(s) mise(s) à jour.
+      </span>
+      <button type="button" class="auto-categorize-result-close" @click="autoCategorizeResult = null">✕</button>
     </div>
 
     <div class="table-scroll" v-if="filteredPayees.length">
@@ -86,7 +112,20 @@
               <td>{{ p.name }}</td>
               <td><code>{{ p.pattern }}</code></td>
               <td class="num">{{ p.amount != null ? formatAmount(p.amount) : '' }}</td>
-              <td>{{ categoryLabel(p.categoryId) }}</td>
+              <td>
+                <template v-if="p.categoryId">{{ categoryLabel(p.categoryId) }}</template>
+                <button
+                  v-else-if="suggestedCategoryId(p)"
+                  type="button"
+                  class="category-suggestion"
+                  :disabled="applyingSuggestionId === p.id"
+                  :title="'Toutes les transactions déjà catégorisées de ce tiers utilisent ' + categoryLabel(suggestedCategoryId(p)) + ' — cliquer pour appliquer cette catégorie au tiers'"
+                  @click.stop="applySuggestion(p)"
+                >
+                  {{ applyingSuggestionId === p.id ? 'Application…' : `Suggestion : ${categoryLabel(suggestedCategoryId(p))}` }}
+                </button>
+                <template v-else>—</template>
+              </td>
               <td class="row-actions" @click.stop>
                 <button class="btn danger" @click="remove(p)">Suppr.</button>
               </td>
@@ -181,7 +220,8 @@
 <script setup>
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import { PayeesAPI, CategoriesAPI } from '../services/api'
+import { PayeesAPI } from '../services/api'
+import { dataStore } from '../services/dataStore'
 import { normalizeSearch } from '../services/search'
 import { flattenCategories } from '../services/categories'
 import { formatAmount } from '../services/format'
@@ -191,11 +231,22 @@ import MergeModal from '../components/MergeModal.vue'
 
 const route = useRoute()
 
-const payees = ref([])
-const categories = ref([])
+// Donnees issues du cache partage (voir App.vue / dataStore.js), comme sur
+// Transactions.vue : cette page avait auparavant son propre chargement local
+// (PayeesAPI.list()/CategoriesAPI.list() a part), deconnecte du cache
+// partage — une modification faite ici (edition, fusion) ne se repercutait
+// donc pas ailleurs (ex : autocomplete tiers de la page Transactions) tant
+// que le cache partage n'etait pas revalide par autre chose (navigation,
+// F5...).
+const payees = computed(() => dataStore.state.payees)
+const categories = computed(() => dataStore.state.categories)
 const showModal = ref(false)
 const searchQuery = ref('')
+const withoutCategoryOnly = ref(false)
 const form = ref(emptyForm())
+
+const autoCategorizing = ref(false)
+const autoCategorizeResult = ref(null)
 
 const editingId = ref(null)
 const editForm = ref(null)
@@ -211,10 +262,13 @@ function emptyForm() {
   return { name: '', pattern: '', amount: null, categoryId: null }
 }
 
+const withoutCategoryCount = computed(() => payees.value.filter(p => !p.categoryId).length)
+
 const filteredPayees = computed(() => {
   const q = normalizeSearch(searchQuery.value)
-  if (!q) return payees.value
-  return payees.value.filter(p =>
+  const base = withoutCategoryOnly.value ? payees.value.filter(p => !p.categoryId) : payees.value
+  if (!q) return base
+  return base.filter(p =>
     normalizeSearch(p.name).includes(q) ||
     normalizeSearch(p.pattern).includes(q) ||
     normalizeSearch(categoryLabel(p.categoryId)).includes(q)
@@ -234,14 +288,80 @@ function categoryLabel(categoryId) {
   return categoryLabelById.value.get(categoryId) || '—'
 }
 
-async function load() {
-  payees.value = await PayeesAPI.list()
+/**
+ * Categorie(s) distincte(s) utilisee(s) par les transactions DEJA
+ * categorisees de chaque tiers (indexees une seule fois par tiers, pas a
+ * chaque ligne affichee — meme principe que categoryLabelById ci-dessus) :
+ * sert a suggerer une categorie pour un tiers qui n'en a pas encore, quand
+ * toutes ses transactions categorisees s'accordent sur UNE seule categorie.
+ * Les transactions non categorisees du meme tiers n'entrent pas en compte
+ * (ni pour, ni contre) : seul un signal consistant compte.
+ */
+const categoryIdsByPayeeId = computed(() => {
+  const map = new Map()
+  for (const t of dataStore.state.transactions) {
+    if (!t.payeeId || t.categoryId == null) continue
+    let set = map.get(t.payeeId)
+    if (!set) {
+      set = new Set()
+      map.set(t.payeeId, set)
+    }
+    set.add(t.categoryId)
+  }
+  return map
+})
+
+/** Categorie suggeree pour un tiers sans categorie, ou null si aucun signal exploitable (aucune transaction categorisee, ou categories divergentes). */
+function suggestedCategoryId(payee) {
+  if (payee.categoryId) return null
+  const ids = categoryIdsByPayeeId.value.get(payee.id)
+  if (!ids || ids.size !== 1) return null
+  return ids.values().next().value
+}
+
+const applyingSuggestionId = ref(null)
+
+/** Applique en un clic la categorie suggeree (voir suggestedCategoryId) sans passer par le mode edition complet de la ligne. */
+async function applySuggestion(payee) {
+  const categoryId = suggestedCategoryId(payee)
+  if (!categoryId) return
+  applyingSuggestionId.value = payee.id
+  try {
+    await PayeesAPI.update(payee.id, {
+      name: payee.name,
+      pattern: payee.pattern,
+      amount: payee.amount,
+      categoryId
+    })
+    await refreshAfterMutation()
+  } finally {
+    applyingSuggestionId.value = null
+  }
+}
+
+/** Revalide le cache partage des tiers apres creation/edition/suppression/fusion, et purge la selection des tiers qui n'existent plus. */
+async function refreshAfterMutation() {
+  await dataStore.refreshPayees()
   const existingIds = new Set(payees.value.map(p => p.id))
   selectedIds.value = selectedIds.value.filter(id => existingIds.has(id))
 }
 
-async function loadRefs() {
-  categories.value = await CategoriesAPI.list()
+/**
+ * Version en masse de applySuggestion ci-dessus (voir ServiceTiers#autoCategorize
+ * cote backend) : categorise en une fois tous les tiers eligibles, et
+ * propage la categorie ainsi determinee aux transactions de ces tiers
+ * encore sans categorie. Revalide aussi le cache des transactions (pas
+ * seulement celui des tiers), puisque des transactions peuvent avoir change.
+ */
+async function runAutoCategorize() {
+  autoCategorizing.value = true
+  autoCategorizeResult.value = null
+  try {
+    autoCategorizeResult.value = await PayeesAPI.autoCategorize()
+    await Promise.all([dataStore.refreshPayees(), dataStore.refreshTransactions()])
+  } finally {
+    autoCategorizing.value = false
+  }
 }
 
 function openCreate() {
@@ -256,13 +376,13 @@ async function save() {
   }
   await PayeesAPI.create(form.value)
   showModal.value = false
-  await load()
+  await refreshAfterMutation()
 }
 
 async function remove(payee) {
   if (!confirm(`Supprimer le tiers "${payee.name}" ?`)) return
   await PayeesAPI.remove(payee.id)
-  await load()
+  await refreshAfterMutation()
 }
 
 /* --- Édition inline --- */
@@ -295,7 +415,7 @@ async function confirmEdit() {
   editForm.value = null
 
   await PayeesAPI.update(id, payload)
-  await load()
+  await refreshAfterMutation()
 }
 
 /** Vrai si tous les tiers actuellement affichés (selon le filtre) sont sélectionnés. */
@@ -350,7 +470,10 @@ async function confirmMerge() {
     await PayeesAPI.merge(sourceIds, mergeTargetId.value, mergePattern.value.trim())
     showMergeModal.value = false
     selectedIds.value = []
-    await load()
+    // La fusion reaffecte aussi le tiers de chaque transaction des tiers
+    // source (voir ServiceTiers#merge cote backend) : revalider aussi le
+    // cache des transactions, pas seulement celui des tiers.
+    await Promise.all([dataStore.refreshPayees(), dataStore.refreshTransactions()])
   } catch (e) {
     alert('Erreur lors de la fusion : ' + (e.response?.data?.error || e.message))
   } finally {
@@ -359,8 +482,13 @@ async function confirmMerge() {
 }
 
 onMounted(async () => {
-  await loadRefs()
-  await load()
+  // Si le prechargement lance au demarrage de l'app est deja termine (cas
+  // courant), instantane. Sinon (arrivee directe sur /payees), on attend
+  // juste cette premiere fois — meme pattern que Transactions.vue.
+  await dataStore.ensureLoaded()
+  // Revalidation silencieuse en arriere-plan a chaque visite de la page, au
+  // cas ou tiers/categories/transactions ont change depuis le prechargement.
+  dataStore.refreshAll()
 
   // Arrivee depuis "Transactions > À traiter > Créer une règle" :
   // - si le tiers existe deja (cas quasi systematique, il a ete cree
@@ -380,6 +508,34 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.auto-categorize-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  background: var(--mint-dim);
+  border: 1px solid var(--mint);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.auto-categorize-result-close {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px;
+  border-radius: 50%;
+}
+.auto-categorize-result-close:hover {
+  color: var(--text-primary);
+  background: var(--ink-800);
+}
+
 /*
  * Volontairement pas d'overflow-x ici : un position:sticky sur le thead
  * (ci-dessous) ne colle au scroll de la PAGE que si aucun ancêtre entre lui
@@ -411,6 +567,34 @@ onMounted(async () => {
 .payees-table tbody tr.row-editing td {
   overflow: visible;
 }
+/*
+ * Bouton de suggestion de categorie (voir suggestedCategoryId) : bordure en
+ * pointilles + teinte ambre pour bien le distinguer d'une categorie deja
+ * assignee (texte simple) — signale visuellement "proposition a valider",
+ * pas une valeur deja actee.
+ */
+.category-suggestion {
+  display: inline-flex;
+  align-items: center;
+  border: 1px dashed var(--amber);
+  background: var(--amber-dim);
+  color: var(--amber);
+  border-radius: var(--radius-sm);
+  padding: 3px 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.category-suggestion:hover:not(:disabled) {
+  background: var(--amber);
+  color: #FFFFFF;
+}
+.category-suggestion:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .row-actions {
   display: flex;
   gap: 6px;

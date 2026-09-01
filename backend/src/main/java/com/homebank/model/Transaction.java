@@ -88,16 +88,15 @@ public class Transaction {
     private boolean periodicExpense = false;
 
     /**
-     * Coche pour une depense/revenu ponctuel dont le montant doit etre lisse
-     * sur les 12 mois qui suivent (et incluent) son propre mois de paiement,
-     * plutot que compte en une fois sur ce seul mois (ex : taxe fonciere
-     * payee en octobre 2025, lissee d'octobre 2025 a septembre 2026 inclus).
-     * Pris en compte uniquement dans les rapports (tableau de bord) ;
-     * n'affecte jamais le solde reel des comptes, qui
-     * reste base sur la date et le montant reels (voir ServiceRapport).
+     * Coche pour une transaction exceptionnelle (ex : achat d'une voiture,
+     * gros heritage...) dont le montant fausserait les moyennes/tendances des
+     * tableaux de bord si elle etait comptee comme une depense/revenu normal.
+     * Exclue de tous les rapports bases sur attributedTransactions (voir
+     * ServiceRapport) ; n'affecte jamais le solde reel des comptes, qui reste
+     * base sur la date et le montant reels.
      */
     @Column(nullable = false, columnDefinition = "boolean not null default false")
-    private boolean annualized = false;
+    private boolean exceptional = false;
 
     /**
      * Identifiant unique fourni par la banque ou le fichier importe (si
@@ -106,4 +105,28 @@ public class Transaction {
      */
     @Column(name = "external_id")
     private String externalId;
+
+    /**
+     * Coche par l'utilisateur depuis l'onglet "Doublons" pour indiquer qu'un
+     * groupe remonte par ServiceTransaction#findDuplicateGroups n'est en
+     * realite pas un doublon (ex : deux achats distincts, memes compte/date/
+     * montant par coincidence). Exclue ensuite de toute detection de doublon
+     * (voir ServiceTransaction#findDuplicateGroups), qu'elle soit "certaine"
+     * ou "probable".
+     */
+    @Column(name = "duplicate_ignored", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean duplicateIgnored = false;
+
+    /**
+     * Coche par l'utilisateur depuis l'onglet "Périodiques" ("Ignorer" sur
+     * une suggestion, voir ServiceTransaction#findPeriodicSuggestions) pour
+     * indiquer que cette transaction ne doit plus jamais etre proposee comme
+     * periodique. Sans ce champ, "Ignorer" n'etait qu'un filtre local a la
+     * session (un simple Set en memoire cote frontend, voir
+     * TransactionsPeriodicSuggestions.vue) : la meme suggestion revenait a
+     * chaque nouvelle visite de l'onglet, puisque le backend la recalculait
+     * sans rien savoir d'un refus precedent.
+     */
+    @Column(name = "periodic_suggestion_ignored", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean periodicSuggestionIgnored = false;
 }

@@ -54,6 +54,11 @@ public class ControleurCategorie {
         return categoryMapper.toDTO(categoryService.toggleHidden(id));
     }
 
+    @PostMapping("/{id}/toggle-annualized")
+    public CategorieDTO toggleAnnualized(@PathVariable Long id) {
+        return categoryMapper.toDTO(categoryService.toggleAnnualized(id));
+    }
+
     /**
      * Fusionne plusieurs categories dans une categorie cible : toutes les
      * transactions et sous-categories des categories source sont reaffectees

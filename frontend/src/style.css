@@ -205,6 +205,14 @@ input[type="checkbox"] {
     max-width: 1600px;
 }
 
+/* Page Transactions : le tableau (beaucoup de colonnes) doit profiter de
+   tout l'écran plutôt que de laisser un large espace vide à droite au-delà
+   des 1600px habituels sur les grands écrans (voir App.vue, class posée
+   uniquement sur la route "transactions"). */
+.main-content.main-content-wide {
+    max-width: none;
+}
+
 .page-header {
     display: flex;
     justify-content: space-between;
@@ -433,3 +441,57 @@ code {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--ink-950); }
 ::-webkit-scrollbar-thumb { background: var(--ink-600); border-radius: 6px; }
+
+/* --- Export PDF du tableau de bord (voir export/export-dashboard.mjs) :
+   Playwright imprime en media "print". On masque la sidebar (inutile sur un
+   PDF, elle prenait toute la hauteur de page sans apporter d'info) pour
+   redonner toute la largeur au contenu, et on evite de couper une carte
+   (donc un graphique Chart.js) au milieu d'un saut de page — sauf les
+   tableaux d'analyse mensuelle, trop hauts pour tenir sur une page : forcer
+   un avoid dessus laisserait un grand vide en bas de page precedente.
+   Placees en fin de fichier pour gagner la cascade : une regle @media print
+   serait ecrasee par une regle non conditionnelle de meme specificite qui la
+   suit dans le fichier, puisque les deux s'appliquent pendant l'impression. */
+@media print {
+    .sidebar { display: none; }
+    .app-shell { display: block; min-height: auto; }
+    .main-content { max-width: none; padding-left: 0; padding-right: 0; }
+    .card { break-inside: avoid; page-break-inside: avoid; padding: 16px; }
+    /* Deplies en entier a l'impression (voir Dashboard.vue) et potentiellement
+       hauts (12 mois d'historique par categorie et sous-categorie) — forcer
+       un avoid dessus laisserait un grand vide en bas de page precedente.
+       Exclu : .monthly-summary-card ("Resume mensuel"), seulement 3 lignes,
+       qui elle doit rester entiere (avoid) : sans ca, ses lignes Revenus/
+       Depenses/Solde peuvent se retrouver coupees entre deux pages, avec la
+       derniere ligne isolee toute seule en haut de la page suivante. */
+    .monthly-analysis-card:not(.monthly-summary-card) { break-inside: auto; page-break-inside: auto; }
+
+    /* Chaque groupe categorie+sous-categories (voir Dashboard.vue : un
+       <tbody> par groupe) doit rester entier — sinon le saut de page peut
+       tomber au milieu d'un groupe, laissant ses dernieres sous-categories
+       (ou pire, juste la ligne de total qui suit) isolees seules en haut
+       d'une page presque vide. En le rendant indivisible, le moteur est
+       force de reculer jusqu'a la frontiere entre deux groupes pour placer
+       le saut de page. La ligne de total (elle aussi dans son propre
+       <tbody>) reste en plus attachee au groupe qui la precede si possible. */
+    .monthly-analysis-table tbody {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+    .monthly-analysis-table .total-row {
+        break-before: avoid;
+        page-break-before: avoid;
+    }
+
+    /* Export en 2 passes fusionnees (voir export/export-dashboard.mjs) :
+       le tableau de bord entier ne tient pas dans une seule orientation —
+       les tableaux d'analyse mensuelle (12 mois + moyenne/total) ont besoin
+       du paysage, mais le reste se lit mieux en portrait sur un telephone
+       (l'export est consulte a distance, voir ServiceExport). Le script
+       capture donc la meme page deux fois avec l'une ou l'autre de ces
+       classes sur <html>, puis fusionne les deux PDF resultants. */
+    .pdf-cacher-tableaux-larges .monthly-analysis-card { display: none; }
+    .pdf-ne-montrer-que-tableaux-larges .dashboard-page > *:not(.monthly-analysis-card):not(.page-header) {
+        display: none;
+    }
+}

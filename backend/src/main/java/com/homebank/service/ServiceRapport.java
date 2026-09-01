@@ -34,26 +34,36 @@ public class ServiceRapport {
     /**
      * Une transaction (reelle) attribuee a un mois donne pour un montant
      * donne — en general la transaction elle-meme sur sa propre date, sauf
-     * pour une transaction "annualisee" (voir Transaction#annualized) qui
-     * genere une ligne par mois de la fenetre glissante de 12 mois demarrant
-     * a son propre mois de paiement, chacune pour 1/12 de son montant (voir
-     * {@link #attributedTransactions}).
+     * pour une transaction dont la categorie est marquee "annuelle" (voir
+     * Categorie#annualized) qui genere une ligne par mois de la fenetre
+     * glissante de 12 mois demarrant a son propre mois de paiement, chacune
+     * pour 1/12 de son montant (voir {@link #attributedTransactions}).
      */
     private record AttributedTransaction(Transaction source, LocalDate date, BigDecimal amount) {}
 
+    /** Vrai si la transaction est affectee a une categorie marquee "annuelle" (voir Categorie#annualized). */
+    private boolean hasAnnualizedCategory(Transaction t) {
+        return t.getCategory() != null && t.getCategory().isAnnualized();
+    }
+
     /**
      * Transactions "attribuables" a la periode [from,to] : les transactions
-     * normales, sur leur propre date reelle ; et, pour toute transaction
-     * marquee "annualisee" (ex : taxe fonciere payee en une fois mais qui
-     * couvre toute l'annee), une ligne par mois de la fenetre glissante de
-     * 12 mois qui commence a son propre mois de paiement (ex : payee en
-     * octobre 2025 => repartie d'octobre 2025 a septembre 2026 inclus) qui
-     * tombe dans la periode — chacune pour 1/12 de son montant — meme quand
-     * la date reelle du paiement elle-meme est hors periode. Une transaction
-     * annualisee ne compte donc jamais en une fois sur son seul mois de
-     * paiement : uniquement lissee sur les 12 mois suivants. Le solde reel
-     * des comptes (balanceForecast) n'utilise jamais cette methode : il
-     * reste base sur la date et le montant reels.
+     * normales, sur leur propre date reelle ; et, pour toute transaction dont
+     * la categorie est marquee "annuelle" (ex : taxe fonciere payee en une
+     * fois mais qui couvre toute l'annee), une ligne par mois de la fenetre
+     * glissante de 12 mois qui commence a son propre mois de paiement (ex :
+     * payee en octobre 2025 => repartie d'octobre 2025 a septembre 2026
+     * inclus) qui tombe dans la periode — chacune pour 1/12 de son montant —
+     * meme quand la date reelle du paiement elle-meme est hors periode. Une
+     * transaction d'une categorie annuelle ne compte donc jamais en une fois
+     * sur son seul mois de paiement : uniquement lissee sur les 12 mois
+     * suivants. Le solde reel des comptes (balanceForecast) n'utilise jamais
+     * cette methode : il reste base sur la date et le montant reels.
+     * <p>
+     * Une transaction marquee "exceptionnelle" (voir Transaction#exceptional)
+     * est totalement exclue de attributedTransactions, quel que soit le
+     * caractere annuel de sa categorie, pour ne jamais fausser les moyennes/
+     * tendances des tableaux de bord (ex : achat d'une voiture).
      */
     private List<AttributedTransaction> attributedTransactions(LocalDate from, LocalDate to, Long accountId) {
         LocalDate today = LocalDate.now();
@@ -65,13 +75,15 @@ public class ServiceRapport {
         for (Transaction t : inRange) {
             if (t.getPaymentMode() == ModePaiement.TRANSFER) continue;
             if (t.getDate().isAfter(today)) continue;
-            if (t.isAnnualized()) continue; // traitee ci-dessous, jamais pour son montant plein
+            if (t.isExceptional()) continue;
+            if (hasAnnualizedCategory(t)) continue; // traitee ci-dessous, jamais pour son montant plein
             result.add(new AttributedTransaction(t, t.getDate(), t.getAmount()));
         }
 
-        for (Transaction t : transactionRepository.findByAnnualizedTrue()) {
+        for (Transaction t : transactionRepository.findByCategory_AnnualizedTrue()) {
             if (t.getPaymentMode() == ModePaiement.TRANSFER) continue;
             if (t.getDate().isAfter(today)) continue;
+            if (t.isExceptional()) continue;
             if (accountId != null && (t.getAccount() == null || !accountId.equals(t.getAccount().getId()))) continue;
 
             BigDecimal monthlyShare = t.getAmount().divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
@@ -321,6 +333,9 @@ public class ServiceRapport {
         LocalDate threeMonthsAgo = today.minusMonths(3);
         List<Transaction> flagged = transactionRepository.findByPeriodicExpenseTrueOrderByDateDescIdDesc()
                 .stream()
+                // Une transaction exceptionnelle est exclue de tous les tableaux de
+                // bord (voir Transaction#exceptional), y compris celui-ci.
+                .filter(t -> !t.isExceptional())
                 // Une occurrence future n'a pas encore reellement eu lieu : on ne la
                 // retient pas comme "derniere" occurrence connue de la depense.
                 .filter(t -> !t.getDate().isAfter(today))

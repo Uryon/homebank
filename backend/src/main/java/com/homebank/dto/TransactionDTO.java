@@ -28,6 +28,7 @@ public class TransactionDTO {
     private Long transferTransactionId;
     private boolean validated;
     private boolean periodicExpense;
-    private boolean annualized;
+    private boolean exceptional;
     private String externalId;
+    private boolean duplicateIgnored;
 }

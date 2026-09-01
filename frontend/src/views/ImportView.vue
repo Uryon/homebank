@@ -86,6 +86,11 @@ async function doImport() {
 
 onMounted(async () => {
   await dataStore.ensureLoaded()
-  if (accounts.value.length) accountId.value = accounts.value[0].id
+  // Compte courant par defaut (le plus souvent le compte cible d'un import
+  // de releve bancaire), sinon le premier compte de la liste — meme critere
+  // de priorite que le tri des comptes dans la sidebar/Comptes.vue.
+  const checkingAccount = accounts.value.find(a => a.type === 'CHECKING')
+  if (checkingAccount) accountId.value = checkingAccount.id
+  else if (accounts.value.length) accountId.value = accounts.value[0].id
 })
 </script>
