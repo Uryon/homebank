@@ -449,6 +449,7 @@ import AmountInput from '../components/AmountInput.vue'
 import MonthYearFilter from '../components/MonthYearFilter.vue'
 import TransactionsSubNav from './TransactionsSubNav.vue'
 import { formatAmount, formatDate } from '../services/format'
+import { findPayeeByName } from '../services/payee'
 
 const route = useRoute()
 
@@ -922,8 +923,8 @@ async function load() {
  * l'utilisateur saisit/selectionne un tiers reconnu dans le formulaire, ce
  * champ est rempli avec la categorie par defaut du tiers — y COMPRIS si une
  * categorie etait deja renseignee (ex : deja pre-remplie a tort par un tiers
- * homonyme avant la desambiguisation par montant, voir findPayeeByName
- * ci-dessous) : c'est le fait de choisir/changer explicitement le tiers qui
+ * homonyme avant la desambiguisation par montant, voir
+ * services/payee.js#findPayeeByName) : c'est le fait de choisir/changer explicitement le tiers qui
  * declenche la mise a jour, jamais un rafraichissement en arriere-plan.
  * Ce pre-remplissage est desormais la SEULE source de la categorie par
  * defaut du tiers : le backend (TransactionService#applyPayload) applique la
@@ -938,8 +939,8 @@ async function load() {
 // de tous les tiers a chaque caractere tape dans le champ Tiers. Un nom peut
 // correspondre a PLUSIEURS tiers (voir Tiers#amount : "Bouygues" a 10€ et a
 // 20€ sont deux tiers distincts avec le meme nom affiche), d'ou le tableau
-// plutot qu'un seul tiers par nom — voir findPayeeByName ci-dessous, qui les
-// departage par montant.
+// plutot qu'un seul tiers par nom — voir services/payee.js#findPayeeByName,
+// qui les departage par montant.
 const payeeByNormalizedName = computed(() => {
   const map = new Map()
   for (const p of payees.value) {
@@ -952,34 +953,11 @@ const payeeByNormalizedName = computed(() => {
   return map
 })
 
-/**
- * Parmi les tiers partageant ce nom, celui dont le montant de reference
- * correspond exactement (en valeur absolue) au montant de la transaction —
- * meme logique que ServiceTiers#matchPayee cote backend — sinon un tiers
- * "generique" (sans montant de reference) s'il en existe un, sinon le
- * premier. Sans cette distinction par montant, la categorisation automatique
- * pouvait proposer le mauvais tiers (et donc la mauvaise categorie) parmi
- * plusieurs homonymes (ex : plusieurs "Bouygues" a des montants differents).
- */
-function findPayeeByName(name, amount) {
-  if (!name || !name.trim()) return null
-  const candidates = payeeByNormalizedName.value.get(name.trim().toLowerCase())
-  if (!candidates?.length) return null
-  if (candidates.length === 1) return candidates[0]
-
-  if (amount != null && amount !== '') {
-    const absAmount = Math.abs(Number(amount))
-    const exactAmountMatch = candidates.find(p => p.amount != null && Math.abs(Number(p.amount)) === absAmount)
-    if (exactAmountMatch) return exactAmountMatch
-  }
-  return candidates.find(p => p.amount == null) || candidates[0]
-}
-
-// L'edition inline applique la meme logique localement, voir
-// TransactionRow.vue (elle y a besoin de sa propre copie car editForm n'est
-// plus accessible depuis ce composant).
+// L'edition inline applique la meme logique localement via TransactionRow.vue
+// (elle recoit payeeByNormalizedName en prop, editForm n'etant pas accessible
+// depuis ce composant).
 function applyDefaultCategoryFromPayee(payeeName) {
-  const payee = findPayeeByName(payeeName, form.value.amount)
+  const payee = findPayeeByName(payeeByNormalizedName.value, payeeName, form.value.amount)
   if (payee?.categoryId) form.value.categoryId = payee.categoryId
 }
 

@@ -77,6 +77,34 @@
                     </excludes>
                 </configuration>
             </plugin>
+            <plugin>
+                <!--
+                  Couverture de tests, consommee par Sonar (voir
+                  sonar.coverage.jacoco.xmlReportPaths dans
+                  sonar-project.properties a la racine du repo).
+                  prepare-agent instrumente les classes avant les tests
+                  (phase initialize) ; report genere target/site/jacoco/jacoco.xml
+                  juste apres leur execution (phase test).
+                -->
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 

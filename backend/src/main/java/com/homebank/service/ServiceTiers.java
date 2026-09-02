@@ -11,6 +11,7 @@ import com.homebank.repository.DepotTransaction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -23,6 +24,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import java.util.stream.Collectors;
 
 @Service
 public class ServiceTiers {
@@ -181,7 +183,9 @@ public class ServiceTiers {
                 Pattern compiled = Pattern.compile(wildcardToRegex(wildcarded), Pattern.CASE_INSENSITIVE);
                 if (compiled.matcher(normalizedText).find()) return true;
             } catch (PatternSyntaxException e) {
-                // motif invalide (ne devrait plus arriver avec le systeme "joker") : on l'ignore
+                // motif invalide (ne devrait plus arriver avec le systeme "joker") : ignore ce
+                // segment mais trace l'anomalie plutot que de la masquer silencieusement
+                log.warn("Motif de tiers invalide ignore : \"{}\" ({})", rawPart, e.getMessage());
             }
         }
         return false;
@@ -311,7 +315,7 @@ public class ServiceTiers {
      * un tiers renomme ou dont le motif a ete modifie a la main par l'utilisateur
      * (page Tiers, fusion...) n'est jamais supprime automatiquement.
      */
-    @org.springframework.transaction.annotation.Transactional
+    @Transactional
     public void cleanupIfPayeeChanged(Tiers previousPayee, Tiers newPayee) {
         if (previousPayee == null || previousPayee.equals(newPayee)) return;
         pruneIfOrphan(previousPayee);
@@ -343,7 +347,7 @@ public class ServiceTiers {
      * - les tiers source sont supprimes.
      * Operation atomique : tout est annule en cas d'erreur.
      */
-    @org.springframework.transaction.annotation.Transactional
+    @Transactional
     public TiersDTO merge(List<Long> sourceIds, Long targetId, String pattern) {
         Tiers target = findEntityById(targetId);
 
@@ -379,7 +383,7 @@ public class ServiceTiers {
      * Appelee au demarrage par config.PayeeRelationMigration ; idempotente
      * (ne touche que les transactions dont payee_id est encore NULL).
      */
-    @org.springframework.transaction.annotation.Transactional
+    @Transactional
     public int migrateLegacyTransactionPayees() {
         if (transactionRepository.countLegacyPayeeColumn() == 0) return 0;
 
@@ -387,20 +391,30 @@ public class ServiceTiers {
         if (legacyRows.isEmpty()) return 0;
 
         List<Tiers> knownPayees = findAllForMatching();
+
+        // Un seul findAllById groupé plutôt qu'un findById par ligne dans la
+        // boucle : evite un aller-retour SQL par transaction a migrer.
+        List<Long> transactionIds = legacyRows.stream().map(row -> ((Number) row[0]).longValue()).toList();
+        Map<Long, Transaction> transactionsById = transactionRepository.findAllById(transactionIds).stream()
+                .collect(Collectors.toMap(Transaction::getId, t -> t));
+
+        List<Transaction> transactionsToSave = new ArrayList<>();
         int migrated = 0;
         for (Object[] row : legacyRows) {
             Long transactionId = ((Number) row[0]).longValue();
             String rawText = (String) row[1];
 
-            transactionRepository.findById(transactionId).ifPresent(t -> {
+            Transaction t = transactionsById.get(transactionId);
+            if (t != null) {
                 Tiers resolved = resolveOrCreate(rawText, t.getAmount(), knownPayees);
                 if (resolved != null) {
                     t.setPayee(resolved);
-                    transactionRepository.save(t);
+                    transactionsToSave.add(t);
                 }
-            });
+            }
             migrated++;
         }
+        transactionRepository.saveAll(transactionsToSave);
         return migrated;
     }
 
@@ -416,7 +430,7 @@ public class ServiceTiers {
      * choisie, ni sur un tiers ni sur une transaction — ne fait que combler
      * les vides a partir d'un signal deja consistant.
      */
-    @org.springframework.transaction.annotation.Transactional
+    @Transactional
     public CategorisationAutoResultatDTO autoCategorize() {
         List<Tiers> allPayees = payeeRepository.findAll();
         List<Transaction> allTransactions = transactionRepository.findAllWithPayeeAndCategory();

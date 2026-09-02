@@ -132,6 +132,7 @@ import PayeeAutocomplete from './PayeeAutocomplete.vue'
 import CategoryAutocomplete from './CategoryAutocomplete.vue'
 import AmountInput from './AmountInput.vue'
 import { formatAmount, formatDate, displayMemo } from '../services/format'
+import { findPayeeByName } from '../services/payee'
 
 const props = defineProps({
   transaction: { type: Object, required: true },
@@ -212,27 +213,6 @@ const editAmountType = computed(() => {
 })
 
 /**
- * Meme logique de desambiguisation par montant que Transactions.vue#findPayeeByName
- * (copie locale, editForm n'etant pas accessible depuis ce composant) : parmi
- * les tiers partageant ce nom, celui dont le montant de reference correspond
- * exactement (en valeur absolue) au montant de la transaction, sinon un tiers
- * "generique" (sans montant de reference), sinon le premier.
- */
-function findPayeeByName(name, amount) {
-  if (!name || !name.trim()) return null
-  const candidates = props.payeeIndex.get(name.trim().toLowerCase())
-  if (!candidates?.length) return null
-  if (candidates.length === 1) return candidates[0]
-
-  if (amount != null && amount !== '') {
-    const absAmount = Math.abs(Number(amount))
-    const exactAmountMatch = candidates.find(p => p.amount != null && Math.abs(Number(p.amount)) === absAmount)
-    if (exactAmountMatch) return exactAmountMatch
-  }
-  return candidates.find(p => p.amount == null) || candidates[0]
-}
-
-/**
  * Categorisation automatique par tiers (voir Transactions.vue pour le detail
  * du raisonnement), sur CETTE ligne. Deux cas :
  * - categorie encore vide : rempli des l'ouverture de l'edition (ce watch se
@@ -250,7 +230,7 @@ watch(() => editForm.value?.payee, (payeeName) => {
   if (!editForm.value) return
   const payeeActuallyChanged = payeeName !== payeeAtEditStart
   if (editForm.value.categoryId && !payeeActuallyChanged) return
-  const payee = findPayeeByName(payeeName, editForm.value.amount)
+  const payee = findPayeeByName(props.payeeIndex, payeeName, editForm.value.amount)
   if (payee?.categoryId) editForm.value.categoryId = payee.categoryId
 })
 

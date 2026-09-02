@@ -7,6 +7,7 @@ import com.homebank.model.Transaction;
 import com.homebank.model.TransactionSupprimee;
 import com.homebank.repository.DepotTransaction;
 import com.homebank.repository.DepotTransactionSupprimee;
+import lombok.Getter;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -53,11 +54,15 @@ public class ServiceImport {
         this.payeeService = payeeService;
     }
 
+    // Champs prives (accessibles depuis ServiceImport, classe englobante) :
+    // seuls les getters (utilises par Jackson pour la reponse JSON) exposent
+    // l'etat en dehors du service.
+    @Getter
     public static class ImportResult {
-        public int imported;
-        public int duplicates;
-        public int skipped;
-        public List<String> errors = new ArrayList<>();
+        private int imported;
+        private int duplicates;
+        private int skipped;
+        private final List<String> errors = new ArrayList<>();
     }
 
     /**

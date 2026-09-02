@@ -201,4 +201,53 @@ class ServiceTiersTest {
         assertThat(migrated).isZero();
         verify(transactionRepository, never()).findLegacyPayeeTextForMigration();
     }
+
+    private static com.homebank.model.Transaction transaction(Long id, BigDecimal amount) {
+        com.homebank.model.Transaction t = new com.homebank.model.Transaction();
+        t.setId(id);
+        t.setAmount(amount);
+        return t;
+    }
+
+    @Test
+    void migrateLegacyTransactionPayees_relieChaqueTransactionAuTiersReconnuOuCreeEtSauvegardeEnUnSeulBatch() {
+        Tiers carrefourConnu = tiers(1L, "Carrefour", "Carrefour", null);
+        com.homebank.model.Transaction t10 = transaction(10L, new BigDecimal("15.00"));
+        com.homebank.model.Transaction t11 = transaction(11L, new BigDecimal("20.00"));
+        when(transactionRepository.countLegacyPayeeColumn()).thenReturn(1L);
+        when(transactionRepository.findLegacyPayeeTextForMigration()).thenReturn(List.<Object[]>of(
+                new Object[]{10L, "Carrefour"},
+                new Object[]{11L, "NouveauTiers"}
+        ));
+        when(payeeRepository.findAll()).thenReturn(new ArrayList<>(List.of(carrefourConnu)));
+        when(transactionRepository.findAllById(List.of(10L, 11L))).thenReturn(List.of(t10, t11));
+        when(payeeRepository.save(any(Tiers.class))).thenAnswer(inv -> {
+            Tiers saved = inv.getArgument(0);
+            saved.setId(42L);
+            return saved;
+        });
+
+        int migrated = service.migrateLegacyTransactionPayees();
+
+        assertThat(migrated).isEqualTo(2);
+        assertThat(t10.getPayee()).isEqualTo(carrefourConnu);
+        assertThat(t11.getPayee()).isNotNull();
+        assertThat(t11.getPayee().getName()).isEqualTo("NouveauTiers");
+        verify(transactionRepository).saveAll(List.of(t10, t11));
+    }
+
+    @Test
+    void migrateLegacyTransactionPayees_compteLaLigneMaisNeFaitRienSiLaTransactionNexistePlus() {
+        when(transactionRepository.countLegacyPayeeColumn()).thenReturn(1L);
+        when(transactionRepository.findLegacyPayeeTextForMigration())
+                .thenReturn(List.<Object[]>of(new Object[]{99L, "Inconnu"}));
+        when(payeeRepository.findAll()).thenReturn(new ArrayList<>());
+        when(transactionRepository.findAllById(List.of(99L))).thenReturn(List.of());
+
+        int migrated = service.migrateLegacyTransactionPayees();
+
+        assertThat(migrated).isEqualTo(1);
+        verify(transactionRepository).saveAll(List.of());
+        verify(payeeRepository, never()).save(any());
+    }
 }

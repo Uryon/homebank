@@ -713,9 +713,13 @@ const totalBalance = computed(() =>
     Object.values(balances.value).reduce((sum, v) => sum + Number(v), 0)
 )
 
+// Instance creee une seule fois, comme amountFormatter dans services/format.js :
+// construire un Intl.NumberFormat a chaque appel est couteux.
+const compactAmountFormatter = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })
+
 /** Version compacte pour le total au centre du donut (ex : "3 780 €" au lieu de "3 780,00 €"). */
 function formatAmountCompact(v) {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(v || 0)
+  return compactAmountFormatter.format(v || 0)
 }
 
 /**
