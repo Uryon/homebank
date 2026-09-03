@@ -67,6 +67,22 @@ html, body {
     min-height: 100vh;
 }
 
+/* Contenu present pour les lecteurs d'ecran (accessibilite) mais invisible
+   a l'ecran : ex. entetes <th> de tableaux dont le titre visuel est deja
+   porte par la carte englobante, mais qui doivent quand meme exposer une
+   structure de tableau valide. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 a { color: inherit; text-decoration: none; }
 
 button {
@@ -366,7 +382,7 @@ table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
     gap: 14px;
 }
 .form-field { display: flex; flex-direction: column; gap: 6px; }
-.form-field label {
+.form-field label, .form-field .form-field-label {
     font-size: 12px;
     color: var(--text-muted);
     font-weight: 600;

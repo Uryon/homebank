@@ -5,6 +5,8 @@
       v-model="query"
       type="text"
       autocomplete="off"
+      :id="id"
+      :aria-label="ariaLabel"
       :placeholder="placeholder"
       @focus="openDropdown"
       @input="handleInput"
@@ -60,7 +62,13 @@ const props = defineProps({
   // Liste des tiers existants, sous la forme { id, name, ... }.
   payees: { type: Array, required: true },
   placeholder: { type: String, default: '' },
-  maxResults: { type: Number, default: 30 }
+  maxResults: { type: Number, default: 30 },
+  // Transmis tel quel au <input> interne, pour permettre a l'appelant
+  // d'associer un <label for="..."> (accessibilite).
+  id: { type: String, default: null },
+  // Nom accessible direct quand aucun <label> visible n'existe (ex : cellule
+  // de tableau, champ d'edition en masse) — alternative a id+<label for>.
+  ariaLabel: { type: String, default: null }
 })
 
 const emit = defineEmits(['update:modelValue'])

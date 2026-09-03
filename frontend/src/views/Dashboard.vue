@@ -103,6 +103,9 @@
           <div v-if="periodicExpenses.expenses.items.length">
             <div class="periodic-table-wrap">
               <table class="plain-table">
+                <thead class="sr-only">
+                  <tr><th>Tiers</th><th>Montant</th></tr>
+                </thead>
                 <tbody>
                   <tr v-for="item in periodicExpenses.expenses.items" :key="item.payee">
                     <td>{{ item.payee || 'Sans nom' }}</td>
@@ -136,6 +139,9 @@
           <div v-if="periodicExpenses.revenues.items.length">
             <div class="periodic-table-wrap">
               <table class="plain-table">
+                <thead class="sr-only">
+                  <tr><th>Tiers</th><th>Montant</th></tr>
+                </thead>
                 <tbody>
                   <tr v-for="item in periodicExpenses.revenues.items" :key="item.payee">
                     <td>{{ item.payee || 'Sans nom' }}</td>
@@ -986,7 +992,7 @@ const FORECAST_COLOR = '#9AA3B5'
 
 /** Couleur hexadecimale -> rgba() avec une opacite donnee, pour les remplissages sous les courbes. */
 function hexToRgba(hex, alpha) {
-  const n = parseInt(hex.slice(1), 16)
+  const n = Number.parseInt(hex.slice(1), 16)
   const r = (n >> 16) & 0xff
   const g = (n >> 8) & 0xff
   const b = n & 0xff

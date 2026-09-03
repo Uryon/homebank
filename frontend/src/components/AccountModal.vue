@@ -4,12 +4,12 @@
       <h2>{{ isEdit ? 'Modifier le compte' : 'Nouveau compte' }}</h2>
       <div class="form-grid">
         <div class="form-field" style="grid-column: span 2;">
-          <label>Nom</label>
-          <input v-model="form.name" placeholder="Ex : Compte courant" />
+          <label for="account-modal-name">Nom</label>
+          <input id="account-modal-name" v-model="form.name" placeholder="Ex : Compte courant" />
         </div>
         <div class="form-field">
-          <label>Type</label>
-          <select v-model="form.type">
+          <label for="account-modal-type">Type</label>
+          <select id="account-modal-type" v-model="form.type">
             <option value="CHECKING">Compte courant</option>
             <option value="SAVINGS">Épargne</option>
             <option value="CASH">Espèces</option>
@@ -18,16 +18,16 @@
           </select>
         </div>
         <div class="form-field">
-          <label>Devise</label>
-          <input v-model="form.currency" placeholder="EUR" maxlength="3" />
+          <label for="account-modal-currency">Devise</label>
+          <input id="account-modal-currency" v-model="form.currency" placeholder="EUR" maxlength="3" />
         </div>
         <div class="form-field">
-          <label>Solde initial</label>
-          <AmountInput v-model="form.initialBalance" />
+          <label for="account-modal-balance">Solde initial</label>
+          <AmountInput id="account-modal-balance" v-model="form.initialBalance" />
         </div>
         <div class="form-field" style="grid-column: span 2;">
-          <label>Notes</label>
-          <textarea v-model="form.notes" rows="2"></textarea>
+          <label for="account-modal-notes">Notes</label>
+          <textarea id="account-modal-notes" v-model="form.notes" rows="2"></textarea>
         </div>
       </div>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px;">

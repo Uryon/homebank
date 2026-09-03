@@ -6,6 +6,8 @@
         v-model="query"
         type="text"
         autocomplete="off"
+        :id="id"
+        :aria-label="ariaLabel"
         :placeholder="placeholder"
         @focus="openDropdown"
         @input="handleInput"
@@ -67,6 +69,12 @@ const props = defineProps({
   // (affichees pour le contexte de la hierarchie, jamais selectionnables).
   categories: { type: Array, required: true },
   placeholder: { type: String, default: 'Rechercher une catégorie…' },
+  // Transmis tel quel au <input> interne, pour permettre a l'appelant
+  // d'associer un <label for="..."> (accessibilite).
+  id: { type: String, default: null },
+  // Nom accessible direct quand aucun <label> visible n'existe (ex : cellule
+  // de tableau, champ d'edition en masse) — alternative a id+<label for>.
+  ariaLabel: { type: String, default: null },
   // 'EXPENSE' | 'INCOME' | null : quand fourni, ne montre que les categories
   // du type correspondant (+ celles marquees BOTH), pour ne jamais pouvoir
   // affecter une categorie de revenu a une depense ou inversement. Laisser

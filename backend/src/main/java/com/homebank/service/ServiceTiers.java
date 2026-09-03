@@ -171,7 +171,7 @@ public class ServiceTiers {
         String normalizedText = normalizeWhitespace(text);
         for (String rawPart : patternField.split(";")) {
             String part = normalizeWhitespace(rawPart);
-            if (part.isEmpty()) continue;
+            if (part == null || part.isEmpty()) continue;
             try {
                 // Le champ stocke/affiche est du texte simple, sans etoile
                 // ("Carrefour"). C'est ICI, au moment du traitement seulement,

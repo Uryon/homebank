@@ -361,7 +361,7 @@ async function removeSingle(transaction, group) {
 
 /** Echappe les caracteres speciaux regex, sauf l'etoile (gardee comme joker). */
 function escapeRegexChars(s) {
-  return s.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+  return s.replace(/[.+?^${}()|[\]\\]/g, String.raw`\$&`)
 }
 
 /** Convertit un seul motif "joker" (avec *) en expression reguliere JS equivalente (miroir de ServiceTiers#wildcardToRegex). */

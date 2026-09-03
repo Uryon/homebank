@@ -6,6 +6,7 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.ZoneId;
 
 /**
  * Empreinte d'une transaction supprimee manuellement (compte, date, montant,
@@ -50,5 +51,5 @@ public class TransactionSupprimee {
     private String externalId;
 
     @Column(name = "deleted_at", nullable = false)
-    private LocalDate deletedAt = LocalDate.now();
+    private LocalDate deletedAt = LocalDate.now(ZoneId.systemDefault());
 }

@@ -4,6 +4,7 @@
     type="text"
     inputmode="decimal"
     v-model="text"
+    :id="id"
     :title="attrTitle"
     @keydown.enter="commit"
     @blur="commit"
@@ -44,7 +45,10 @@ const props = defineProps({
   // Transactions.vue) — sans ca, taper "-4" pour remplacer un montant deja
   // pre-rempli (ex : la moitie calculee par defaut) l'ADDITIONNAIT au lieu
   // de le remplacer, ce qui ne correspond jamais a l'intention dans ce cas.
-  allowRelative: { type: Boolean, default: true }
+  allowRelative: { type: Boolean, default: true },
+  // Transmis tel quel au <input> interne, pour permettre a l'appelant
+  // d'associer un <label for="..."> (accessibilite).
+  id: { type: String, default: null }
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -74,7 +78,7 @@ function resolve(raw) {
 
   // Normalise virgule decimale et espaces (y compris un espace comme
   // separateur de milliers, ex : "21 000") avant d'evaluer.
-  const normalized = trimmed.replace(/,/g, '.').replace(/\s+/g, '')
+  const normalized = trimmed.replaceAll(',', '.').replaceAll(/\s+/g, '')
 
   // Chaine de termes +/- : un premier nombre optionnellement signe, puis
   // autant de "+/- nombre" que voulu (ex : "21000-500+300", "-500+300").

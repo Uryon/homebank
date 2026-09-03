@@ -58,14 +58,14 @@
         </p>
         <div class="form-grid">
           <div class="form-field">
-            <label>Compte source</label>
-            <select v-model.number="transferForm.fromAccountId">
+            <label for="transfer-from">Compte source</label>
+            <select id="transfer-from" v-model.number="transferForm.fromAccountId">
               <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
             </select>
           </div>
           <div class="form-field">
-            <label>Compte destination</label>
-            <select v-model.number="transferForm.toAccountId">
+            <label for="transfer-to">Compte destination</label>
+            <select id="transfer-to" v-model.number="transferForm.toAccountId">
               <option
                 v-for="a in accounts"
                 :key="a.id"
@@ -77,16 +77,16 @@
             </select>
           </div>
           <div class="form-field">
-            <label>Montant</label>
-            <AmountInput v-model="transferForm.amount" />
+            <label for="transfer-amount">Montant</label>
+            <AmountInput id="transfer-amount" v-model="transferForm.amount" />
           </div>
           <div class="form-field">
-            <label>Date</label>
-            <input v-model="transferForm.date" type="date" />
+            <label for="transfer-date">Date</label>
+            <input id="transfer-date" v-model="transferForm.date" type="date" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
-            <label>Mémo (facultatif)</label>
-            <input v-model="transferForm.memo" placeholder="Ex : Épargne du mois" />
+            <label for="transfer-memo">Mémo (facultatif)</label>
+            <input id="transfer-memo" v-model="transferForm.memo" placeholder="Ex : Épargne du mois" />
           </div>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">

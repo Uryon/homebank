@@ -14,24 +14,27 @@
     <!-- Mode édition -->
     <template v-if="isEditing && editForm">
       <td class="num" @click.stop>
-        <input type="checkbox" :checked="selected" title="Sélectionner cette transaction" @change="$emit('toggle-select', transaction)" />
+        <input type="checkbox" :checked="selected" title="Sélectionner cette transaction" aria-label="Sélectionner cette transaction" @change="$emit('toggle-select', transaction)" />
       </td>
       <td class="num" @click.stop>
-        <input type="checkbox" v-model="editForm.validated" title="Transaction validée (rapprochement bancaire)" />
+        <input type="checkbox" v-model="editForm.validated" title="Transaction validée (rapprochement bancaire)" aria-label="Transaction validée (rapprochement bancaire)" />
       </td>
       <td @click.stop>
-        <input v-model="editForm.date" type="date" ref="firstEditField" />
+        <input v-model="editForm.date" type="date" ref="firstEditField" aria-label="Date" />
       </td>
       <td @click.stop>
-        <select v-model.number="editForm.accountId">
+        <select v-model.number="editForm.accountId" aria-label="Compte">
           <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
         </select>
       </td>
       <td @click.stop>
-        <PayeeAutocomplete v-model="editForm.payee" :payees="payees" />
+        <label for="tx-edit-payee" class="sr-only">Tiers</label>
+        <PayeeAutocomplete id="tx-edit-payee" v-model="editForm.payee" :payees="payees" />
       </td>
       <td @click.stop>
+        <label for="tx-edit-category" class="sr-only">Catégorie</label>
         <CategoryAutocomplete
+          id="tx-edit-category"
           v-model="editForm.categoryId"
           :categories="flatCategories"
           :transaction-type="editAmountType"
@@ -39,16 +42,16 @@
         />
       </td>
       <td @click.stop>
-        <input v-model="editForm.memo" placeholder="Note libre" />
+        <input v-model="editForm.memo" aria-label="Mémo" placeholder="Note libre" />
       </td>
       <td class="num" colspan="2" @click.stop>
-        <AmountInput v-model="editForm.amount" style="text-align: right;" />
+        <AmountInput v-model="editForm.amount" aria-label="Montant" style="text-align: right;" />
       </td>
       <td class="num" @click.stop>
-        <input type="checkbox" v-model="editForm.periodicExpense" title="Dépense périodique récurrente" />
+        <input type="checkbox" v-model="editForm.periodicExpense" title="Dépense périodique récurrente" aria-label="Dépense périodique récurrente" />
       </td>
       <td class="num" @click.stop>
-        <input type="checkbox" v-model="editForm.exceptional" title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)" />
+        <input type="checkbox" v-model="editForm.exceptional" title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)" aria-label="Transaction exceptionnelle" />
       </td>
       <td @click.stop>
         <span class="row-actions">
@@ -61,7 +64,7 @@
     <!-- Mode lecture -->
     <template v-else>
       <td class="num" @click.stop>
-        <input type="checkbox" :checked="selected" title="Sélectionner cette transaction" @change="$emit('toggle-select', transaction)" />
+        <input type="checkbox" :checked="selected" title="Sélectionner cette transaction" :aria-label="'Sélectionner la transaction ' + (transaction.payee || 'sans tiers') + ' du ' + formatDate(transaction.date)" @change="$emit('toggle-select', transaction)" />
       </td>
       <td class="num" @click.stop>
         <span
@@ -88,6 +91,7 @@
           type="checkbox"
           :checked="transaction.periodicExpense"
           title="Dépense périodique récurrente"
+          :aria-label="'Dépense périodique récurrente — ' + (transaction.payee || 'sans tiers')"
           @change="$emit('toggle-periodic', transaction)"
         />
       </td>
@@ -96,6 +100,7 @@
           type="checkbox"
           :checked="transaction.exceptional"
           title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)"
+          :aria-label="'Transaction exceptionnelle — ' + (transaction.payee || 'sans tiers')"
           @change="$emit('toggle-exceptional', transaction)"
         />
       </td>

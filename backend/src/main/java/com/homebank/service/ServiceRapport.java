@@ -13,13 +13,23 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 public class ServiceRapport {
+
+    private static final String INCOME = "income";
+    private static final String EXPENSE = "expense";
+    private static final String EXPENSES_KEY = "expenses";
+    private static final String TOTAL_KEY = "total";
+    private static final String LEVEL_KEY = "level";
+    private static final String PARENT_NAME_KEY = "parentName";
+    private static final String VALUES_KEY = "values";
+    private static final String LABEL_KEY = "label";
+    private static final String AMOUNT_KEY = "amount";
 
     private final DepotTransaction transactionRepository;
     private final DepotCompte accountRepository;
@@ -66,7 +76,7 @@ public class ServiceRapport {
      * tendances des tableaux de bord (ex : achat d'une voiture).
      */
     private List<AttributedTransaction> attributedTransactions(LocalDate from, LocalDate to, Long accountId) {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(ZoneId.systemDefault());
         List<AttributedTransaction> result = new ArrayList<>();
 
         List<Transaction> inRange = accountId != null
@@ -133,14 +143,14 @@ public class ServiceRapport {
                     row.put("category", e.getKey());
                     row.put("categoryId", categoryIdByLabel.get(e.getKey()));
                     row.put("uncategorized", uncategorizedLabels.contains(e.getKey()));
-                    row.put("total", e.getValue());
+                    row.put(TOTAL_KEY, e.getValue());
                     row.put("percentage", grandTotal.signum() == 0
                             ? BigDecimal.ZERO
                             : e.getValue().multiply(BigDecimal.valueOf(100))
                                     .divide(grandTotal, 1, RoundingMode.HALF_UP));
                     return row;
                 })
-                .collect(Collectors.toList());
+                .toList();
     }
 
     /**
@@ -183,7 +193,7 @@ public class ServiceRapport {
 
     private boolean matchesFlow(AttributedTransaction at, String flow) {
         if (flow == null) return true;
-        return "income".equals(flow) ? at.amount().signum() > 0 : at.amount().signum() < 0;
+        return INCOME.equals(flow) ? at.amount().signum() > 0 : at.amount().signum() < 0;
     }
 
     private boolean matchesCategory(Transaction t, Long categoryId, Long rootCategoryId, boolean uncategorized) {
@@ -214,8 +224,8 @@ public class ServiceRapport {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("income", income);
-        result.put("expenses", expenses.abs());
+        result.put(INCOME, income);
+        result.put(EXPENSES_KEY, expenses.abs());
         result.put("net", income.add(expenses));
         return result;
     }
@@ -233,7 +243,7 @@ public class ServiceRapport {
     private LocalDate anchorMonth(LocalDate referenceMonth) {
         return referenceMonth != null
                 ? referenceMonth.withDayOfMonth(1).plusMonths(1)
-                : LocalDate.now().withDayOfMonth(1);
+                : LocalDate.now(ZoneId.systemDefault()).withDayOfMonth(1);
     }
 
     /**
@@ -253,7 +263,7 @@ public class ServiceRapport {
 
             Map<String, Object> point = new LinkedHashMap<>();
             point.put("date", monthStart.toString());
-            point.put("label", monthLabel(monthStart));
+            point.put(LABEL_KEY, monthLabel(monthStart));
             point.put("savings", s.get("net"));
             result.add(point);
         }
@@ -279,7 +289,7 @@ public class ServiceRapport {
     public List<Map<String, Object>> balanceForecast(Long accountId, LocalDate referenceMonth) {
         List<Map<String, Object>> result = new ArrayList<>();
         LocalDate firstOfCurrentMonth = anchorMonth(referenceMonth);
-        LocalDate currentMonthStart = LocalDate.now().withDayOfMonth(1);
+        LocalDate currentMonthStart = LocalDate.now(ZoneId.systemDefault()).withDayOfMonth(1);
         // Charge les comptes une seule fois pour tout le calcul, plutot qu'a
         // chaque appel de balanceAsOf (findAll()/findById() repete).
         List<Compte> accounts = loadAccounts(accountId);
@@ -294,7 +304,7 @@ public class ServiceRapport {
             BigDecimal totalChange = trendBalances.get(trendBalances.size() - 1)
                     .subtract(trendBalances.get(0));
             avgMonthlyNet = totalChange.divide(
-                    BigDecimal.valueOf(trendBalances.size() - 1), 2, RoundingMode.HALF_UP);
+                    BigDecimal.valueOf((long) trendBalances.size() - 1), 2, RoundingMode.HALF_UP);
         }
 
         // Chaque point = le precedent + la variation mensuelle moyenne des
@@ -329,7 +339,7 @@ public class ServiceRapport {
      * dans un seul total affiche comme "Depenses periodiques".
      */
     public Map<String, Object> periodicExpensesSummary() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(ZoneId.systemDefault());
         LocalDate threeMonthsAgo = today.minusMonths(3);
         List<Transaction> flagged = transactionRepository.findByPeriodicExpenseTrueOrderByDateDescIdDesc()
                 .stream()
@@ -349,7 +359,7 @@ public class ServiceRapport {
         List<Transaction> revenues = flagged.stream().filter(t -> t.getAmount().signum() >= 0).toList();
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("expenses", summarizePeriodicGroup(expenses));
+        result.put(EXPENSES_KEY, summarizePeriodicGroup(expenses));
         result.put("revenues", summarizePeriodicGroup(revenues));
         return result;
     }
@@ -369,15 +379,15 @@ public class ServiceRapport {
             item.put("transactionId", t.getId());
             item.put("payee", t.getPayee() != null ? t.getPayee().getName() : null);
             item.put("date", t.getDate());
-            item.put("amount", t.getAmount().abs());
+            item.put(AMOUNT_KEY, t.getAmount().abs());
             items.add(item);
             total = total.add(t.getAmount().abs());
         }
-        items.sort((a, b) -> ((BigDecimal) b.get("amount")).compareTo((BigDecimal) a.get("amount")));
+        items.sort((a, b) -> ((BigDecimal) b.get(AMOUNT_KEY)).compareTo((BigDecimal) a.get(AMOUNT_KEY)));
 
         Map<String, Object> group = new LinkedHashMap<>();
         group.put("items", items);
-        group.put("total", total);
+        group.put(TOTAL_KEY, total);
         return group;
     }
 
@@ -399,7 +409,7 @@ public class ServiceRapport {
     private Map<String, Object> point(LocalDate date, BigDecimal balance, String type) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("date", date.toString());
-        m.put("label", monthLabel(date));
+        m.put(LABEL_KEY, monthLabel(date));
         m.put("balance", balance);
         m.put("type", type);
         return m;
@@ -436,7 +446,7 @@ public class ServiceRapport {
         for (LocalDate month = from; month.isBefore(firstOfCurrentMonth); month = month.plusMonths(1)) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("key", month.toString());
-            m.put("label", capitalize(month.format(monthFormatter)));
+            m.put(LABEL_KEY, capitalize(month.format(monthFormatter)));
             m.put("year", month.getYear());
             m.put("month", month.getMonthValue());
             months.add(m);
@@ -479,7 +489,7 @@ public class ServiceRapport {
 
             // Les transactions sans catégorie restent visibles dans le tableau.
             String safeName = category != null ? category.getName() : "Sans catégorie";
-            String key = catKey + "|" + (amount.signum() > 0 ? "income" : "expense");
+            String key = catKey + "|" + (amount.signum() > 0 ? INCOME : EXPENSE);
 
             Map<String, Object> row = rows.get(key);
             if (row == null) {
@@ -488,19 +498,19 @@ public class ServiceRapport {
                 row.put("categoryId", categoryId);
                 row.put("name", safeName);
                 row.put("parentId", parentId);
-                row.put("parentName", parentName);
-                row.put("level", parentId == null ? 0 : 1);
-                row.put("type", amount.signum() > 0 ? "income" : "expense");
+                row.put(PARENT_NAME_KEY, parentName);
+                row.put(LEVEL_KEY, parentId == null ? 0 : 1);
+                row.put("type", amount.signum() > 0 ? INCOME : EXPENSE);
                 Map<String, BigDecimal> values = new LinkedHashMap<>();
                 for (Map<String, Object> m : months) {
                     values.put((String) m.get("key"), BigDecimal.ZERO);
                 }
-                row.put("values", values);
+                row.put(VALUES_KEY, values);
                 rows.put(key, row);
             }
 
             @SuppressWarnings("unchecked")
-            Map<String, BigDecimal> values = (Map<String, BigDecimal>) row.get("values");
+            Map<String, BigDecimal> values = (Map<String, BigDecimal>) row.get(VALUES_KEY);
             values.put(monthKey, values.getOrDefault(monthKey, BigDecimal.ZERO)
                     .add(amount.abs()));
 
@@ -513,19 +523,19 @@ public class ServiceRapport {
 
         // Construit la hiérarchie : racines d'abord, sous-catégories juste après.
         List<Map<String, Object>> incomeRows = rows.values().stream()
-                .filter(r -> "income".equals(r.get("type")))
+                .filter(r -> INCOME.equals(r.get("type")))
                 .sorted(this::compareCategoryRows)
                 .map(this::completeAnalysisRow)
                 .toList();
 
         List<Map<String, Object>> expenseRows = rows.values().stream()
-                .filter(r -> "expense".equals(r.get("type")))
+                .filter(r -> EXPENSE.equals(r.get("type")))
                 .sorted(this::compareCategoryRows)
                 .map(this::completeAnalysisRow)
                 .toList();
 
-        Map<String, Object> incomeTotal = totalAnalysisRow("Total revenus", "income", months, monthlyIncomeTotals);
-        Map<String, Object> expenseTotal = totalAnalysisRow("Total dépenses", "expense", months, monthlyExpenseTotals);
+        Map<String, Object> incomeTotal = totalAnalysisRow("Total revenus", INCOME, months, monthlyIncomeTotals);
+        Map<String, Object> expenseTotal = totalAnalysisRow("Total dépenses", EXPENSE, months, monthlyExpenseTotals);
 
         List<Map<String, Object>> monthlySummary = new ArrayList<>();
         for (Map<String, Object> m : months) {
@@ -534,8 +544,8 @@ public class ServiceRapport {
             BigDecimal expenses = monthlyExpenseTotals.getOrDefault(key, BigDecimal.ZERO);
             Map<String, Object> summary = new LinkedHashMap<>();
             summary.put("key", key);
-            summary.put("income", income);
-            summary.put("expenses", expenses);
+            summary.put(INCOME, income);
+            summary.put(EXPENSES_KEY, expenses);
             summary.put("net", income.subtract(expenses));
             monthlySummary.add(summary);
         }
@@ -544,9 +554,9 @@ public class ServiceRapport {
         result.put("from", from);
         result.put("to", to);
         result.put("months", months);
-        result.put("income", incomeRows);
+        result.put(INCOME, incomeRows);
         result.put("incomeTotal", incomeTotal);
-        result.put("expenses", expenseRows);
+        result.put(EXPENSES_KEY, expenseRows);
         result.put("expenseTotal", expenseTotal);
         result.put("summary", monthlySummary);
         return result;
@@ -554,13 +564,13 @@ public class ServiceRapport {
 
     private Map<String, Object> completeAnalysisRow(Map<String, Object> row) {
         @SuppressWarnings("unchecked")
-        Map<String, BigDecimal> values = (Map<String, BigDecimal>) row.get("values");
+        Map<String, BigDecimal> values = (Map<String, BigDecimal>) row.get(VALUES_KEY);
         BigDecimal total = values.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal average = values.isEmpty()
                 ? BigDecimal.ZERO
                 : total.divide(BigDecimal.valueOf(values.size()), 2, RoundingMode.HALF_UP);
         row.put("average", average);
-        row.put("total", total);
+        row.put(TOTAL_KEY, total);
         return row;
     }
 
@@ -572,26 +582,26 @@ public class ServiceRapport {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("key", "total-" + type);
         row.put("name", name);
-        row.put("level", 0);
+        row.put(LEVEL_KEY, 0);
         row.put("type", type);
         Map<String, BigDecimal> values = new LinkedHashMap<>();
         for (Map<String, Object> month : months) {
             String key = (String) month.get("key");
             values.put(key, monthlyTotals.getOrDefault(key, BigDecimal.ZERO));
         }
-        row.put("values", values);
+        row.put(VALUES_KEY, values);
         return completeAnalysisRow(row);
     }
 
     private int compareCategoryRows(Map<String, Object> a, Map<String, Object> b) {
-        String ap = Objects.toString(a.get("parentName"), "");
-        String bp = Objects.toString(b.get("parentName"), "");
+        String ap = Objects.toString(a.get(PARENT_NAME_KEY), "");
+        String bp = Objects.toString(b.get(PARENT_NAME_KEY), "");
         int parent = ap.compareToIgnoreCase(bp);
         if (parent != 0) return parent;
 
         int level = Integer.compare(
-                ((Number) a.get("level")).intValue(),
-                ((Number) b.get("level")).intValue());
+                ((Number) a.get(LEVEL_KEY)).intValue(),
+                ((Number) b.get(LEVEL_KEY)).intValue());
         if (level != 0) return level;
 
         return Objects.toString(a.get("name"), "").compareToIgnoreCase(

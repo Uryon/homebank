@@ -15,8 +15,8 @@
 
     <div class="toolbar">
       <div class="form-field">
-        <label>Compte</label>
-        <select v-model="filterAccount" @change="load">
+        <label for="tx-filter-account">Compte</label>
+        <select id="tx-filter-account" v-model="filterAccount" @change="load">
           <option :value="null">Tous les comptes</option>
           <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
         </select>
@@ -67,8 +67,8 @@
       </div>
 
       <div class="form-field" style="margin-left: auto;">
-        <label title="Tiers, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Ou &gt; / &lt; / = un montant seul.">Recherche (tiers, catégorie, montant, ou &gt; / &lt; / = un montant)</label>
-        <input v-model="searchQuery" placeholder="Ex : Bouygues;29,99 ou > 100" style="min-width: 260px;" />
+        <label for="tx-search" title="Tiers, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Ou &gt; / &lt; / = un montant seul.">Recherche (tiers, catégorie, montant, ou &gt; / &lt; / = un montant)</label>
+        <input id="tx-search" v-model="searchQuery" placeholder="Ex : Bouygues;29,99 ou > 100" style="min-width: 260px;" />
         <div v-if="amountQuery" class="text-hint">
           {{ amountSearchLoading ? 'Recherche…' : `${filteredTransactions.length} transaction(s) trouvée(s)` }}
         </div>
@@ -107,6 +107,7 @@
                 type="checkbox"
                 :checked="allPagedSelected"
                 title="Sélectionner/désélectionner toutes les transactions actuellement affichées"
+                aria-label="Sélectionner/désélectionner toutes les transactions actuellement affichées"
                 @change="toggleSelectAllPaged"
               />
             </th>
@@ -177,30 +178,31 @@
 
         <div class="form-grid">
           <div class="form-field">
-            <label>Compte</label>
-            <select v-model.number="form.accountId">
+            <label for="new-tx-account">Compte</label>
+            <select id="new-tx-account" v-model.number="form.accountId">
               <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
             </select>
           </div>
 
           <div class="form-field">
-            <label>Date</label>
-            <input v-model="form.date" type="date" />
+            <label for="new-tx-date">Date</label>
+            <input id="new-tx-date" v-model="form.date" type="date" />
           </div>
 
           <div class="form-field">
-            <label>Tiers (payee)</label>
-            <PayeeAutocomplete v-model="form.payee" :payees="payees" placeholder="Ex : Supermarché" />
+            <label for="new-tx-payee">Tiers (payee)</label>
+            <PayeeAutocomplete id="new-tx-payee" v-model="form.payee" :payees="payees" placeholder="Ex : Supermarché" />
           </div>
 
           <div class="form-field">
-            <label>Montant (négatif = dépense)</label>
-            <AmountInput v-model="form.amount" />
+            <label for="new-tx-amount">Montant (négatif = dépense)</label>
+            <AmountInput id="new-tx-amount" v-model="form.amount" />
           </div>
 
           <div class="form-field">
-            <label>Catégorie</label>
+            <label for="new-tx-category">Catégorie</label>
             <CategoryAutocomplete
+              id="new-tx-category"
               v-model="form.categoryId"
               :categories="flatCategories"
               :transaction-type="formAmountType"
@@ -209,8 +211,8 @@
           </div>
 
           <div class="form-field">
-            <label>Mode de paiement</label>
-            <select v-model="form.paymentMode">
+            <label for="new-tx-payment-mode">Mode de paiement</label>
+            <select id="new-tx-payment-mode" v-model="form.paymentMode">
               <option value="NONE">Aucun</option>
               <option value="CASH">Espèces</option>
               <option value="CHEQUE">Chèque</option>
@@ -222,13 +224,13 @@
           </div>
 
           <div class="form-field" style="grid-column: span 2;">
-            <label>Mémo</label>
-            <input v-model="form.memo" placeholder="Note libre" />
+            <label for="new-tx-memo">Mémo</label>
+            <input id="new-tx-memo" v-model="form.memo" placeholder="Note libre" />
           </div>
 
           <div class="form-field" style="grid-column: span 2;">
-            <label>Tags (séparés par des espaces)</label>
-            <input v-model="form.tags" />
+            <label for="new-tx-tags">Tags (séparés par des espaces)</label>
+            <input id="new-tx-tags" v-model="form.tags" />
           </div>
 
           <div class="form-field" style="grid-column: span 2; flex-direction: row; align-items: center; gap: 8px;">
@@ -264,6 +266,8 @@
             <div class="bulk-field-label">Catégorie</div>
             <div class="bulk-field-control">
               <CategoryAutocomplete
+                id="bulk-category"
+                aria-label="Catégorie"
                 :model-value="bulkForm.categoryId"
                 @update:model-value="onBulkCategoryChange"
                 :categories="flatCategories"
@@ -277,6 +281,8 @@
             <div class="bulk-field-label">Tiers</div>
             <div class="bulk-field-control">
               <PayeeAutocomplete
+                id="bulk-payee"
+                aria-label="Tiers"
                 :model-value="bulkForm.payee"
                 @update:model-value="onBulkPayeeChange"
                 :payees="payees"
@@ -289,7 +295,7 @@
           <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.paymentMode !== null }">
             <div class="bulk-field-label">Mode de paiement</div>
             <div class="bulk-field-control">
-              <select v-model="bulkForm.paymentMode">
+              <select v-model="bulkForm.paymentMode" aria-label="Mode de paiement">
                 <option :value="null">Ne pas modifier</option>
                 <option value="NONE">Aucun</option>
                 <option value="CASH">Espèces</option>
@@ -310,7 +316,7 @@
           <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.periodicExpense !== null }">
             <div class="bulk-field-label">Dépense périodique</div>
             <div class="bulk-field-control">
-              <select v-model="bulkForm.periodicExpense">
+              <select v-model="bulkForm.periodicExpense" aria-label="Dépense périodique">
                 <option :value="null">Ne pas modifier</option>
                 <option :value="true">Oui</option>
                 <option :value="false">Non</option>
@@ -322,7 +328,7 @@
           <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.exceptional !== null }">
             <div class="bulk-field-label">Exceptionnelle</div>
             <div class="bulk-field-control">
-              <select v-model="bulkForm.exceptional">
+              <select v-model="bulkForm.exceptional" aria-label="Exceptionnelle">
                 <option :value="null">Ne pas modifier</option>
                 <option :value="true">Oui</option>
                 <option :value="false">Non</option>
@@ -338,7 +344,7 @@
           <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.validated !== null }">
             <div class="bulk-field-label">Validée / en attente</div>
             <div class="bulk-field-control">
-              <select v-model="bulkForm.validated">
+              <select v-model="bulkForm.validated" aria-label="Validée / en attente">
                 <option :value="null">Ne pas modifier</option>
                 <option :value="true">Validée</option>
                 <option :value="false">En attente</option>
@@ -380,12 +386,13 @@
 
         <div class="form-grid">
           <div class="form-field">
-            <label>Montant — 1ère partie {{ splitTransaction?.amount < 0 ? '(négatif = dépense)' : '(positif = revenu)' }}</label>
-            <AmountInput v-model="splitForm.firstAmount" :allow-relative="false" />
+            <label for="split-first-amount">Montant — 1ère partie {{ splitTransaction?.amount < 0 ? '(négatif = dépense)' : '(positif = revenu)' }}</label>
+            <AmountInput id="split-first-amount" v-model="splitForm.firstAmount" :allow-relative="false" />
           </div>
           <div class="form-field">
-            <label>Catégorie — 1ère partie</label>
+            <label for="split-first-category">Catégorie — 1ère partie</label>
             <CategoryAutocomplete
+              id="split-first-category"
               v-model="splitForm.firstCategoryId"
               :categories="flatCategories"
               :transaction-type="splitAmountType"
@@ -393,19 +400,20 @@
             />
           </div>
           <div class="form-field" style="grid-column: span 2;">
-            <label>Mémo — 1ère partie</label>
-            <input v-model="splitForm.firstMemo" placeholder="Note libre" />
+            <label for="split-first-memo">Mémo — 1ère partie</label>
+            <input id="split-first-memo" v-model="splitForm.firstMemo" placeholder="Note libre" />
           </div>
 
           <div class="form-field">
-            <label>Montant — 2e partie</label>
+            <span class="form-field-label">Montant — 2e partie</span>
             <div class="split-second-amount amount" :class="secondAmount >= 0 ? 'positive' : 'negative'">
               {{ formatAmount(secondAmount) }}
             </div>
           </div>
           <div class="form-field">
-            <label>Catégorie — 2e partie</label>
+            <label for="split-second-category">Catégorie — 2e partie</label>
             <CategoryAutocomplete
+              id="split-second-category"
               v-model="splitForm.secondCategoryId"
               :categories="flatCategories"
               :transaction-type="splitAmountType"
@@ -413,8 +421,8 @@
             />
           </div>
           <div class="form-field" style="grid-column: span 2;">
-            <label>Mémo — 2e partie</label>
-            <input v-model="splitForm.secondMemo" placeholder="Note libre" />
+            <label for="split-second-memo">Mémo — 2e partie</label>
+            <input id="split-second-memo" v-model="splitForm.secondMemo" placeholder="Note libre" />
           </div>
         </div>
 

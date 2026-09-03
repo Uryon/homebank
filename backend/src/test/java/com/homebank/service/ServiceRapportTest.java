@@ -99,7 +99,7 @@ class ServiceRapportTest {
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), null);
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).get("total")).isEqualTo(new BigDecimal("50.00"));
+        assertThat(result.get(0)).containsEntry("total", new BigDecimal("50.00"));
     }
 
     @Test
@@ -126,9 +126,10 @@ class ServiceRapportTest {
         List<Map<String, Object>> result = service.expensesByCategory(
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
-        assertThat(result.get(0).get("category")).isEqualTo("Alimentation : Restaurant");
-        assertThat(result.get(0).get("categoryId")).isEqualTo(2L);
-        assertThat(result.get(0).get("uncategorized")).isEqualTo(false);
+        assertThat(result.get(0))
+                .containsEntry("category", "Alimentation : Restaurant")
+                .containsEntry("categoryId", 2L)
+                .containsEntry("uncategorized", false);
     }
 
     @Test
@@ -140,9 +141,10 @@ class ServiceRapportTest {
         List<Map<String, Object>> result = service.expensesByCategory(
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
-        assertThat(result.get(0).get("category")).isEqualTo("Non categorise");
+        assertThat(result.get(0))
+                .containsEntry("category", "Non categorise")
+                .containsEntry("uncategorized", true);
         assertThat(result.get(0).get("categoryId")).isNull();
-        assertThat(result.get(0).get("uncategorized")).isEqualTo(true);
     }
 
     @Test
@@ -158,10 +160,12 @@ class ServiceRapportTest {
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
         assertThat(result).hasSize(2);
-        assertThat(result.get(0).get("category")).isEqualTo("Courses");
-        assertThat(result.get(0).get("percentage")).isEqualTo(new BigDecimal("60.0"));
-        assertThat(result.get(1).get("category")).isEqualTo("Loisirs");
-        assertThat(result.get(1).get("percentage")).isEqualTo(new BigDecimal("40.0"));
+        assertThat(result.get(0))
+                .containsEntry("category", "Courses")
+                .containsEntry("percentage", new BigDecimal("60.0"));
+        assertThat(result.get(1))
+                .containsEntry("category", "Loisirs")
+                .containsEntry("percentage", new BigDecimal("40.0"));
     }
 
     // --- attributedTransactions : lissage des categories "annuelles" sur 12 mois ---
@@ -180,7 +184,7 @@ class ServiceRapportTest {
                 LocalDate.of(2025, 11, 1), LocalDate.of(2026, 1, 31), null);
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).get("total")).isEqualTo(new BigDecimal("300.00")); // 3 * (1200/12)
+        assertThat(result.get(0)).containsEntry("total", new BigDecimal("300.00")); // 3 * (1200/12)
     }
 
     @Test
@@ -196,7 +200,7 @@ class ServiceRapportTest {
         List<Map<String, Object>> result = service.expensesByCategory(
                 LocalDate.of(2025, 10, 1), LocalDate.of(2025, 10, 31), null);
 
-        assertThat(result.get(0).get("total")).isEqualTo(new BigDecimal("100.00")); // 1200/12, jamais 1200
+        assertThat(result.get(0)).containsEntry("total", new BigDecimal("100.00")); // 1200/12, jamais 1200
     }
 
     @Test
@@ -227,9 +231,10 @@ class ServiceRapportTest {
 
         Map<String, Object> result = service.summary(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
-        assertThat(result.get("income")).isEqualTo(new BigDecimal("2000.00"));
-        assertThat(result.get("expenses")).isEqualTo(new BigDecimal("500.00"));
-        assertThat(result.get("net")).isEqualTo(new BigDecimal("1500.00"));
+        assertThat(result)
+                .containsEntry("income", new BigDecimal("2000.00"))
+                .containsEntry("expenses", new BigDecimal("500.00"))
+                .containsEntry("net", new BigDecimal("1500.00"));
     }
 
     // --- cellTransactions : le detail doit correspondre exactement aux agregats ---
@@ -334,10 +339,12 @@ class ServiceRapportTest {
         List<Map<String, Object>> result = service.monthlySavings(2, null, referenceMonth);
 
         assertThat(result).hasSize(2);
-        assertThat(result.get(0).get("date")).isEqualTo("2026-02-01");
-        assertThat(result.get(0).get("savings")).isEqualTo(new BigDecimal("1000.00"));
-        assertThat(result.get(1).get("date")).isEqualTo("2026-03-01");
-        assertThat(result.get(1).get("savings")).isEqualTo(new BigDecimal("-200.00"));
+        assertThat(result.get(0))
+                .containsEntry("date", "2026-02-01")
+                .containsEntry("savings", new BigDecimal("1000.00"));
+        assertThat(result.get(1))
+                .containsEntry("date", "2026-03-01")
+                .containsEntry("savings", new BigDecimal("-200.00"));
     }
 
     // --- periodicExpensesSummary ---
@@ -378,14 +385,14 @@ class ServiceRapportTest {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> expenseItems = (List<Map<String, Object>>) expenses.get("items");
         assertThat(expenseItems).hasSize(1); // une seule ligne pour Netflix, la plus recente
-        assertThat(expenseItems.get(0).get("transactionId")).isEqualTo(2L);
+        assertThat(expenseItems.get(0)).containsEntry("transactionId", 2L);
 
         @SuppressWarnings("unchecked")
         Map<String, Object> revenues = (Map<String, Object>) result.get("revenues");
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> revenueItems = (List<Map<String, Object>>) revenues.get("items");
         assertThat(revenueItems).hasSize(1);
-        assertThat(revenueItems.get(0).get("transactionId")).isEqualTo(3L);
+        assertThat(revenueItems.get(0)).containsEntry("transactionId", 3L);
     }
 
     @Test
@@ -421,7 +428,7 @@ class ServiceRapportTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> expenses = (Map<String, Object>) result.get("expenses");
-        assertThat(expenses.get("total")).isEqualTo(BigDecimal.ZERO);
+        assertThat(expenses).containsEntry("total", BigDecimal.ZERO);
     }
 
     // --- balanceForecast ---
@@ -476,7 +483,7 @@ class ServiceRapportTest {
         Map<String, Object> ligneRestaurant = expenseRows.stream()
                 .filter(r -> "Restaurant".equals(r.get("name"))).findFirst().orElseThrow();
         assertThat(ligneAlimentation.get("parentId")).isNull();
-        assertThat(ligneRestaurant.get("parentId")).isEqualTo(1L);
+        assertThat(ligneRestaurant).containsEntry("parentId", 1L);
         @SuppressWarnings("unchecked")
         Map<String, BigDecimal> valuesAlimentation = (Map<String, BigDecimal>) ligneAlimentation.get("values");
         @SuppressWarnings("unchecked")
@@ -487,7 +494,7 @@ class ServiceRapportTest {
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> incomeRows = (List<Map<String, Object>>) result.get("income");
         assertThat(incomeRows).hasSize(1);
-        assertThat(incomeRows.get(0).get("name")).isEqualTo("Salaire");
+        assertThat(incomeRows.get(0)).containsEntry("name", "Salaire");
 
         @SuppressWarnings("unchecked")
         Map<String, Object> expenseTotal = (Map<String, Object>) result.get("expenseTotal");
@@ -499,8 +506,9 @@ class ServiceRapportTest {
         List<Map<String, Object>> summary = (List<Map<String, Object>>) result.get("summary");
         Map<String, Object> juin = summary.stream()
                 .filter(m -> "2025-06-01".equals(m.get("key"))).findFirst().orElseThrow();
-        assertThat(juin.get("expenses")).isEqualTo(new BigDecimal("65.00"));
-        assertThat(juin.get("net")).isEqualTo(new BigDecimal("-65.00"));
+        assertThat(juin)
+                .containsEntry("expenses", new BigDecimal("65.00"))
+                .containsEntry("net", new BigDecimal("-65.00"));
     }
 
     @Test

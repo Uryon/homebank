@@ -10,21 +10,21 @@
     <div class="card" style="max-width: 560px;">
       <div class="form-grid">
         <div class="form-field" style="grid-column: span 2;">
-          <label>Compte de destination</label>
-          <select v-model.number="accountId">
+          <label for="import-account">Compte de destination</label>
+          <select id="import-account" v-model.number="accountId">
             <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
           </select>
         </div>
         <div class="form-field" style="grid-column: span 2;">
-          <label>Format du fichier</label>
-          <select v-model="format">
+          <label for="import-format">Format du fichier</label>
+          <select id="import-format" v-model="format">
             <option value="csv">CSV (format HomeBank : date;paymode;info;payee;memo;amount;category;tags)</option>
             <option value="qif">QIF (Quicken Interchange Format)</option>
           </select>
         </div>
         <div class="form-field" style="grid-column: span 2;">
-          <label>Fichier</label>
-          <input type="file" :accept="format === 'csv' ? '.csv' : '.qif'" @change="onFileChange" />
+          <label for="import-file">Fichier</label>
+          <input id="import-file" type="file" :accept="format === 'csv' ? '.csv' : '.qif'" @change="onFileChange" />
         </div>
       </div>
       <div style="margin-top: 20px;">

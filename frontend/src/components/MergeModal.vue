@@ -5,8 +5,8 @@
       <p v-if="description" class="merge-description">{{ description }}</p>
 
       <div class="form-field">
-        <label>{{ targetLabel }}</label>
-        <select :value="modelValue" @change="$emit('update:modelValue', Number($event.target.value))">
+        <label for="merge-target">{{ targetLabel }}</label>
+        <select id="merge-target" :value="modelValue" @change="$emit('update:modelValue', Number($event.target.value))">
           <option v-for="item in items" :key="item.id" :value="item.id">
             {{ optionLabel(item) }}
           </option>

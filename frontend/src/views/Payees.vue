@@ -20,8 +20,8 @@
 
     <div class="toolbar">
       <div class="form-field">
-        <label title="Nom, motif, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99">Recherche</label>
-        <input v-model="searchQuery" placeholder="Ex : Bouygues;29,99" style="min-width: 240px;" />
+        <label for="payees-search" title="Nom, motif, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99">Recherche</label>
+        <input id="payees-search" v-model="searchQuery" placeholder="Ex : Bouygues;29,99" style="min-width: 240px;" />
       </div>
 
       <div class="form-field" style="align-self: flex-end;">
@@ -69,6 +69,7 @@
                 type="checkbox"
                 :checked="allFilteredSelected"
                 title="Sélectionner / désélectionner tous les tiers actuellement affichés"
+                aria-label="Sélectionner / désélectionner tous les tiers actuellement affichés"
                 @change="toggleSelectAllFiltered"
               />
             </th>
@@ -88,16 +89,18 @@
             @keydown.enter.prevent="editingId === p.id && confirmEdit()"
             @keydown.esc="cancelEdit"
           >
-            <td @click.stop><input type="checkbox" :value="p.id" v-model="selectedIds" /></td>
+            <td @click.stop><input type="checkbox" :value="p.id" v-model="selectedIds" :aria-label="'Sélectionner ' + p.name" /></td>
 
             <template v-if="editingId === p.id">
-              <td @click.stop><input v-model="editForm.name" ref="firstEditField" /></td>
-              <td @click.stop><input v-model="editForm.pattern" placeholder="Ex : Carrefour" /></td>
+              <td @click.stop><input v-model="editForm.name" ref="firstEditField" aria-label="Nom" /></td>
+              <td @click.stop><input v-model="editForm.pattern" aria-label="Motif de reconnaissance" placeholder="Ex : Carrefour" /></td>
               <td class="num" @click.stop>
-                <AmountInput v-model="editForm.amount" style="text-align:right;" placeholder="Tous montants" />
+                <AmountInput v-model="editForm.amount" aria-label="Montant" style="text-align:right;" placeholder="Tous montants" />
               </td>
               <td @click.stop>
+                <label for="payee-edit-category" class="sr-only">Catégorie associée</label>
                 <CategoryAutocomplete
+                  id="payee-edit-category"
                   v-model="editForm.categoryId"
                   :categories="flatCategories"
                   placeholder="Aucune"
@@ -148,12 +151,12 @@
         <h2>Nouveau tiers</h2>
         <div class="form-grid">
           <div class="form-field" style="grid-column: span 2;">
-            <label>Nom du tiers</label>
-            <input v-model="form.name" placeholder="Ex : Carrefour" />
+            <label for="new-payee-name">Nom du tiers</label>
+            <input id="new-payee-name" v-model="form.name" placeholder="Ex : Carrefour" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
-            <label>Motif de reconnaissance</label>
-            <input v-model="form.pattern" placeholder='Ex : Carrefour' />
+            <label for="new-payee-pattern">Motif de reconnaissance</label>
+            <input id="new-payee-pattern" v-model="form.pattern" placeholder='Ex : Carrefour' />
             <div class="text-hint">
               Tapez simplement le texte à repérer (ex : <code>Carrefour</code>) : il sera
               reconnu partout où il apparaît dans le libellé de la transaction, quelle que
@@ -163,12 +166,13 @@
             </div>
           </div>
           <div class="form-field" style="grid-column: span 2;">
-            <label>Montant associé (laisser vide = s'applique à tous les montants)</label>
-            <AmountInput v-model="form.amount" placeholder="Ex : 10" />
+            <label for="new-payee-amount">Montant associé (laisser vide = s'applique à tous les montants)</label>
+            <AmountInput id="new-payee-amount" v-model="form.amount" placeholder="Ex : 10" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
-            <label>Catégorie associée (appliquée automatiquement aux transactions de ce tiers)</label>
+            <label for="new-payee-category">Catégorie associée (appliquée automatiquement aux transactions de ce tiers)</label>
             <CategoryAutocomplete
+              id="new-payee-category"
               v-model="form.categoryId"
               :categories="flatCategories"
               placeholder="Rechercher une catégorie… (ex : ali)"
@@ -196,7 +200,7 @@
       @cancel="showMergeModal = false"
     >
       <div class="form-field">
-        <label>Motifs actuels des tiers sélectionnés</label>
+        <span class="form-field-label">Motifs actuels des tiers sélectionnés</span>
         <ul class="merge-patterns-list">
           <li v-for="p in selectedPayeeObjects" :key="p.id">
             <strong>{{ p.name }}</strong> : <code>{{ p.pattern }}</code>
@@ -205,8 +209,8 @@
       </div>
 
       <div class="form-field">
-        <label>Motif de reconnaissance final</label>
-        <input v-model="mergePattern" placeholder="Ex : Carrefour" />
+        <label for="payee-merge-pattern">Motif de reconnaissance final</label>
+        <input id="payee-merge-pattern" v-model="mergePattern" placeholder="Ex : Carrefour" />
         <div class="text-hint">
           Pré-rempli avec le motif du tiers conservé, ci-dessus pour référence.
           Modifiez-le comme vous le souhaitez : les motifs des tiers fusionnés ne

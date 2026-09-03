@@ -10,8 +10,8 @@
 
     <div class="toolbar">
       <div class="form-field">
-        <label>Recherche</label>
-        <input v-model="searchQuery" placeholder="Ex : Alimentation" style="min-width: 240px;" />
+        <label for="categories-search">Recherche</label>
+        <input id="categories-search" v-model="searchQuery" placeholder="Ex : Alimentation" style="min-width: 240px;" />
       </div>
 
       <div v-if="selectedIds.length >= 2" class="form-field" style="align-self: flex-end;">
@@ -37,6 +37,7 @@
             type="checkbox"
             :checked="allExpenseFilteredSelected"
             title="Sélectionner / désélectionner toutes les catégories de dépenses actuellement affichées"
+            aria-label="Sélectionner / désélectionner toutes les catégories de dépenses actuellement affichées"
             @change="toggleSelectAllExpense"
           />
           <span class="column-dot expense"></span> Dépenses
@@ -60,9 +61,9 @@
             >
               <template v-if="editingId === root.id">
                 <div class="cat-row-inline" @click.stop>
-                  <input v-model="editForm.icon" placeholder="🙂" maxlength="4" class="icon-field" />
-                  <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
-                  <select v-model="editForm.type">
+                  <input v-model="editForm.icon" aria-label="Icône" placeholder="🙂" maxlength="4" class="icon-field" />
+                  <input v-model="editForm.name" ref="firstEditField" aria-label="Nom" placeholder="Nom" style="flex: 1;" />
+                  <select v-model="editForm.type" aria-label="Type">
                     <option value="EXPENSE">Dépense</option>
                     <option value="INCOME">Revenu</option>
                     <option value="BOTH">Les deux</option>
@@ -73,7 +74,7 @@
               </template>
               <template v-else>
                 <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
-                  <input type="checkbox" :value="root.id" v-model="selectedIds" @click.stop />
+                  <input type="checkbox" :value="root.id" v-model="selectedIds" :aria-label="'Sélectionner ' + root.name" @click.stop />
                   <strong>{{ iconPrefix(root.icon) }}{{ root.name }}</strong>
                   <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
                   <span v-if="root.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
@@ -103,9 +104,9 @@
             >
               <template v-if="editingId === child.id">
                 <div class="cat-row-inline" @click.stop>
-                  <input v-model="editForm.icon" placeholder="🙂" maxlength="4" class="icon-field" />
-                  <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
-                  <select v-model.number="editForm.parentId">
+                  <input v-model="editForm.icon" aria-label="Icône" placeholder="🙂" maxlength="4" class="icon-field" />
+                  <input v-model="editForm.name" ref="firstEditField" aria-label="Nom" placeholder="Nom" style="flex: 1;" />
+                  <select v-model.number="editForm.parentId" aria-label="Catégorie parente">
                     <option v-for="r in roots" :key="r.id" :value="r.id">{{ iconPrefix(r.icon) }}{{ r.name }}</option>
                   </select>
                   <span class="text-muted" style="font-size: 12px;">
@@ -117,7 +118,7 @@
               </template>
               <template v-else>
                 <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);">
-                  <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
+                  <input type="checkbox" :value="child.id" v-model="selectedIds" :aria-label="'Sélectionner ' + child.name" @click.stop />
                   <span>{{ iconPrefix(child.icon) }}{{ child.name }}</span>
                   <span v-if="child.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
@@ -140,6 +141,7 @@
             type="checkbox"
             :checked="allIncomeFilteredSelected"
             title="Sélectionner / désélectionner toutes les catégories de revenus actuellement affichées"
+            aria-label="Sélectionner / désélectionner toutes les catégories de revenus actuellement affichées"
             @change="toggleSelectAllIncome"
           />
           <span class="column-dot income"></span> Revenus
@@ -163,9 +165,9 @@
             >
               <template v-if="editingId === root.id">
                 <div class="cat-row-inline" @click.stop>
-                  <input v-model="editForm.icon" placeholder="🙂" maxlength="4" class="icon-field" />
-                  <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
-                  <select v-model="editForm.type">
+                  <input v-model="editForm.icon" aria-label="Icône" placeholder="🙂" maxlength="4" class="icon-field" />
+                  <input v-model="editForm.name" ref="firstEditField" aria-label="Nom" placeholder="Nom" style="flex: 1;" />
+                  <select v-model="editForm.type" aria-label="Type">
                     <option value="EXPENSE">Dépense</option>
                     <option value="INCOME">Revenu</option>
                     <option value="BOTH">Les deux</option>
@@ -176,7 +178,7 @@
               </template>
               <template v-else>
                 <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
-                  <input type="checkbox" :value="root.id" v-model="selectedIds" @click.stop />
+                  <input type="checkbox" :value="root.id" v-model="selectedIds" :aria-label="'Sélectionner ' + root.name" @click.stop />
                   <strong>{{ iconPrefix(root.icon) }}{{ root.name }}</strong>
                   <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
                   <span v-if="root.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
@@ -206,9 +208,9 @@
             >
               <template v-if="editingId === child.id">
                 <div class="cat-row-inline" @click.stop>
-                  <input v-model="editForm.icon" placeholder="🙂" maxlength="4" class="icon-field" />
-                  <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
-                  <select v-model.number="editForm.parentId">
+                  <input v-model="editForm.icon" aria-label="Icône" placeholder="🙂" maxlength="4" class="icon-field" />
+                  <input v-model="editForm.name" ref="firstEditField" aria-label="Nom" placeholder="Nom" style="flex: 1;" />
+                  <select v-model.number="editForm.parentId" aria-label="Catégorie parente">
                     <option v-for="r in roots" :key="r.id" :value="r.id">{{ iconPrefix(r.icon) }}{{ r.name }}</option>
                   </select>
                   <span class="text-muted" style="font-size: 12px;">
@@ -220,7 +222,7 @@
               </template>
               <template v-else>
                 <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);">
-                  <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
+                  <input type="checkbox" :value="child.id" v-model="selectedIds" :aria-label="'Sélectionner ' + child.name" @click.stop />
                   <span>{{ iconPrefix(child.icon) }}{{ child.name }}</span>
                   <span v-if="child.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
@@ -258,17 +260,17 @@
       >
         <template v-if="editingId === item.id">
           <div class="cat-row-inline" @click.stop>
-            <input v-model="editForm.icon" placeholder="🙂" maxlength="4" class="icon-field" />
-            <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
+            <input v-model="editForm.icon" aria-label="Icône" placeholder="🙂" maxlength="4" class="icon-field" />
+            <input v-model="editForm.name" ref="firstEditField" aria-label="Nom" placeholder="Nom" style="flex: 1;" />
             <template v-if="!item.parentId">
-              <select v-model="editForm.type">
+              <select v-model="editForm.type" aria-label="Type">
                 <option value="EXPENSE">Dépense</option>
                 <option value="INCOME">Revenu</option>
                 <option value="BOTH">Les deux</option>
               </select>
             </template>
             <template v-else>
-              <select v-model.number="editForm.parentId">
+              <select v-model.number="editForm.parentId" aria-label="Catégorie parente">
                 <option v-for="r in roots" :key="r.id" :value="r.id">{{ iconPrefix(r.icon) }}{{ r.name }}</option>
               </select>
               <span class="text-muted" style="font-size: 12px;">
@@ -300,30 +302,30 @@
         <h2>Nouvelle catégorie</h2>
         <div class="form-grid">
           <div class="form-field">
-            <label>Icône</label>
-            <input v-model="form.icon" placeholder="🙂" maxlength="4" class="icon-field" style="width: 100%;" />
+            <label for="new-category-icon">Icône</label>
+            <input id="new-category-icon" v-model="form.icon" placeholder="🙂" maxlength="4" class="icon-field" style="width: 100%;" />
           </div>
           <div class="form-field">
-            <label>Nom</label>
-            <input v-model="form.name" placeholder="Ex : Alimentation" />
+            <label for="new-category-name">Nom</label>
+            <input id="new-category-name" v-model="form.name" placeholder="Ex : Alimentation" />
           </div>
           <div class="form-field">
-            <label>Catégorie parente</label>
-            <select v-model.number="form.parentId">
+            <label for="new-category-parent">Catégorie parente</label>
+            <select id="new-category-parent" v-model.number="form.parentId">
               <option :value="null">Aucune (catégorie racine)</option>
               <option v-for="r in roots" :key="r.id" :value="r.id">{{ iconPrefix(r.icon) }}{{ r.name }}</option>
             </select>
           </div>
           <div class="form-field" v-if="!form.parentId">
-            <label>Type</label>
-            <select v-model="form.type">
+            <label for="new-category-type">Type</label>
+            <select id="new-category-type" v-model="form.type">
               <option value="EXPENSE">Dépense</option>
               <option value="INCOME">Revenu</option>
               <option value="BOTH">Les deux</option>
             </select>
           </div>
           <div class="form-field" v-else>
-            <label>Type</label>
+            <span class="form-field-label">Type</span>
             <div class="text-muted" style="padding-top: 8px; font-size: 13px;">
               {{ typeLabel(rootTypeById.get(form.parentId)) }} (hérité de la catégorie parente)
             </div>

@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -411,7 +412,7 @@ public class ServiceTransaction {
             }
         }
 
-        suggestions.sort((a, b) -> b.getCount() - a.getCount());
+        suggestions.sort((a, b) -> Integer.compare(b.getCount(), a.getCount()));
         return suggestions;
     }
 
@@ -452,9 +453,7 @@ public class ServiceTransaction {
      * pure coincidence.
      */
     private boolean matchesFrequencyWithGaps(long days, int target, int tolerance) {
-        long occurrences = Math.max(1, Math.min(
-                Math.round((double) days / target),
-                PERIODIC_MAX_MISSED_OCCURRENCES + 1L));
+        long occurrences = Math.clamp(Math.round((double) days / target), 1, PERIODIC_MAX_MISSED_OCCURRENCES + 1L);
         return Math.abs(days - occurrences * target) <= tolerance;
     }
 
@@ -727,7 +726,7 @@ public class ServiceTransaction {
 
         Compte from = accountService.findById(request.getFromAccountId());
         Compte to = accountService.findById(request.getToAccountId());
-        LocalDate date = request.getDate() != null ? request.getDate() : LocalDate.now();
+        LocalDate date = request.getDate() != null ? request.getDate() : LocalDate.now(ZoneId.systemDefault());
         BigDecimal amount = request.getAmount().abs();
 
         Transaction debit = new Transaction();

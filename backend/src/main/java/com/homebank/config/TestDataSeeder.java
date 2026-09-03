@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.ZoneId;
 
 /**
  * Jette de donnees de demonstration, chargee UNIQUEMENT quand le profil
@@ -30,6 +31,9 @@ import java.time.LocalDate;
 public class TestDataSeeder implements CommandLineRunner {
 
     private static final Logger log = LoggerFactory.getLogger(TestDataSeeder.class);
+    private static final String CARREFOUR = "Carrefour";
+    private static final String COURSES_DE_LA_SEMAINE = "Courses de la semaine";
+    private static final String NETFLIX = "Netflix";
 
     private final DepotCompte accountRepository;
     private final DepotCategorie categoryRepository;
@@ -78,13 +82,13 @@ public class TestDataSeeder implements CommandLineRunner {
         Categorie salaire = rootCategory("Salaire", Categorie.TypeCategorie.INCOME);
 
         // --- Tiers (auto-catégorisation) ---
-        payee("Carrefour", "Carrefour", null, supermarche);
+        payee(CARREFOUR, CARREFOUR, null, supermarche);
         payee("Employeur", "Employeur;Virement salaire", null, salaire);
         payee("Bailleur", "Bailleur;Loyer", null, loyer);
-        payee("Netflix", "Netflix", new BigDecimal("15.00"), abonnements);
+        payee(NETFLIX, NETFLIX, new BigDecimal("15.00"), abonnements);
 
         // --- Transactions : 4 derniers mois, revenus + depenses variees ---
-        LocalDate today = LocalDate.now();
+        LocalDate today = LocalDate.now(ZoneId.systemDefault());
         for (int monthsAgo = 4; monthsAgo >= 0; monthsAgo--) {
             LocalDate monthStart = today.withDayOfMonth(1).minusMonths(monthsAgo);
             boolean isCurrentMonth = monthsAgo == 0;
@@ -94,16 +98,16 @@ public class TestDataSeeder implements CommandLineRunner {
                     "Employeur", "Virement salaire", salaire, ModePaiement.TRANSFER, true, false);
 
             // Loyer, prelevement du 3
-            Transaction loyerTx = transaction(courant, monthStart.plusDays(2), new BigDecimal("-850.00"),
+            transaction(courant, monthStart.plusDays(2), new BigDecimal("-850.00"),
                     "Bailleur", "Loyer mensuel", loyer, ModePaiement.DIRECT_DEBIT, true, true);
 
             // Courses, plusieurs fois dans le mois
             transaction(courant, monthStart.plusDays(5), new BigDecimal("-64.30"),
-                    "Carrefour", "Courses de la semaine", supermarche, ModePaiement.CARD, true, false);
+                    CARREFOUR, COURSES_DE_LA_SEMAINE, supermarche, ModePaiement.CARD, true, false);
             transaction(courant, monthStart.plusDays(14), new BigDecimal("-48.90"),
-                    "Carrefour", "Courses de la semaine", supermarche, ModePaiement.CARD, true, false);
+                    CARREFOUR, COURSES_DE_LA_SEMAINE, supermarche, ModePaiement.CARD, true, false);
             transaction(courant, monthStart.plusDays(21), new BigDecimal("-52.10"),
-                    "Carrefour", "Courses de la semaine", supermarche, ModePaiement.CARD, true, false);
+                    CARREFOUR, COURSES_DE_LA_SEMAINE, supermarche, ModePaiement.CARD, true, false);
 
             // Restaurant, occasionnel
             transaction(courant, monthStart.plusDays(9), new BigDecimal("-38.50"),
@@ -111,7 +115,7 @@ public class TestDataSeeder implements CommandLineRunner {
 
             // Netflix, abonnement mensuel recurrent
             transaction(carte, monthStart.plusDays(1), new BigDecimal("-15.00"),
-                    "Netflix", "Abonnement", abonnements, ModePaiement.DIRECT_DEBIT, true, true);
+                    NETFLIX, "Abonnement", abonnements, ModePaiement.DIRECT_DEBIT, true, true);
 
             // Energie
             transaction(courant, monthStart.plusDays(10), new BigDecimal("-72.40"),

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -68,7 +69,7 @@ public class ServiceCompte {
      */
     private BigDecimal currentBalance(Compte account) {
         return account.getInitialBalance()
-                .add(transactionRepository.sumAmountByAccountIdAsOf(account.getId(), LocalDate.now()));
+                .add(transactionRepository.sumAmountByAccountIdAsOf(account.getId(), LocalDate.now(ZoneId.systemDefault())));
     }
 
     /**

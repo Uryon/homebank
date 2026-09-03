@@ -107,36 +107,36 @@
         <h2>{{ editing ? 'Modifier le prêt' : 'Nouveau prêt' }}</h2>
         <div class="form-grid">
           <div class="form-field" style="grid-column: span 2;">
-            <label>Nom</label>
-            <input v-model="form.name" placeholder="Ex : Prêt immobilier - Résidence principale" />
+            <label for="loan-name">Nom</label>
+            <input id="loan-name" v-model="form.name" placeholder="Ex : Prêt immobilier - Résidence principale" />
           </div>
           <div class="form-field">
-            <label>Capital emprunté</label>
-            <AmountInput v-model="form.principal" />
+            <label for="loan-principal">Capital emprunté</label>
+            <AmountInput id="loan-principal" v-model="form.principal" />
           </div>
           <div class="form-field">
-            <label>Taux annuel (%)</label>
-            <input v-model.number="form.annualRate" type="number" step="0.001" min="0" placeholder="Ex : 3.25" />
+            <label for="loan-rate">Taux annuel (%)</label>
+            <input id="loan-rate" v-model.number="form.annualRate" type="number" step="0.001" min="0" placeholder="Ex : 3.25" />
           </div>
           <div class="form-field">
-            <label>Durée (mois)</label>
-            <input v-model.number="form.termMonths" type="number" min="1" placeholder="Ex : 240 pour 20 ans" />
+            <label for="loan-term">Durée (mois)</label>
+            <input id="loan-term" v-model.number="form.termMonths" type="number" min="1" placeholder="Ex : 240 pour 20 ans" />
           </div>
           <div class="form-field">
-            <label>Date de la 1ère mensualité</label>
-            <input v-model="form.startDate" type="date" />
+            <label for="loan-start-date">Date de la 1ère mensualité</label>
+            <input id="loan-start-date" v-model="form.startDate" type="date" />
           </div>
           <div class="form-field">
-            <label>Mensualité (hors assurance)</label>
-            <AmountInput v-model="form.monthlyPayment" />
+            <label for="loan-monthly-payment">Mensualité (hors assurance)</label>
+            <AmountInput id="loan-monthly-payment" v-model="form.monthlyPayment" />
           </div>
           <div class="form-field">
-            <label>Assurance mensuelle (optionnel)</label>
-            <AmountInput v-model="form.monthlyInsurance" />
+            <label for="loan-monthly-insurance">Assurance mensuelle (optionnel)</label>
+            <AmountInput id="loan-monthly-insurance" v-model="form.monthlyInsurance" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
-            <label>Notes</label>
-            <input v-model="form.notes" placeholder="Note libre" />
+            <label for="loan-notes">Notes</label>
+            <input id="loan-notes" v-model="form.notes" placeholder="Note libre" />
           </div>
         </div>
         <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
@@ -184,7 +184,6 @@ function emptyForm() {
 const selectedLoan = computed(() => loans.value.find(l => l.id === selectedId.value) || null)
 
 const scheduleRows = computed(() => {
-  const today = new Date().toISOString().slice(0, 10)
   let currentAssigned = false
   return schedule.value.map(row => {
     const isCurrent = !currentAssigned && !row.paid

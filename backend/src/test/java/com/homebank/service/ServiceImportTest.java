@@ -4,7 +4,6 @@ import com.homebank.model.Categorie;
 import com.homebank.model.Compte;
 import com.homebank.model.Tiers;
 import com.homebank.model.Transaction;
-import com.homebank.model.TransactionSupprimee;
 import com.homebank.repository.DepotTransaction;
 import com.homebank.repository.DepotTransactionSupprimee;
 import org.junit.jupiter.api.BeforeEach;
@@ -81,8 +80,10 @@ class ServiceImportTest {
 
     @Test
     void importCsv_formatHomebank_creeUneTransactionAvecTiersEtCategorieResolus() {
-        String csv = "Date;Paymode;Info;Payee;Memo;Amount;Category;Tags\n"
-                + "01/03/2024;;;Carrefour;Courses;-45,50;Alimentation;\n";
+        String csv = """
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                01/03/2024;;;Carrefour;Courses;-45,50;Alimentation;
+                """;
         Categorie categorie = new Categorie();
         categorie.setId(9L);
         Tiers carrefour = tiers(2L, "Carrefour", null);
@@ -107,8 +108,10 @@ class ServiceImportTest {
 
     @Test
     void importCsv_sansCategorieDansLeFichier_reprendLaCategorieParDefautDuTiers() {
-        String csv = "Date;Paymode;Info;Payee;Memo;Amount;Category;Tags\n"
-                + "01/03/2024;;;Carrefour;;-10,00;;\n";
+        String csv = """
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                01/03/2024;;;Carrefour;;-10,00;;
+                """;
         Categorie categorieParDefaut = new Categorie();
         categorieParDefaut.setId(5L);
         Tiers carrefour = tiers(2L, "Carrefour", categorieParDefaut);
@@ -132,8 +135,10 @@ class ServiceImportTest {
         when(transactionRepository.findByAccount_IdOrderByDateDescIdDesc(1L)).thenReturn(List.of(existing));
         when(payeeService.resolveOrCreate(eq("Carrefour"), any(), anyList())).thenReturn(carrefour);
 
-        String csv = "Date;Paymode;Info;Payee;Memo;Amount;Category;Tags\n"
-                + "01/03/2024;;;Carrefour;;-45,50;;\n";
+        String csv = """
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                01/03/2024;;;Carrefour;;-45,50;;
+                """;
 
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
 
@@ -144,9 +149,11 @@ class ServiceImportTest {
 
     @Test
     void importCsv_ligneAvecDateInvalide_estIgnoreeSansInterrompreLImportDesAutresLignes() {
-        String csv = "Date;Paymode;Info;Payee;Memo;Amount;Category;Tags\n"
-                + "date-invalide;;;Carrefour;;-10,00;;\n"
-                + "01/03/2024;;;Monoprix;;-5,00;;\n";
+        String csv = """
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                date-invalide;;;Carrefour;;-10,00;;
+                01/03/2024;;;Monoprix;;-5,00;;
+                """;
         when(payeeService.resolveOrCreate(anyString(), any(), anyList())).thenReturn(null);
 
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
@@ -159,8 +166,10 @@ class ServiceImportTest {
 
     @Test
     void importCsv_ligneAvecColonnesInsuffisantes_estIgnoreeAvecErreur() {
-        String csv = "Date;Paymode;Info;Payee;Memo;Amount;Category;Tags\n"
-                + "01/03/2024;;;Carrefour\n";
+        String csv = """
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                01/03/2024;;;Carrefour
+                """;
 
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
 
@@ -172,10 +181,12 @@ class ServiceImportTest {
 
     @Test
     void importCsv_exportBancaireBrut_reconnaitLeFormatSansMemoNiCategorieEtUtiliseLeLibelleCommeTiers() {
-        String csv = "Numero Compte;1234567890\n"
-                + "Solde;1000,00\n"
-                + "Date;Libelle;Montant(EUROS)\n"
-                + "01/03/2024;\"VIR SEPA CARREFOUR PARIS\";-45,50\n";
+        String csv = """
+                Numero Compte;1234567890
+                Solde;1000,00
+                Date;Libelle;Montant(EUROS)
+                01/03/2024;"VIR SEPA CARREFOUR PARIS";-45,50
+                """;
         when(payeeService.resolveOrCreate(eq("VIR SEPA CARREFOUR PARIS"), any(), anyList())).thenReturn(null);
 
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
@@ -186,8 +197,10 @@ class ServiceImportTest {
 
     @Test
     void importCsv_montantAuFormatEuropeenAvecSeparateurDeMilliers_estCorrectementConverti() {
-        String csv = "Date;Paymode;Info;Payee;Memo;Amount;Category;Tags\n"
-                + "01/03/2024;;;Salaire;;1.234,56;;\n";
+        String csv = """
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                01/03/2024;;;Salaire;;1.234,56;;
+                """;
 
         service.importCsv(csvFile(csv), 1L);
 
@@ -200,13 +213,15 @@ class ServiceImportTest {
 
     @Test
     void importQif_enregistrementCompletApresTypeBank_creeUneTransaction() {
-        String qif = "!Type:Bank\n"
-                + "D01/03/2024\n"
-                + "T-45,50\n"
-                + "PCarrefour\n"
-                + "MCourses\n"
-                + "LAlimentation\n"
-                + "^\n";
+        String qif = """
+                !Type:Bank
+                D01/03/2024
+                T-45,50
+                PCarrefour
+                MCourses
+                LAlimentation
+                ^
+                """;
         Categorie categorie = new Categorie();
         categorie.setId(9L);
         when(categoryService.findOrCreateByName("Alimentation")).thenReturn(categorie);
@@ -225,14 +240,16 @@ class ServiceImportTest {
 
     @Test
     void importQif_ignoreLesEnregistrementsAvantTypeBank() {
-        String qif = "!Type:Cat\n"
-                + "NAutreSection\n"
-                + "^\n"
-                + "!Type:Bank\n"
-                + "D01/03/2024\n"
-                + "T-10,00\n"
-                + "PMonoprix\n"
-                + "^\n";
+        String qif = """
+                !Type:Cat
+                NAutreSection
+                ^
+                !Type:Bank
+                D01/03/2024
+                T-10,00
+                PMonoprix
+                ^
+                """;
 
         ServiceImport.ImportResult result = service.importQif(qifFile(qif), 1L);
 
@@ -242,13 +259,15 @@ class ServiceImportTest {
 
     @Test
     void importQif_enregistrementSansDateOuMontant_estIgnoreAvecErreurEtNeBloquePasLaSuite() {
-        String qif = "!Type:Bank\n"
-                + "PSansDateNiMontant\n"
-                + "^\n"
-                + "D01/03/2024\n"
-                + "T-5,00\n"
-                + "PMonoprix\n"
-                + "^\n";
+        String qif = """
+                !Type:Bank
+                PSansDateNiMontant
+                ^
+                D01/03/2024
+                T-5,00
+                PMonoprix
+                ^
+                """;
 
         ServiceImport.ImportResult result = service.importQif(qifFile(qif), 1L);
 
@@ -267,11 +286,13 @@ class ServiceImportTest {
         when(transactionRepository.findByAccount_IdOrderByDateDescIdDesc(1L)).thenReturn(List.of(existing));
         when(payeeService.resolveOrCreate(eq("Monoprix"), any(), anyList())).thenReturn(monoprix);
 
-        String qif = "!Type:Bank\n"
-                + "D01/03/2024\n"
-                + "T-10,00\n"
-                + "PMonoprix\n"
-                + "^\n";
+        String qif = """
+                !Type:Bank
+                D01/03/2024
+                T-10,00
+                PMonoprix
+                ^
+                """;
 
         ServiceImport.ImportResult result = service.importQif(qifFile(qif), 1L);
 
