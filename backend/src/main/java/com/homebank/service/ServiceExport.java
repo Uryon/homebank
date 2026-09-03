@@ -27,14 +27,21 @@ public class ServiceExport {
     private final String dossierSortie;
     private final String urlTableauDeBord;
     private final String cheminScript;
+    private final String cheminNode;
 
     public ServiceExport(
             @Value("${export.dossier-sortie}") String dossierSortie,
             @Value("${export.url-tableau-de-bord}") String urlTableauDeBord,
-            @Value("${export.chemin-script}") String cheminScript) {
+            @Value("${export.chemin-script}") String cheminScript,
+            // Resout "node" par son nom via le PATH par defaut (comportement
+            // historique, portable) ; peut etre epingle a un chemin absolu via
+            // EXPORT_CHEMIN_NODE si on veut eliminer toute dependance au PATH
+            // (voir le hotspot Sonar "PATH variable" sur cet appel).
+            @Value("${export.chemin-node:node}") String cheminNode) {
         this.dossierSortie = dossierSortie;
         this.urlTableauDeBord = urlTableauDeBord;
         this.cheminScript = cheminScript;
+        this.cheminNode = cheminNode;
     }
 
     public void exporterTableauDeBord() {
@@ -45,7 +52,7 @@ public class ServiceExport {
                             + "(Google Drive pour ordinateur...).");
         }
 
-        ProcessBuilder pb = new ProcessBuilder("node", cheminScript, dossierSortie, urlTableauDeBord)
+        ProcessBuilder pb = new ProcessBuilder(cheminNode, cheminScript, dossierSortie, urlTableauDeBord)
                 .redirectErrorStream(true);
         try {
             Process process = pb.start();

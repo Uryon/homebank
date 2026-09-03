@@ -23,7 +23,7 @@
       </div>
 
       <div class="form-field">
-        <label>Période</label>
+        <span class="form-field-label">Période</span>
         <MonthYearFilter
           :month="filterMonth"
           :year="filterYear"

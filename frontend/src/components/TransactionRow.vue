@@ -64,7 +64,8 @@
     <!-- Mode lecture -->
     <template v-else>
       <td class="num" @click.stop>
-        <input type="checkbox" :checked="selected" title="Sélectionner cette transaction" :aria-label="'Sélectionner la transaction ' + (transaction.payee || 'sans tiers') + ' du ' + formatDate(transaction.date)" @change="$emit('toggle-select', transaction)" />
+        <label :for="'tx-select-' + transaction.id" class="sr-only">Sélectionner cette transaction</label>
+        <input :id="'tx-select-' + transaction.id" type="checkbox" :checked="selected" title="Sélectionner cette transaction" :aria-label="'Sélectionner la transaction ' + (transaction.payee || 'sans tiers') + ' du ' + formatDate(transaction.date)" @change="$emit('toggle-select', transaction)" />
       </td>
       <td class="num" @click.stop>
         <span
@@ -87,7 +88,9 @@
       <td class="num amount negative">{{ transaction.amount < 0 ? formatAmount(transaction.amount) : '' }}</td>
       <td class="num amount positive">{{ transaction.amount > 0 ? formatAmount(transaction.amount) : '' }}</td>
       <td class="num" @click.stop>
+        <label :for="'tx-periodic-' + transaction.id" class="sr-only">Dépense périodique récurrente</label>
         <input
+          :id="'tx-periodic-' + transaction.id"
           type="checkbox"
           :checked="transaction.periodicExpense"
           title="Dépense périodique récurrente"
@@ -96,7 +99,9 @@
         />
       </td>
       <td class="num" @click.stop>
+        <label :for="'tx-exceptional-' + transaction.id" class="sr-only">Transaction exceptionnelle</label>
         <input
+          :id="'tx-exceptional-' + transaction.id"
           type="checkbox"
           :checked="transaction.exceptional"
           title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)"

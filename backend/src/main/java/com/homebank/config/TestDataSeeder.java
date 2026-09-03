@@ -94,44 +94,44 @@ public class TestDataSeeder implements CommandLineRunner {
             boolean isCurrentMonth = monthsAgo == 0;
 
             // Salaire, le dernier jour "raisonnable" du mois (le 28)
-            transaction(courant, monthStart.withDayOfMonth(28), new BigDecimal("2400.00"),
+            transaction(new TransactionCore(courant, monthStart.withDayOfMonth(28), new BigDecimal("2400.00")),
                     "Employeur", "Virement salaire", salaire, ModePaiement.TRANSFER, true, false);
 
             // Loyer, prelevement du 3
-            transaction(courant, monthStart.plusDays(2), new BigDecimal("-850.00"),
+            transaction(new TransactionCore(courant, monthStart.plusDays(2), new BigDecimal("-850.00")),
                     "Bailleur", "Loyer mensuel", loyer, ModePaiement.DIRECT_DEBIT, true, true);
 
             // Courses, plusieurs fois dans le mois
-            transaction(courant, monthStart.plusDays(5), new BigDecimal("-64.30"),
+            transaction(new TransactionCore(courant, monthStart.plusDays(5), new BigDecimal("-64.30")),
                     CARREFOUR, COURSES_DE_LA_SEMAINE, supermarche, ModePaiement.CARD, true, false);
-            transaction(courant, monthStart.plusDays(14), new BigDecimal("-48.90"),
+            transaction(new TransactionCore(courant, monthStart.plusDays(14), new BigDecimal("-48.90")),
                     CARREFOUR, COURSES_DE_LA_SEMAINE, supermarche, ModePaiement.CARD, true, false);
-            transaction(courant, monthStart.plusDays(21), new BigDecimal("-52.10"),
+            transaction(new TransactionCore(courant, monthStart.plusDays(21), new BigDecimal("-52.10")),
                     CARREFOUR, COURSES_DE_LA_SEMAINE, supermarche, ModePaiement.CARD, true, false);
 
             // Restaurant, occasionnel
-            transaction(courant, monthStart.plusDays(9), new BigDecimal("-38.50"),
+            transaction(new TransactionCore(courant, monthStart.plusDays(9), new BigDecimal("-38.50")),
                     "Le Bistrot", "Déjeuner", restaurant, ModePaiement.CARD, true, false);
 
             // Netflix, abonnement mensuel recurrent
-            transaction(carte, monthStart.plusDays(1), new BigDecimal("-15.00"),
+            transaction(new TransactionCore(carte, monthStart.plusDays(1), new BigDecimal("-15.00")),
                     NETFLIX, "Abonnement", abonnements, ModePaiement.DIRECT_DEBIT, true, true);
 
             // Energie
-            transaction(courant, monthStart.plusDays(10), new BigDecimal("-72.40"),
+            transaction(new TransactionCore(courant, monthStart.plusDays(10), new BigDecimal("-72.40")),
                     "Fournisseur énergie", "Facture électricité/gaz", energie, ModePaiement.DIRECT_DEBIT, true, true);
 
             // Transport
-            transaction(courant, monthStart.plusDays(3), new BigDecimal("-45.00"),
+            transaction(new TransactionCore(courant, monthStart.plusDays(3), new BigDecimal("-45.00")),
                     "Réseau transport", "Pass mensuel", transport, ModePaiement.CARD, true, false);
 
             // Sur le mois en cours uniquement : quelques transactions "en attente"
             // (comme si elles venaient d'etre importees), pour illustrer le
             // rapprochement bancaire.
             if (isCurrentMonth) {
-                transaction(courant, today.minusDays(1), new BigDecimal("-19.90"),
+                transaction(new TransactionCore(courant, today.minusDays(1), new BigDecimal("-19.90")),
                         "Boulangerie du coin", null, alimentation, ModePaiement.CARD, false, false);
-                transaction(courant, today, new BigDecimal("-9.50"),
+                transaction(new TransactionCore(courant, today, new BigDecimal("-9.50")),
                         "Station essence", null, transport, ModePaiement.CARD, false, false);
             }
         }
@@ -208,20 +208,26 @@ public class TestDataSeeder implements CommandLineRunner {
     }
 
     /**
+     * Regroupe compte/date/montant, communs a chaque transaction de demo,
+     * pour ramener transaction(...) a 7 parametres (regle Sonar : 7 max).
+     */
+    private record TransactionCore(Compte account, LocalDate date, BigDecimal amount) {
+    }
+
+    /**
      * `payeeName` passe par la meme reconnaissance/creation automatique que
      * l'import ou la saisie manuelle (voir ServiceTiers#resolveOrCreate),
      * pour que les donnees de demo utilisent exactement le meme chemin que
      * du code reel : un nom deja enregistre via payee(...) rejoint le meme
      * tiers, un nom inconnu (ex : "Le Bistrot") en cree un a la volee.
      */
-    private Transaction transaction(Compte account, LocalDate date, BigDecimal amount, String payeeName,
-                                     String memo, Categorie category, ModePaiement mode,
-                                     boolean validated, boolean periodicExpense) {
+    private Transaction transaction(TransactionCore core, String payeeName, String memo, Categorie category,
+                                     ModePaiement mode, boolean validated, boolean periodicExpense) {
         Transaction t = new Transaction();
-        t.setAccount(account);
-        t.setDate(date);
-        t.setAmount(amount);
-        t.setPayee(payeeName != null ? payeeService.resolveOrCreate(payeeName, amount) : null);
+        t.setAccount(core.account());
+        t.setDate(core.date());
+        t.setAmount(core.amount());
+        t.setPayee(payeeName != null ? payeeService.resolveOrCreate(payeeName, core.amount()) : null);
         t.setMemo(memo);
         t.setCategory(category);
         t.setPaymentMode(mode);

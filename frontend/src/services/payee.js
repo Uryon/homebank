@@ -16,7 +16,7 @@
  * plusieurs homonymes (ex : plusieurs "Bouygues" a des montants differents).
  */
 export function findPayeeByName(payeeIndex, name, amount) {
-  if (!name || !name.trim()) return null
+  if (!name?.trim()) return null
   const candidates = payeeIndex.get(name.trim().toLowerCase())
   if (!candidates?.length) return null
   if (candidates.length === 1) return candidates[0]
