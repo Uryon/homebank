@@ -147,6 +147,13 @@ public class ServiceImport {
     }
 
     /**
+     * Regroupe l'etat partage entre toutes les lignes d'un meme import (voir
+     * processCsvLine/finalizeQifRecord), pour eviter de le faire transiter en
+     * une longue liste de parametres individuels.
+     */
+    private record ImportContext(Compte account, List<Tiers> knownPayees, Set<CleDoublon> existingKeys, ImportResult result) {}
+
+    /**
      * Positions des colonnes utiles dans un CSV, deduites de sa ligne
      * d'en-tete (voir detectLayout ci-dessous). -1 pour une colonne absente
      * de ce format (ex : pas de memo/categorie/tags separes dans un export
@@ -195,53 +202,58 @@ public class ServiceImport {
         int firstDataLine = headerLineIndex >= 0 ? headerLineIndex + 1 : 0;
         int minRequiredFields = Math.max(layout.dateIdx(), layout.amountIdx()) + 1;
 
+        ImportContext ctx = new ImportContext(account, knownPayees, existingKeys, result);
         for (int i = firstDataLine; i < lines.size(); i++) {
-            int lineNumber = i + 1;
-            String line = lines.get(i);
-            if (line.isBlank()) continue;
-
-            String[] fields = line.split(";", -1);
-            if (fields.length < minRequiredFields) {
-                result.skipped++;
-                result.errors.add("Ligne " + lineNumber + " : nombre de colonnes insuffisant");
-                continue;
-            }
-
-            try {
-                LocalDate date = parseDate(csvField(fields, layout.dateIdx()));
-                String payeeText = csvField(fields, layout.payeeIdx());
-                String memo = csvField(fields, layout.memoIdx());
-                BigDecimal amount = parseAmount(csvField(fields, layout.amountIdx()));
-                String categoryName = csvField(fields, layout.categoryIdx());
-                String tags = csvField(fields, layout.tagsIdx());
-
-                Tiers payee = resolvePayee(payeeText, amount, knownPayees);
-                String canonicalPayee = payee != null ? payee.getName() : payeeText;
-
-                if (isDuplicate(accountId, date, amount, canonicalPayee, null, existingKeys)) {
-                    result.duplicates++;
-                    continue;
-                }
-
-                Transaction t = new Transaction();
-                t.setAccount(account);
-                t.setDate(date);
-                t.setAmount(amount);
-                t.setMemo(sanitizeMemo(memo));
-                t.setTags(tags);
-                t.setPayee(payee);
-                t.setCategory(resolveCategory(payee, categoryName));
-                t.setValidated(false); // toute transaction importee demarre "en attente"
-                transactionRepository.save(t);
-                existingKeys.add(CleDoublon.of(date, amount, canonicalPayee));
-                result.imported++;
-            } catch (Exception e) {
-                result.skipped++;
-                result.errors.add("Ligne " + lineNumber + " : " + e.getMessage());
-            }
+            processCsvLine(lines.get(i), i + 1, layout, minRequiredFields, ctx);
         }
 
         return result;
+    }
+
+    /** Traite une seule ligne de donnees du CSV (voir importCsv) : ligne vide ou insuffisante ignoree, doublon compte a part, sinon transaction creee. */
+    private void processCsvLine(String line, int lineNumber, CsvLayout layout, int minRequiredFields, ImportContext ctx) {
+        if (line.isBlank()) return;
+        ImportResult result = ctx.result();
+
+        String[] fields = line.split(";", -1);
+        if (fields.length < minRequiredFields) {
+            result.skipped++;
+            result.errors.add("Ligne " + lineNumber + " : nombre de colonnes insuffisant");
+            return;
+        }
+
+        try {
+            LocalDate date = parseDate(csvField(fields, layout.dateIdx()));
+            String payeeText = csvField(fields, layout.payeeIdx());
+            String memo = csvField(fields, layout.memoIdx());
+            BigDecimal amount = parseAmount(csvField(fields, layout.amountIdx()));
+            String categoryName = csvField(fields, layout.categoryIdx());
+            String tags = csvField(fields, layout.tagsIdx());
+
+            Tiers payee = resolvePayee(payeeText, amount, ctx.knownPayees());
+            String canonicalPayee = payee != null ? payee.getName() : payeeText;
+
+            if (isDuplicate(ctx.account().getId(), date, amount, canonicalPayee, null, ctx.existingKeys())) {
+                result.duplicates++;
+                return;
+            }
+
+            Transaction t = new Transaction();
+            t.setAccount(ctx.account());
+            t.setDate(date);
+            t.setAmount(amount);
+            t.setMemo(sanitizeMemo(memo));
+            t.setTags(tags);
+            t.setPayee(payee);
+            t.setCategory(resolveCategory(payee, categoryName));
+            t.setValidated(false); // toute transaction importee demarre "en attente"
+            transactionRepository.save(t);
+            ctx.existingKeys().add(CleDoublon.of(date, amount, canonicalPayee));
+            result.imported++;
+        } catch (Exception e) {
+            result.skipped++;
+            result.errors.add("Ligne " + lineNumber + " : " + e.getMessage());
+        }
     }
 
     /**
@@ -260,11 +272,13 @@ public class ServiceImport {
             if (line.isBlank()) continue;
 
             String[] fields = line.split(";", -1);
-            if (fields.length >= 3 && stripQuotes(fields[0]).equalsIgnoreCase("date")) {
-                return i;
+            if (fields.length >= 3) {
+                // 3+ colonnes : soit la vraie ligne d'en-tete ("Date;..."), soit deja
+                // de la donnee (pas d'en-tete du tout) — dans les deux cas la
+                // recherche s'arrete ici, il ne reste qu'a distinguer les deux cas.
+                return stripQuotes(fields[0]).equalsIgnoreCase("date") ? i : -1;
             }
-            if (fields.length < 3) continue; // ligne de metadonnees ("Cle;Valeur"), on continue a chercher
-            return -1; // deja de la donnee (3+ colonnes, ne commence pas par "date") : pas d'en-tete du tout
+            // sinon (< 3 colonnes) : ligne de metadonnees ("Cle;Valeur"), on continue a chercher (fin du corps de boucle)
         }
         return -1;
     }
@@ -301,106 +315,18 @@ public class ServiceImport {
         ImportResult result = new ImportResult();
         List<Tiers> knownPayees = payeeService.findAllForMatching();
         Set<CleDoublon> existingKeys = loadDuplicateKeys(accountId);
+        ImportContext ctx = new ImportContext(account, knownPayees, existingKeys, result);
 
         try (BufferedReader reader = new BufferedReader(
                 new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
 
             String line;
-            LocalDate date = null;
-            BigDecimal amount = null;
-            String payeeText = null;
-            String memo = null;
-            String categoryName = null;
+            QifRecordState state = new QifRecordState();
             int lineNumber = 0;
-
-            // On ne traite les transactions qu'après !Type:Bank
-            boolean inBankSection = false;
 
             while ((line = reader.readLine()) != null) {
                 lineNumber++;
-
-                if (line.isBlank()) {
-                    continue;
-                }
-
-                // Gestion des sections QIF
-                if (line.startsWith("!")) {
-                    inBankSection = line.equalsIgnoreCase("!Type:Bank");
-                    continue;
-                }
-
-                // On ignore tout ce qui précède !Type:Bank
-                if (!inBankSection) {
-                    continue;
-                }
-
-                char code = line.charAt(0);
-                String value = line.length() > 1
-                        ? line.substring(1).trim()
-                        : "";
-
-                switch (code) {
-                    case 'D' -> date = parseDate(value);
-
-                    case 'T', 'U' -> amount = parseAmount(value);
-
-                    case 'P' -> payeeText = value;
-
-                    case 'M' -> memo = value;
-
-                    case 'L' -> categoryName = value;
-
-                    case '^' -> {
-                        // Fin d'enregistrement -> création de la transaction
-                        try {
-                            if (date == null || amount == null) {
-                                throw new IllegalStateException(
-                                        "date ou montant manquant"
-                                );
-                            }
-
-                            Tiers payee = resolvePayee(payeeText, amount, knownPayees);
-                            String canonicalPayee = payee != null ? payee.getName() : payeeText;
-
-                            if (isDuplicate(accountId, date, amount, canonicalPayee, null, existingKeys)) {
-                                result.duplicates++;
-                            } else {
-                                Transaction t = new Transaction();
-                                t.setAccount(account);
-                                t.setDate(date);
-                                t.setAmount(amount);
-                                t.setMemo(sanitizeMemo(memo));
-                                t.setPayee(payee);
-                                t.setCategory(resolveCategory(payee, categoryName));
-                                t.setValidated(false);
-
-                                transactionRepository.save(t);
-                                existingKeys.add(CleDoublon.of(date, amount, canonicalPayee));
-                                result.imported++;
-                            }
-
-                        } catch (Exception e) {
-                            result.skipped++;
-                            result.errors.add(
-                                    "Enregistrement terminé ligne "
-                                            + lineNumber
-                                            + " : "
-                                            + e.getMessage()
-                            );
-                        } finally {
-                            // Réinitialisation pour la prochaine transaction
-                            date = null;
-                            amount = null;
-                            payeeText = null;
-                            memo = null;
-                            categoryName = null;
-                        }
-                    }
-
-                    default -> {
-                        // Champs QIF non gérés : N, C, A, etc.
-                    }
-                }
+                processQifLine(line, lineNumber, ctx, state);
             }
 
         } catch (IOException e) {
@@ -410,6 +336,94 @@ public class ServiceImport {
         }
 
         return result;
+    }
+
+    /**
+     * Champs d'un enregistrement QIF en cours d'accumulation (entre deux "^"),
+     * et section courante ("!Type:Bank" ou non) : etat mutable qui persiste
+     * d'une ligne a l'autre du fichier tant que l'enregistrement n'est pas
+     * termine (voir processQifLine/finalizeQifRecord).
+     */
+    private static class QifRecordState {
+        LocalDate date;
+        BigDecimal amount;
+        String payeeText;
+        String memo;
+        String categoryName;
+        // On ne traite les transactions qu'apres !Type:Bank.
+        boolean inBankSection;
+
+        void reset() {
+            date = null;
+            amount = null;
+            payeeText = null;
+            memo = null;
+            categoryName = null;
+        }
+    }
+
+    /** Traite une seule ligne du fichier QIF (voir importQif) : accumule un champ de l'enregistrement en cours, ou le finalise sur "^". */
+    private void processQifLine(String line, int lineNumber, ImportContext ctx, QifRecordState state) {
+        if (line.isBlank()) return;
+
+        // Gestion des sections QIF.
+        if (line.startsWith("!")) {
+            state.inBankSection = line.equalsIgnoreCase("!Type:Bank");
+            return;
+        }
+
+        // On ignore tout ce qui precede !Type:Bank.
+        if (!state.inBankSection) return;
+
+        char code = line.charAt(0);
+        String value = line.length() > 1 ? line.substring(1).trim() : "";
+
+        switch (code) {
+            case 'D' -> state.date = parseDate(value);
+            case 'T', 'U' -> state.amount = parseAmount(value);
+            case 'P' -> state.payeeText = value;
+            case 'M' -> state.memo = value;
+            case 'L' -> state.categoryName = value;
+            case '^' -> finalizeQifRecord(lineNumber, ctx, state);
+            default -> {
+                // Champs QIF non geres : N, C, A, etc.
+            }
+        }
+    }
+
+    /** Fin d'un enregistrement QIF ("^") : cree la transaction correspondante (ou compte un doublon/une erreur), puis reinitialise l'etat pour le suivant. */
+    private void finalizeQifRecord(int lineNumber, ImportContext ctx, QifRecordState state) {
+        ImportResult result = ctx.result();
+        try {
+            if (state.date == null || state.amount == null) {
+                throw new IllegalStateException("date ou montant manquant");
+            }
+
+            Tiers payee = resolvePayee(state.payeeText, state.amount, ctx.knownPayees());
+            String canonicalPayee = payee != null ? payee.getName() : state.payeeText;
+
+            if (isDuplicate(ctx.account().getId(), state.date, state.amount, canonicalPayee, null, ctx.existingKeys())) {
+                result.duplicates++;
+            } else {
+                Transaction t = new Transaction();
+                t.setAccount(ctx.account());
+                t.setDate(state.date);
+                t.setAmount(state.amount);
+                t.setMemo(sanitizeMemo(state.memo));
+                t.setPayee(payee);
+                t.setCategory(resolveCategory(payee, state.categoryName));
+                t.setValidated(false);
+
+                transactionRepository.save(t);
+                ctx.existingKeys().add(CleDoublon.of(state.date, state.amount, canonicalPayee));
+                result.imported++;
+            }
+        } catch (Exception e) {
+            result.skipped++;
+            result.errors.add("Enregistrement termine ligne " + lineNumber + " : " + e.getMessage());
+        } finally {
+            state.reset();
+        }
     }
 
     private LocalDate parseDate(String raw) {

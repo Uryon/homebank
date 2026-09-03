@@ -83,29 +83,40 @@ public class ServiceRapport {
                 ? transactionRepository.findByAccountIdAndDateBetween(accountId, from, to)
                 : transactionRepository.findByDateBetween(from, to);
         for (Transaction t : inRange) {
-            if (t.getPaymentMode() == ModePaiement.TRANSFER) continue;
-            if (t.getDate().isAfter(today)) continue;
-            if (t.isExceptional()) continue;
-            if (hasAnnualizedCategory(t)) continue; // traitee ci-dessous, jamais pour son montant plein
-            result.add(new AttributedTransaction(t, t.getDate(), t.getAmount()));
+            addIfAttributable(t, today, result);
         }
 
         for (Transaction t : transactionRepository.findByCategory_AnnualizedTrue()) {
-            if (t.getPaymentMode() == ModePaiement.TRANSFER) continue;
-            if (t.getDate().isAfter(today)) continue;
-            if (t.isExceptional()) continue;
-            if (accountId != null && (t.getAccount() == null || !accountId.equals(t.getAccount().getId()))) continue;
-
-            BigDecimal monthlyShare = t.getAmount().divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
-            LocalDate firstMonth = t.getDate().withDayOfMonth(1);
-            for (int i = 0; i < 12; i++) {
-                LocalDate monthStart = firstMonth.plusMonths(i);
-                if (monthStart.isBefore(from) || monthStart.isAfter(to)) continue;
-                result.add(new AttributedTransaction(t, monthStart, monthlyShare));
-            }
+            addAnnualizedShares(t, today, from, to, accountId, result);
         }
 
         return result;
+    }
+
+    /** Vrai si t doit etre exclue de tous les rapports, quelle que soit sa categorie : virement, transaction future, ou marquee exceptionnelle. */
+    private static boolean isExcludedFromReports(Transaction t, LocalDate today) {
+        return t.getPaymentMode() == ModePaiement.TRANSFER || t.getDate().isAfter(today) || t.isExceptional();
+    }
+
+    /** Ajoute t a result s'il est attribuable normalement (voir attributedTransactions) : les categories annuelles sont traitees a part par addAnnualizedShares, jamais ici pour leur montant plein. */
+    private void addIfAttributable(Transaction t, LocalDate today, List<AttributedTransaction> result) {
+        if (isExcludedFromReports(t, today)) return;
+        if (hasAnnualizedCategory(t)) return;
+        result.add(new AttributedTransaction(t, t.getDate(), t.getAmount()));
+    }
+
+    /** Ajoute a result une ligne par mois de la fenetre glissante de 12 mois de t qui tombe dans [from,to] (voir attributedTransactions), pour le compte filtre (accountId==null = tous). */
+    private void addAnnualizedShares(Transaction t, LocalDate today, LocalDate from, LocalDate to, Long accountId, List<AttributedTransaction> result) {
+        if (isExcludedFromReports(t, today)) return;
+        if (accountId != null && (t.getAccount() == null || !accountId.equals(t.getAccount().getId()))) return;
+
+        BigDecimal monthlyShare = t.getAmount().divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
+        LocalDate firstMonth = t.getDate().withDayOfMonth(1);
+        for (int i = 0; i < 12; i++) {
+            LocalDate monthStart = firstMonth.plusMonths(i);
+            if (monthStart.isBefore(from) || monthStart.isAfter(to)) continue;
+            result.add(new AttributedTransaction(t, monthStart, monthlyShare));
+        }
     }
 
     /**
@@ -441,6 +452,35 @@ public class ServiceRapport {
         LocalDate from = firstOfCurrentMonth.minusMonths(12);
         LocalDate to = firstOfCurrentMonth.minusDays(1);
 
+        List<Map<String, Object>> months = buildMonthsWindow(from, firstOfCurrentMonth);
+        Map<String, BigDecimal> monthlyIncomeTotals = zeroedMonthlyTotals(months);
+        Map<String, BigDecimal> monthlyExpenseTotals = zeroedMonthlyTotals(months);
+
+        // Clé stable : catégorie (ou catégorie racine + sous-catégorie) + type de flux.
+        Map<String, Map<String, Object>> rows = buildCategoryMonthRows(
+                attributedTransactions(from, to, accountId), months, monthlyIncomeTotals, monthlyExpenseTotals);
+
+        // Construit la hiérarchie : racines d'abord, sous-catégories juste après.
+        List<Map<String, Object>> incomeRows = extractSortedRows(rows, INCOME);
+        List<Map<String, Object>> expenseRows = extractSortedRows(rows, EXPENSE);
+        Map<String, Object> incomeTotal = totalAnalysisRow("Total revenus", INCOME, months, monthlyIncomeTotals);
+        Map<String, Object> expenseTotal = totalAnalysisRow("Total dépenses", EXPENSE, months, monthlyExpenseTotals);
+        List<Map<String, Object>> monthlySummary = buildMonthlySummary(months, monthlyIncomeTotals, monthlyExpenseTotals);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("from", from);
+        result.put("to", to);
+        result.put("months", months);
+        result.put(INCOME, incomeRows);
+        result.put("incomeTotal", incomeTotal);
+        result.put(EXPENSES_KEY, expenseRows);
+        result.put("expenseTotal", expenseTotal);
+        result.put("summary", monthlySummary);
+        return result;
+    }
+
+    /** Un point par mois entierement termine de [from, firstOfCurrentMonth[ (voir monthlyCategoryAnalysis). */
+    private List<Map<String, Object>> buildMonthsWindow(LocalDate from, LocalDate firstOfCurrentMonth) {
         List<Map<String, Object>> months = new ArrayList<>();
         DateTimeFormatter monthFormatter = DateTimeFormatter.ofPattern("MMM.", Locale.FRENCH);
         for (LocalDate month = from; month.isBefore(firstOfCurrentMonth); month = month.plusMonths(1)) {
@@ -451,24 +491,35 @@ public class ServiceRapport {
             m.put("month", month.getMonthValue());
             months.add(m);
         }
+        return months;
+    }
 
-        // Clé stable : catégorie (ou catégorie racine + sous-catégorie) + type de flux.
-        Map<String, Map<String, Object>> rows = new LinkedHashMap<>();
-        Map<String, BigDecimal> monthlyIncomeTotals = new LinkedHashMap<>();
-        Map<String, BigDecimal> monthlyExpenseTotals = new LinkedHashMap<>();
-
+    private static Map<String, BigDecimal> zeroedMonthlyTotals(List<Map<String, Object>> months) {
+        Map<String, BigDecimal> totals = new LinkedHashMap<>();
         for (Map<String, Object> m : months) {
-            monthlyIncomeTotals.put((String) m.get("key"), BigDecimal.ZERO);
-            monthlyExpenseTotals.put((String) m.get("key"), BigDecimal.ZERO);
+            totals.put((String) m.get("key"), BigDecimal.ZERO);
         }
+        return totals;
+    }
 
-        // Pre-agregation par (categorie, mois) — equivalent du GROUP BY qu'une
-        // requete SQL ferait, mais en Java pour pouvoir inclure les tranches
-        // de transactions annualisees (voir attributedTransactions), qui
-        // n'existent qu'en memoire (jamais en base sous cette forme).
+    /**
+     * Pre-agrege les transactions attribuees en lignes categorie/mois (voir
+     * monthlyCategoryAnalysis) — equivalent du GROUP BY qu'une requete SQL
+     * ferait, mais en Java pour pouvoir inclure les tranches de transactions
+     * annualisees (voir attributedTransactions), qui n'existent qu'en
+     * memoire (jamais en base sous cette forme) — en cumulant au passage les
+     * totaux mensuels income/expense (monthlyIncomeTotals/monthlyExpenseTotals,
+     * mutes directement).
+     */
+    private Map<String, Map<String, Object>> buildCategoryMonthRows(
+            List<AttributedTransaction> transactions,
+            List<Map<String, Object>> months,
+            Map<String, BigDecimal> monthlyIncomeTotals,
+            Map<String, BigDecimal> monthlyExpenseTotals) {
+
         Map<String, BigDecimal> perCategoryMonth = new LinkedHashMap<>();
         Map<String, Categorie> categoryByKey = new LinkedHashMap<>();
-        for (AttributedTransaction at : attributedTransactions(from, to, accountId)) {
+        for (AttributedTransaction at : transactions) {
             Categorie category = at.source().getCategory();
             String catKey = category != null ? category.getId().toString() : "uncategorized";
             String monthKey = at.date().withDayOfMonth(1).toString();
@@ -476,67 +527,69 @@ public class ServiceRapport {
             categoryByKey.putIfAbsent(catKey, category);
         }
 
+        Map<String, Map<String, Object>> rows = new LinkedHashMap<>();
         for (Map.Entry<String, BigDecimal> entry : perCategoryMonth.entrySet()) {
             String[] parts = entry.getKey().split("\\|", 2);
             String catKey = parts[0];
             String monthKey = parts[1];
             BigDecimal amount = entry.getValue();
-
             Categorie category = categoryByKey.get(catKey);
-            Long categoryId = category != null ? category.getId() : null;
-            Long parentId = category != null && category.getParent() != null ? category.getParent().getId() : null;
-            String parentName = category != null && category.getParent() != null ? category.getParent().getName() : null;
 
-            // Les transactions sans catégorie restent visibles dans le tableau.
-            String safeName = category != null ? category.getName() : "Sans catégorie";
-            String key = catKey + "|" + (amount.signum() > 0 ? INCOME : EXPENSE);
+            Map<String, Object> row = rows.computeIfAbsent(
+                    catKey + "|" + (amount.signum() > 0 ? INCOME : EXPENSE),
+                    key -> newCategoryRow(key, category, amount, months));
 
-            Map<String, Object> row = rows.get(key);
-            if (row == null) {
-                row = new LinkedHashMap<>();
-                row.put("key", key);
-                row.put("categoryId", categoryId);
-                row.put("name", safeName);
-                row.put("parentId", parentId);
-                row.put(PARENT_NAME_KEY, parentName);
-                row.put(LEVEL_KEY, parentId == null ? 0 : 1);
-                row.put("type", amount.signum() > 0 ? INCOME : EXPENSE);
-                Map<String, BigDecimal> values = new LinkedHashMap<>();
-                for (Map<String, Object> m : months) {
-                    values.put((String) m.get("key"), BigDecimal.ZERO);
-                }
-                row.put(VALUES_KEY, values);
-                rows.put(key, row);
-            }
-
-            @SuppressWarnings("unchecked")
-            Map<String, BigDecimal> values = (Map<String, BigDecimal>) row.get(VALUES_KEY);
-            values.put(monthKey, values.getOrDefault(monthKey, BigDecimal.ZERO)
-                    .add(amount.abs()));
-
-            if (amount.signum() > 0) {
-                monthlyIncomeTotals.merge(monthKey, amount, BigDecimal::add);
-            } else if (amount.signum() < 0) {
-                monthlyExpenseTotals.merge(monthKey, amount.abs(), BigDecimal::add);
-            }
+            addMonthAmount(row, monthKey, amount);
+            mergeMonthlyTotal(amount, monthKey, monthlyIncomeTotals, monthlyExpenseTotals);
         }
+        return rows;
+    }
 
-        // Construit la hiérarchie : racines d'abord, sous-catégories juste après.
-        List<Map<String, Object>> incomeRows = rows.values().stream()
-                .filter(r -> INCOME.equals(r.get("type")))
+    /** Nouvelle ligne vierge (valeurs a zero sur tous les mois) pour une categorie/type de flux (voir buildCategoryMonthRows). */
+    private Map<String, Object> newCategoryRow(String key, Categorie category, BigDecimal firstAmount, List<Map<String, Object>> months) {
+        Long categoryId = category != null ? category.getId() : null;
+        Long parentId = category != null && category.getParent() != null ? category.getParent().getId() : null;
+        String parentName = category != null && category.getParent() != null ? category.getParent().getName() : null;
+        // Les transactions sans catégorie restent visibles dans le tableau.
+        String safeName = category != null ? category.getName() : "Sans catégorie";
+
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("key", key);
+        row.put("categoryId", categoryId);
+        row.put("name", safeName);
+        row.put("parentId", parentId);
+        row.put(PARENT_NAME_KEY, parentName);
+        row.put(LEVEL_KEY, parentId == null ? 0 : 1);
+        row.put("type", firstAmount.signum() > 0 ? INCOME : EXPENSE);
+        row.put(VALUES_KEY, zeroedMonthlyTotals(months));
+        return row;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void addMonthAmount(Map<String, Object> row, String monthKey, BigDecimal amount) {
+        Map<String, BigDecimal> values = (Map<String, BigDecimal>) row.get(VALUES_KEY);
+        values.put(monthKey, values.getOrDefault(monthKey, BigDecimal.ZERO).add(amount.abs()));
+    }
+
+    private static void mergeMonthlyTotal(BigDecimal amount, String monthKey,
+                                           Map<String, BigDecimal> monthlyIncomeTotals, Map<String, BigDecimal> monthlyExpenseTotals) {
+        if (amount.signum() > 0) {
+            monthlyIncomeTotals.merge(monthKey, amount, BigDecimal::add);
+        } else if (amount.signum() < 0) {
+            monthlyExpenseTotals.merge(monthKey, amount.abs(), BigDecimal::add);
+        }
+    }
+
+    private List<Map<String, Object>> extractSortedRows(Map<String, Map<String, Object>> rows, String type) {
+        return rows.values().stream()
+                .filter(r -> type.equals(r.get("type")))
                 .sorted(this::compareCategoryRows)
                 .map(this::completeAnalysisRow)
                 .toList();
+    }
 
-        List<Map<String, Object>> expenseRows = rows.values().stream()
-                .filter(r -> EXPENSE.equals(r.get("type")))
-                .sorted(this::compareCategoryRows)
-                .map(this::completeAnalysisRow)
-                .toList();
-
-        Map<String, Object> incomeTotal = totalAnalysisRow("Total revenus", INCOME, months, monthlyIncomeTotals);
-        Map<String, Object> expenseTotal = totalAnalysisRow("Total dépenses", EXPENSE, months, monthlyExpenseTotals);
-
+    private List<Map<String, Object>> buildMonthlySummary(
+            List<Map<String, Object>> months, Map<String, BigDecimal> monthlyIncomeTotals, Map<String, BigDecimal> monthlyExpenseTotals) {
         List<Map<String, Object>> monthlySummary = new ArrayList<>();
         for (Map<String, Object> m : months) {
             String key = (String) m.get("key");
@@ -549,17 +602,7 @@ public class ServiceRapport {
             summary.put("net", income.subtract(expenses));
             monthlySummary.add(summary);
         }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("from", from);
-        result.put("to", to);
-        result.put("months", months);
-        result.put(INCOME, incomeRows);
-        result.put("incomeTotal", incomeTotal);
-        result.put(EXPENSES_KEY, expenseRows);
-        result.put("expenseTotal", expenseTotal);
-        result.put("summary", monthlySummary);
-        return result;
+        return monthlySummary;
     }
 
     private Map<String, Object> completeAnalysisRow(Map<String, Object> row) {

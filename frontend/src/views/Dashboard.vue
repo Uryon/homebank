@@ -821,53 +821,71 @@ const whereMoneyTotal = computed(() =>
  * moyennes recalcules par groupe (une racine sans transaction directe
  * affiche quand meme le total de ses sous-categories).
  */
-function analysisGroup(rows) {
-  const groups = new Map()
-  const zeroValues = () => Object.fromEntries((monthlyAnalysis.value?.months || []).map(m => [m.key, 0]))
-  const addValues = (target, source) => {
-    for (const month of monthlyAnalysis.value.months) {
-      target.values[month.key] = Number(target.values[month.key] || 0) + Number(source.values[month.key] || 0)
-    }
-    target.total = Object.values(target.values).reduce((sum, value) => sum + Number(value || 0), 0)
-    target.average = monthlyAnalysis.value.months.length
-      ? target.total / monthlyAnalysis.value.months.length
-      : 0
+/** Tri alphabetique francais par `name`, partage par analysisGroup ci-dessous (groupes et sous-categories). */
+function byNameFr(a, b) {
+  return String(a.name).localeCompare(String(b.name), 'fr')
+}
+
+/** Cle de regroupement d'une ligne "categorie/mois" (voir analysisGroup) : par categorie racine, elle-meme ou celle de son parent. */
+function rootGroupKey(row) {
+  return row.parentId != null ? `parent-${row.parentId}` : `category-${row.categoryId ?? 'uncategorized'}`
+}
+
+function zeroValuesFor(months) {
+  return Object.fromEntries(months.map(m => [m.key, 0]))
+}
+
+/** Cumule les valeurs mensuelles (et total/moyenne) de source dans target — utilise pour agreger une racine ou ses sous-categories dans son groupe (voir analysisGroup). */
+function addRowValues(target, source, months) {
+  for (const month of months) {
+    target.values[month.key] = Number(target.values[month.key] || 0) + Number(source.values[month.key] || 0)
   }
+  target.total = Object.values(target.values).reduce((sum, value) => sum + Number(value || 0), 0)
+  target.average = months.length ? target.total / months.length : 0
+}
+
+/** Nouveau groupe vierge (valeurs a zero) pour la categorie racine de row (voir analysisGroup). */
+function newAnalysisGroup(row, months) {
+  return {
+    key: rootGroupKey(row),
+    name: row.parentId != null ? row.parentName : row.name,
+    // Categorie racine (elle-meme, ou celle dont ce groupe reunit les
+    // sous-categories) pour retrouver au survol les transactions de tout
+    // le groupe via rootCategoryId (voir groupCategoryFilter/ServiceRapport#cellTransactions).
+    categoryId: row.parentId != null ? row.parentId : row.categoryId,
+    uncategorized: row.parentId == null && row.categoryId == null,
+    values: zeroValuesFor(months),
+    total: 0,
+    average: 0,
+    children: []
+  }
+}
+
+function analysisGroup(rows) {
+  const months = monthlyAnalysis.value?.months || []
+  const groups = new Map()
 
   for (const row of rows || []) {
-    const rootKey = row.parentId != null ? `parent-${row.parentId}` : `category-${row.categoryId ?? 'uncategorized'}`
-    let group = groups.get(rootKey)
-    if (!group) {
-      group = {
-        key: rootKey,
-        name: row.parentId != null ? row.parentName : row.name,
-        // Categorie racine (elle-meme, ou celle dont ce groupe reunit les
-        // sous-categories) pour retrouver au survol les transactions de tout
-        // le groupe via rootCategoryId (voir groupCategoryFilter/ServiceRapport#cellTransactions).
-        categoryId: row.parentId != null ? row.parentId : row.categoryId,
-        uncategorized: row.parentId == null && row.categoryId == null,
-        values: zeroValues(),
-        total: 0,
-        average: 0,
-        children: []
-      }
-      groups.set(rootKey, group)
-    }
+    const rootKey = rootGroupKey(row)
+    if (!groups.has(rootKey)) groups.set(rootKey, newAnalysisGroup(row, months))
+    const group = groups.get(rootKey)
+
     if (row.parentId != null) {
       group.children.push(row)
+    } else {
+      // Les transactions directement affectées à la catégorie racine sont
+      // intégrées au total du groupe.
+      addRowValues(group, row, months)
     }
-    // Les transactions directement affectées à la catégorie racine sont
-    // intégrées au total du groupe.
-    if (row.parentId == null) addValues(group, row)
   }
 
   // Un parent qui n'a que des sous-catégories doit quand même afficher leur total.
   for (const group of groups.values()) {
-    for (const child of group.children) addValues(group, child)
-    group.children.sort((a, b) => String(a.name).localeCompare(String(b.name), 'fr'))
+    for (const child of group.children) addRowValues(group, child, months)
+    group.children.sort(byNameFr)
   }
 
-  return Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name, 'fr'))
+  return Array.from(groups.values()).sort(byNameFr)
 }
 
 const incomeGroups = computed(() => analysisGroup(monthlyAnalysis.value?.income || []))

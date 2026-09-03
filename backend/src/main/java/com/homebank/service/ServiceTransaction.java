@@ -232,46 +232,59 @@ public class ServiceTransaction {
 
         List<Transaction> transactions = transactionRepository.findAllById(ids);
         List<Tiers> orphanCandidates = new ArrayList<>();
-
         for (Transaction t : transactions) {
-            if (payload.isCategoryIdProvided()) {
-                t.setCategory(category);
-            }
-
-            if (payload.isPayeeProvided()) {
-                Tiers previousPayee = t.getPayee();
-                String payeeText = payload.getPayee();
-                Tiers resolvedPayee = (payeeText != null && !payeeText.isBlank())
-                        ? payeeService.resolveOrCreate(payeeText, t.getAmount())
-                        : null;
-                t.setPayee(resolvedPayee);
-                if (previousPayee != null && !previousPayee.equals(resolvedPayee)) {
-                    orphanCandidates.add(previousPayee);
-                }
-            }
-
-            if (payload.isPaymentModeProvided()) {
-                t.setPaymentMode(payload.getPaymentMode());
-            }
-
-            if (payload.isPeriodicExpenseProvided()) {
-                t.setPeriodicExpense(payload.isPeriodicExpense());
-            }
-
-            if (payload.isExceptionalProvided()) {
-                t.setExceptional(payload.isExceptional());
-            }
-
-            if (payload.isValidatedProvided()) {
-                t.setValidated(payload.isValidated());
-            }
+            applyBulkFields(t, payload, category, orphanCandidates);
         }
 
         List<Transaction> saved = transactionRepository.saveAll(transactions);
         log.info("Modification en masse de {} transaction(s)", saved.size());
 
-        // Nettoyage des anciens tiers devenus orphelins "best effort" : ne
-        // doit jamais faire echouer la mise a jour elle-meme (deja actee).
+        cleanupOrphanPayees(orphanCandidates);
+
+        return saved.stream().map(transactionMapper::toDTO).toList();
+    }
+
+    /** Applique a une transaction les seuls champs marques "...Provided" dans payload (voir bulkUpdate). */
+    private void applyBulkFields(Transaction t, TransactionBulkUpdateDTO payload, Categorie category, List<Tiers> orphanCandidates) {
+        if (payload.isCategoryIdProvided()) {
+            t.setCategory(category);
+        }
+
+        if (payload.isPayeeProvided()) {
+            applyBulkPayee(t, payload.getPayee(), orphanCandidates);
+        }
+
+        if (payload.isPaymentModeProvided()) {
+            t.setPaymentMode(payload.getPaymentMode());
+        }
+
+        if (payload.isPeriodicExpenseProvided()) {
+            t.setPeriodicExpense(payload.isPeriodicExpense());
+        }
+
+        if (payload.isExceptionalProvided()) {
+            t.setExceptional(payload.isExceptional());
+        }
+
+        if (payload.isValidatedProvided()) {
+            t.setValidated(payload.isValidated());
+        }
+    }
+
+    /** Resout/cree le nouveau tiers depuis le texte fourni et l'affecte a la transaction ; releve l'ancien tiers s'il change (voir cleanupOrphanPayees). */
+    private void applyBulkPayee(Transaction t, String payeeText, List<Tiers> orphanCandidates) {
+        Tiers previousPayee = t.getPayee();
+        Tiers resolvedPayee = (payeeText != null && !payeeText.isBlank())
+                ? payeeService.resolveOrCreate(payeeText, t.getAmount())
+                : null;
+        t.setPayee(resolvedPayee);
+        if (previousPayee != null && !previousPayee.equals(resolvedPayee)) {
+            orphanCandidates.add(previousPayee);
+        }
+    }
+
+    /** Nettoyage "best effort" des anciens tiers devenus orphelins apres une modification en masse : ne doit jamais faire echouer la mise a jour elle-meme (deja actee). */
+    private void cleanupOrphanPayees(List<Tiers> orphanCandidates) {
         for (Tiers previousPayee : orphanCandidates) {
             try {
                 payeeService.cleanupIfPayeeChanged(previousPayee, null);
@@ -279,8 +292,6 @@ public class ServiceTransaction {
                 log.warn("Echec du nettoyage d'un ancien tiers apres modification en masse : {}", e.getMessage(), e);
             }
         }
-
-        return saved.stream().map(transactionMapper::toDTO).toList();
     }
 
     @Transactional

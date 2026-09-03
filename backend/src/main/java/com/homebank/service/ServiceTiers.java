@@ -434,40 +434,16 @@ public class ServiceTiers {
     public CategorisationAutoResultatDTO autoCategorize() {
         List<Tiers> allPayees = payeeRepository.findAll();
         List<Transaction> allTransactions = transactionRepository.findAllWithPayeeAndCategory();
-
-        Map<Long, List<Transaction>> transactionsByPayeeId = new HashMap<>();
-        for (Transaction t : allTransactions) {
-            if (t.getPayee() == null) continue;
-            transactionsByPayeeId.computeIfAbsent(t.getPayee().getId(), id -> new ArrayList<>()).add(t);
-        }
+        Map<Long, List<Transaction>> transactionsByPayeeId = groupTransactionsByPayeeId(allTransactions);
 
         List<Tiers> payeesToSave = new ArrayList<>();
         List<Transaction> transactionsToSave = new ArrayList<>();
 
         for (Tiers payee : allPayees) {
             List<Transaction> transactions = transactionsByPayeeId.getOrDefault(payee.getId(), List.of());
-
-            Categorie targetCategory = payee.getCategory();
-            if (targetCategory == null) {
-                Set<Categorie> distinctCategories = new HashSet<>();
-                for (Transaction t : transactions) {
-                    if (t.getCategory() != null) distinctCategories.add(t.getCategory());
-                }
-                if (distinctCategories.size() == 1) {
-                    targetCategory = distinctCategories.iterator().next();
-                    payee.setCategory(targetCategory);
-                    payeesToSave.add(payee);
-                }
-            }
-
+            Categorie targetCategory = resolveTargetCategory(payee, transactions, payeesToSave);
             if (targetCategory == null) continue;
-
-            for (Transaction t : transactions) {
-                if (t.getCategory() == null) {
-                    t.setCategory(targetCategory);
-                    transactionsToSave.add(t);
-                }
-            }
+            applyCategoryToUncategorized(transactions, targetCategory, transactionsToSave);
         }
 
         payeeRepository.saveAll(payeesToSave);
@@ -477,5 +453,46 @@ public class ServiceTiers {
                 payeesToSave.size(), transactionsToSave.size());
 
         return new CategorisationAutoResultatDTO(payeesToSave.size(), transactionsToSave.size());
+    }
+
+    /** Regroupe les transactions par id de tiers ; les transactions sans tiers sont ignorees. */
+    private static Map<Long, List<Transaction>> groupTransactionsByPayeeId(List<Transaction> allTransactions) {
+        Map<Long, List<Transaction>> result = new HashMap<>();
+        for (Transaction t : allTransactions) {
+            if (t.getPayee() == null) continue;
+            result.computeIfAbsent(t.getPayee().getId(), id -> new ArrayList<>()).add(t);
+        }
+        return result;
+    }
+
+    /**
+     * Categorie deja affectee au tiers, ou deduite si toutes ses transactions
+     * deja categorisees s'accordent sur une seule (voir javadoc de
+     * autoCategorize) — si deduite, le tiers est ajoute a payeesToSave. Null
+     * si le tiers n'a pas de categorie et qu'aucun signal consistant n'existe.
+     */
+    private static Categorie resolveTargetCategory(Tiers payee, List<Transaction> transactions, List<Tiers> payeesToSave) {
+        if (payee.getCategory() != null) return payee.getCategory();
+
+        Set<Categorie> distinctCategories = new HashSet<>();
+        for (Transaction t : transactions) {
+            if (t.getCategory() != null) distinctCategories.add(t.getCategory());
+        }
+        if (distinctCategories.size() != 1) return null;
+
+        Categorie deduced = distinctCategories.iterator().next();
+        payee.setCategory(deduced);
+        payeesToSave.add(payee);
+        return deduced;
+    }
+
+    /** Affecte targetCategory a chaque transaction encore sans categorie, en l'ajoutant a transactionsToSave. */
+    private static void applyCategoryToUncategorized(List<Transaction> transactions, Categorie targetCategory, List<Transaction> transactionsToSave) {
+        for (Transaction t : transactions) {
+            if (t.getCategory() == null) {
+                t.setCategory(targetCategory);
+                transactionsToSave.add(t);
+            }
+        }
     }
 }
