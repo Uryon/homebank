@@ -1,28 +1,31 @@
 <template>
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand"><span class="brand-mark">◆</span> HomeBank</div>
+      <div class="brand">
+        <AppLogo />
+        <span class="brand-name"><strong>Home</strong>Bank</span>
+      </div>
       <nav>
         <RouterLink to="/" class="nav-item" :class="{ active: $route.name === 'dashboard' }">
-          <span class="dot"></span> Tableau de bord
+          <span class="nav-icon">📊</span> Tableau de bord
         </RouterLink>
         <RouterLink to="/accounts" class="nav-item" :class="{ active: $route.name === 'accounts' }">
-          <span class="dot"></span> Comptes
+          <span class="nav-icon">🏦</span> Comptes
         </RouterLink>
         <RouterLink to="/transactions" class="nav-item" :class="{ active: $route.name === 'transactions' }">
-          <span class="dot"></span> Transactions
+          <span class="nav-icon">💳</span> Transactions
         </RouterLink>
         <RouterLink to="/categories" class="nav-item" :class="{ active: $route.name === 'categories' }">
-          <span class="dot"></span> Catégories
+          <span class="nav-icon">🏷️</span> Catégories
         </RouterLink>
         <RouterLink to="/payees" class="nav-item" :class="{ active: $route.name === 'payees' }">
-          <span class="dot"></span> Tiers
+          <span class="nav-icon">🏪</span> Tiers
         </RouterLink>
         <RouterLink to="/loans" class="nav-item" :class="{ active: $route.name === 'loans' }">
-          <span class="dot"></span> Prêts
+          <span class="nav-icon">📜</span> Prêts
         </RouterLink>
         <RouterLink to="/import" class="nav-item" :class="{ active: $route.name === 'import' }">
-          <span class="dot"></span> Import CSV/QIF
+          <span class="nav-icon">📥</span> Import CSV/QIF
         </RouterLink>
       </nav>
 
@@ -64,6 +67,7 @@ import { computed, onMounted, ref } from 'vue'
 import { dataStore } from './services/dataStore'
 import { formatAmount } from './services/format'
 import AccountModal from './components/AccountModal.vue'
+import AppLogo from './components/AppLogo.vue'
 
 // Precharge comptes, categories, tiers et transactions des le demarrage de
 // l'app, en arriere-plan, pour que la page Transactions (et les autres)
