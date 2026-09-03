@@ -36,7 +36,15 @@
 import { ref, watch } from 'vue'
 
 const props = defineProps({
-  modelValue: { type: Number, default: null }
+  modelValue: { type: Number, default: null },
+  // Desactive le mode ajustement (termes +/- sans nombre de base en tete
+  // appliques au montant ACTUEL, voir resolve() ci-dessous) : a mettre a
+  // false la ou le champ doit toujours representer une valeur ABSOLUE saisie
+  // telle quelle (ex : montant de la 1ere partie d'une division, voir
+  // Transactions.vue) — sans ca, taper "-4" pour remplacer un montant deja
+  // pre-rempli (ex : la moitie calculee par defaut) l'ADDITIONNAIT au lieu
+  // de le remplacer, ce qui ne correspond jamais a l'intention dans ce cas.
+  allowRelative: { type: Boolean, default: true }
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -74,8 +82,11 @@ function resolve(raw) {
     const terms = normalized.match(/[+-]?\d+(?:\.\d+)?/g) || []
     // Pas de nombre de base en tete (le texte commence directement par un
     // signe, ex : "+5" ou "-500+300") : les termes s'ajoutent au montant
-    // actuel, comme s'il etait lui-meme le premier terme.
-    const startsWithSign = normalized[0] === '+' || normalized[0] === '-'
+    // actuel, comme s'il etait lui-meme le premier terme — sauf si
+    // allowRelative est desactive, auquel cas un signe en tete fait partie
+    // de la valeur absolue saisie (ex : "-4" veut dire -4, jamais "montant
+    // actuel - 4").
+    const startsWithSign = props.allowRelative && (normalized[0] === '+' || normalized[0] === '-')
     const total = terms.reduce((sum, term) => sum + Number(term), startsWithSign ? (props.modelValue || 0) : 0)
     return { value: Math.round(total * 100) / 100, valid: true }
   }

@@ -2,6 +2,7 @@ package com.homebank.controller;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -26,6 +27,23 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Map<String, String>> handleBadRequest(IllegalArgumentException e, WebRequest request) {
         log.warn("400 sur {} : {}", requestPath(request), e.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+    }
+
+    /**
+     * Violation de contrainte en base (ex : suppression d'une categorie ou d'un
+     * tiers encore reference par des transactions/tiers, la FK n'a pas de
+     * ON DELETE CASCADE). Renvoyee comme un 409 explicite plutot que de
+     * tomber dans le handler generique (500 "Erreur interne" peu parlant) :
+     * l'utilisateur doit comprendre qu'il faut d'abord reaffecter ce qui
+     * reference encore l'element (ex : le bouton "Fusionner"), pas relancer
+     * la meme suppression.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, String>> handleDataIntegrityViolation(DataIntegrityViolationException e, WebRequest request) {
+        log.warn("409 sur {} : {}", requestPath(request), e.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error",
+                "Impossible de supprimer : cet élément est encore utilisé ailleurs (transactions, tiers ou sous-catégories). " +
+                        "Réaffectez-le d'abord (par exemple via \"Fusionner\") avant de le supprimer."));
     }
 
     @ExceptionHandler(Exception.class)

@@ -20,8 +20,8 @@
 
     <div class="toolbar">
       <div class="form-field">
-        <label>Recherche</label>
-        <input v-model="searchQuery" placeholder="Ex : Carrefour ou Alimentation" style="min-width: 240px;" />
+        <label title="Nom, motif, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99">Recherche</label>
+        <input v-model="searchQuery" placeholder="Ex : Bouygues;29,99" style="min-width: 240px;" />
       </div>
 
       <div class="form-field" style="align-self: flex-end;">
@@ -264,15 +264,54 @@ function emptyForm() {
 
 const withoutCategoryCount = computed(() => payees.value.filter(p => !p.categoryId).length)
 
+/**
+ * Champs de recherche normalisés (nom, motif, catégorie, montant) par tiers,
+ * précalculés une seule fois quand `payees`/`categories` changent plutôt qu'à
+ * chaque frappe — même principe que searchIndexById dans Transactions.vue.
+ */
+const payeeSearchIndexById = computed(() => {
+  const index = new Map()
+  for (const p of payees.value) {
+    index.set(p.id, {
+      nameNormalized: normalizeSearch(p.name),
+      patternNormalized: normalizeSearch(p.pattern),
+      categoryNormalized: normalizeSearch(categoryLabel(p.categoryId)),
+      rawAmount: p.amount != null ? String(p.amount).toLowerCase() : '',
+      amountFormattedNormalized: p.amount != null ? normalizeSearch(formatAmount(p.amount)) : ''
+    })
+  }
+  return index
+})
+
+/**
+ * Un critère (un des termes séparés par ";", déjà normalisé) matche ce tiers
+ * s'il est contenu dans le nom, le motif, la catégorie associée, ou le
+ * montant (comparé à la fois brut et formaté, virgule ou point acceptés —
+ * même logique que la recherche par montant de Transactions.vue).
+ */
+function payeeMatchesTerm(idx, term) {
+  if (idx.nameNormalized.includes(term)) return true
+  if (idx.patternNormalized.includes(term)) return true
+  if (idx.categoryNormalized.includes(term)) return true
+  const termAsAmount = term.replace(',', '.')
+  return idx.rawAmount.includes(termAsAmount) || idx.amountFormattedNormalized.includes(term)
+}
+
+/**
+ * Plusieurs critères séparés par ";" sont tous exigés à la fois (ET), ex :
+ * "Bouygues;29,99" pour retrouver le tiers Bouygues associé à ce montant
+ * précis — chaque critère pris seul reste un simple "contient" (OR entre les
+ * champs), comme avant.
+ */
 const filteredPayees = computed(() => {
-  const q = normalizeSearch(searchQuery.value)
+  const terms = searchQuery.value.split(';').map(normalizeSearch).filter(Boolean)
   const base = withoutCategoryOnly.value ? payees.value.filter(p => !p.categoryId) : payees.value
-  if (!q) return base
-  return base.filter(p =>
-    normalizeSearch(p.name).includes(q) ||
-    normalizeSearch(p.pattern).includes(q) ||
-    normalizeSearch(categoryLabel(p.categoryId)).includes(q)
-  )
+  if (!terms.length) return base
+  const index = payeeSearchIndexById.value
+  return base.filter(p => {
+    const idx = index.get(p.id)
+    return idx && terms.every(term => payeeMatchesTerm(idx, term))
+  })
 })
 
 const flatCategories = computed(() => flattenCategories(categories.value))

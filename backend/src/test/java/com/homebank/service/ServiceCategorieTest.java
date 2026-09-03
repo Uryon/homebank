@@ -122,6 +122,19 @@ class ServiceCategorieTest {
         verify(categoryRepository, never()).findByParent(any());
     }
 
+    // --- delete ---
+
+    @Test
+    void delete_detacheDabordLesTiersQuiLavaientCommeCategorieParDefautPuisSupprimeLaCategorie() {
+        Categorie category = categorie(1L, "Frais bancaires", TypeCategorie.EXPENSE, null);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(category));
+
+        service.delete(1L);
+
+        verify(payeeRepository).clearCategory(category);
+        verify(categoryRepository).deleteById(1L);
+    }
+
     // --- merge ---
 
     @Test

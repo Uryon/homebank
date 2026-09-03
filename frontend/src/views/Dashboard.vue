@@ -191,7 +191,7 @@
               <tr v-for="(row, i) in whereMoneyData" :key="row.category">
                 <td>
                   <span class="legend-dot" :style="{ background: PALETTE[i % PALETTE.length] }"></span>
-                  {{ row.category }}
+                  {{ iconPrefix(row.categoryId) }}{{ row.category }}
                 </td>
                 <td class="num amount negative"
                     @mouseenter="scheduleHover($event, row.category + ' — 12 derniers mois', () => fetchCellTransactions(whereMoneyRange.from, whereMoneyRange.to, 'expense', row.uncategorized ? { uncategorized: true } : { categoryId: row.categoryId }))"
@@ -296,103 +296,6 @@
     </div>
 
     <div class="card monthly-analysis-card">
-      <div class="stat-label" style="margin-bottom: 4px;">Revenus par catégorie — 12 derniers mois</div>
-      <div class="monthly-analysis-subtitle">
-        Évolution mensuelle par catégorie et sous-catégorie. Les 12 derniers mois entièrement terminés sont affichés.
-      </div>
-
-      <div v-if="monthlyAnalysis" class="monthly-analysis-wrap">
-        <table class="monthly-analysis-table">
-          <thead>
-            <tr>
-              <th class="category-sticky">Catégorie</th>
-              <th v-for="month in monthlyAnalysis.months" :key="month.key" class="num">
-                {{ month.label }}
-              </th>
-              <th class="num summary-col">Moyenne</th>
-              <th class="num summary-col">Total</th>
-            </tr>
-          </thead>
-
-          <tbody v-for="(group, i) in incomeGroups" :key="'income-' + group.key" :class="{ 'category-group-alt': i % 2 === 1 }">
-            <tr class="category-row">
-              <td class="category-sticky category-name">
-                <button v-if="group.children.length" class="collapse-button"
-                        @click="toggleMonthlyGroup('income', group.key)"
-                        :title="isMonthlyGroupCollapsed('income', group.key) ? 'Développer' : 'Replier'">
-                  {{ isMonthlyGroupCollapsed('income', group.key) ? '▸' : '▾' }}
-                </button>
-                <span v-else class="collapse-placeholder"></span>
-                <strong>{{ group.name }}</strong>
-              </td>
-              <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                  @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', groupCategoryFilter(group)))"
-                  @mouseleave="onCellLeave">
-                {{ formatAmount(group.values[month.key]) }}
-              </td>
-              <td class="num summary-col"
-                  @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', groupCategoryFilter(group)))"
-                  @mouseleave="onCellLeave">
-                {{ formatAmount(group.average) }}
-              </td>
-              <td class="num summary-col"
-                  @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', groupCategoryFilter(group)))"
-                  @mouseleave="onCellLeave">
-                {{ formatAmount(group.total) }}
-              </td>
-            </tr>
-
-            <template v-if="!isMonthlyGroupCollapsed('income', group.key)">
-              <tr v-for="child in group.children" :key="'income-child-' + child.key"
-                  class="subcategory-row">
-                <td class="category-sticky category-name subcategory-name">
-                  └ {{ child.name }}
-                </td>
-                <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                    @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', childCategoryFilter(child)))"
-                    @mouseleave="onCellLeave">
-                  {{ formatAmount(child.values[month.key]) }}
-                </td>
-                <td class="num summary-col"
-                    @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', childCategoryFilter(child)))"
-                    @mouseleave="onCellLeave">
-                  {{ formatAmount(child.average) }}
-                </td>
-                <td class="num summary-col"
-                    @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', childCategoryFilter(child)))"
-                    @mouseleave="onCellLeave">
-                  {{ formatAmount(child.total) }}
-                </td>
-              </tr>
-            </template>
-          </tbody>
-
-          <tbody>
-            <tr class="total-row income-total-row">
-              <td class="category-sticky"><strong>{{ monthlyAnalysis.incomeTotal.name }}</strong></td>
-              <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                  @mouseenter="scheduleHover($event, 'Total revenus — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income'))"
-                  @mouseleave="onCellLeave">
-                <strong>{{ formatAmount(monthlyAnalysis.incomeTotal.values[month.key]) }}</strong>
-              </td>
-              <td class="num summary-col"
-                  @mouseenter="scheduleHover($event, 'Total revenus — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income'))"
-                  @mouseleave="onCellLeave">
-                <strong>{{ formatAmount(monthlyAnalysis.incomeTotal.average) }}</strong>
-              </td>
-              <td class="num summary-col"
-                  @mouseenter="scheduleHover($event, 'Total revenus — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income'))"
-                  @mouseleave="onCellLeave">
-                <strong>{{ formatAmount(monthlyAnalysis.incomeTotal.total) }}</strong>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div v-else class="empty-state">Chargement de l'analyse mensuelle…</div>
-    </div>
-
-    <div class="card monthly-analysis-card">
       <div class="stat-label" style="margin-bottom: 4px;">Dépenses par catégorie — 12 derniers mois</div>
       <div class="monthly-analysis-subtitle">
         Évolution mensuelle par catégorie et sous-catégorie. Les 12 derniers mois entièrement terminés sont affichés.
@@ -420,19 +323,20 @@
                   {{ isMonthlyGroupCollapsed('expense', group.key) ? '▸' : '▾' }}
                 </button>
                 <span v-else class="collapse-placeholder"></span>
-                <strong>{{ group.name }}</strong>
+                <strong>{{ iconPrefix(group.categoryId) }}{{ group.name }}</strong>
               </td>
               <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                  :class="{ 'zero-value': !Number(group.values[month.key]) }"
                   @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', groupCategoryFilter(group)))"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(group.values[month.key]) }}
               </td>
-              <td class="num summary-col"
+              <td class="num summary-col" :class="{ 'zero-value': !Number(group.average) }"
                   @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', groupCategoryFilter(group)))"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(group.average) }}
               </td>
-              <td class="num summary-col"
+              <td class="num summary-col" :class="{ 'zero-value': !Number(group.total) }"
                   @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', groupCategoryFilter(group)))"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(group.total) }}
@@ -443,19 +347,20 @@
               <tr v-for="child in group.children" :key="'expense-child-' + child.key"
                   class="subcategory-row">
                 <td class="category-sticky category-name subcategory-name">
-                  └ {{ child.name }}
+                  └ {{ iconPrefix(child.categoryId) }}{{ child.name }}
                 </td>
                 <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                    :class="{ 'zero-value': !Number(child.values[month.key]) }"
                     @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', childCategoryFilter(child)))"
                     @mouseleave="onCellLeave">
                   {{ formatAmount(child.values[month.key]) }}
                 </td>
-                <td class="num summary-col"
+                <td class="num summary-col" :class="{ 'zero-value': !Number(child.average) }"
                     @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', childCategoryFilter(child)))"
                     @mouseleave="onCellLeave">
                   {{ formatAmount(child.average) }}
                 </td>
-                <td class="num summary-col"
+                <td class="num summary-col" :class="{ 'zero-value': !Number(child.total) }"
                     @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'expense', childCategoryFilter(child)))"
                     @mouseleave="onCellLeave">
                   {{ formatAmount(child.total) }}
@@ -489,6 +394,105 @@
       <div v-else class="empty-state">Chargement de l'analyse mensuelle…</div>
     </div>
 
+    <div class="card monthly-analysis-card">
+      <div class="stat-label" style="margin-bottom: 4px;">Revenus par catégorie — 12 derniers mois</div>
+      <div class="monthly-analysis-subtitle">
+        Évolution mensuelle par catégorie et sous-catégorie. Les 12 derniers mois entièrement terminés sont affichés.
+      </div>
+
+      <div v-if="monthlyAnalysis" class="monthly-analysis-wrap">
+        <table class="monthly-analysis-table">
+          <thead>
+            <tr>
+              <th class="category-sticky">Catégorie</th>
+              <th v-for="month in monthlyAnalysis.months" :key="month.key" class="num">
+                {{ month.label }}
+              </th>
+              <th class="num summary-col">Moyenne</th>
+              <th class="num summary-col">Total</th>
+            </tr>
+          </thead>
+
+          <tbody v-for="(group, i) in incomeGroups" :key="'income-' + group.key" :class="{ 'category-group-alt': i % 2 === 1 }">
+            <tr class="category-row">
+              <td class="category-sticky category-name">
+                <button v-if="group.children.length" class="collapse-button"
+                        @click="toggleMonthlyGroup('income', group.key)"
+                        :title="isMonthlyGroupCollapsed('income', group.key) ? 'Développer' : 'Replier'">
+                  {{ isMonthlyGroupCollapsed('income', group.key) ? '▸' : '▾' }}
+                </button>
+                <span v-else class="collapse-placeholder"></span>
+                <strong>{{ iconPrefix(group.categoryId) }}{{ group.name }}</strong>
+              </td>
+              <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                  :class="{ 'zero-value': !Number(group.values[month.key]) }"
+                  @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', groupCategoryFilter(group)))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(group.values[month.key]) }}
+              </td>
+              <td class="num summary-col" :class="{ 'zero-value': !Number(group.average) }"
+                  @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', groupCategoryFilter(group)))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(group.average) }}
+              </td>
+              <td class="num summary-col" :class="{ 'zero-value': !Number(group.total) }"
+                  @mouseenter="scheduleHover($event, group.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', groupCategoryFilter(group)))"
+                  @mouseleave="onCellLeave">
+                {{ formatAmount(group.total) }}
+              </td>
+            </tr>
+
+            <template v-if="!isMonthlyGroupCollapsed('income', group.key)">
+              <tr v-for="child in group.children" :key="'income-child-' + child.key"
+                  class="subcategory-row">
+                <td class="category-sticky category-name subcategory-name">
+                  └ {{ iconPrefix(child.categoryId) }}{{ child.name }}
+                </td>
+                <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                    :class="{ 'zero-value': !Number(child.values[month.key]) }"
+                    @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', childCategoryFilter(child)))"
+                    @mouseleave="onCellLeave">
+                  {{ formatAmount(child.values[month.key]) }}
+                </td>
+                <td class="num summary-col" :class="{ 'zero-value': !Number(child.average) }"
+                    @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', childCategoryFilter(child)))"
+                    @mouseleave="onCellLeave">
+                  {{ formatAmount(child.average) }}
+                </td>
+                <td class="num summary-col" :class="{ 'zero-value': !Number(child.total) }"
+                    @mouseenter="scheduleHover($event, child.name + ' — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income', childCategoryFilter(child)))"
+                    @mouseleave="onCellLeave">
+                  {{ formatAmount(child.total) }}
+                </td>
+              </tr>
+            </template>
+          </tbody>
+
+          <tbody>
+            <tr class="total-row income-total-row">
+              <td class="category-sticky"><strong>{{ monthlyAnalysis.incomeTotal.name }}</strong></td>
+              <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
+                  @mouseenter="scheduleHover($event, 'Total revenus — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income'))"
+                  @mouseleave="onCellLeave">
+                <strong>{{ formatAmount(monthlyAnalysis.incomeTotal.values[month.key]) }}</strong>
+              </td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Total revenus — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income'))"
+                  @mouseleave="onCellLeave">
+                <strong>{{ formatAmount(monthlyAnalysis.incomeTotal.average) }}</strong>
+              </td>
+              <td class="num summary-col"
+                  @mouseenter="scheduleHover($event, 'Total revenus — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, 'income'))"
+                  @mouseleave="onCellLeave">
+                <strong>{{ formatAmount(monthlyAnalysis.incomeTotal.total) }}</strong>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-else class="empty-state">Chargement de l'analyse mensuelle…</div>
+    </div>
+
     <CellTransactionsPopover
       :visible="hover.visible"
       :loading="hover.loading"
@@ -506,9 +510,23 @@
 <script setup>
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { AccountsAPI, ReportsAPI, LoansAPI, ExportAPI } from '../services/api'
+import { dataStore } from '../services/dataStore'
 import { formatAmount } from '../services/format'
 import CellTransactionsPopover from '../components/CellTransactionsPopover.vue'
 import Chart from 'chart.js/auto'
+
+// Categories issues du cache partage (voir App.vue / dataStore.js), uniquement
+// pour resoudre l'icone (emoji) a afficher devant chaque nom de categorie
+// dans les tableaux ci-dessous (voir iconPrefix) — le reste du tableau de
+// bord ne consomme que les rapports agreges de ReportsAPI, jamais les
+// categories elles-memes.
+const categoriesById = computed(() => new Map(dataStore.state.categories.map(c => [c.id, c])))
+
+/** Prefixe un nom de categorie avec son icone (emoji) resolue via son id, suivie d'un espace — chaine vide si aucune icone ou id inconnu. */
+function iconPrefix(categoryId) {
+  const icon = categoriesById.value.get(categoryId)?.icon
+  return icon ? `${icon} ` : ''
+}
 
 const accounts = ref([])
 const balances = ref({})
@@ -1590,6 +1608,15 @@ onMounted(loadDashboard)
   min-width: 68px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* Montants a 0 dans les tableaux "Revenus/Depenses par categorie" : moins
+   visibles (opacite reduite) plutot qu'affiches avec le meme contraste
+   qu'une vraie valeur, pour que l'œil aille naturellement vers les
+   categories qui ont effectivement bouge ce mois-la. */
+.monthly-analysis-table .num.zero-value {
+  color: var(--text-faint);
+  opacity: 0.45;
 }
 
 /*

@@ -39,6 +39,9 @@ public class Categorie {
     @Column(nullable = false)
     private TypeCategorie type = TypeCategorie.EXPENSE;
 
+    /** Emoji affiche devant le nom de la categorie (frontend), optionnel */
+    private String icon;
+
     /** Categorie masquee (plus utilisee) : exclue des autocompletes, mais conservee pour l'historique */
     @Column(nullable = false, columnDefinition = "boolean not null default false")
     private boolean hidden = false;

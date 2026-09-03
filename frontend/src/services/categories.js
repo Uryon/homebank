@@ -30,13 +30,15 @@ export function flattenCategories(categories) {
     childrenByParentId.get(c.parentId).push(c)
   }
 
+  const withIcon = (c) => (c.icon ? `${c.icon} ${c.name}` : c.name)
+
   const result = []
   for (const root of categories) {
     if (root.parentId) continue
     const children = childrenByParentId.get(root.id) || []
-    result.push({ id: root.id, label: root.name, type: root.type, selectable: children.length === 0, hidden: !!root.hidden })
+    result.push({ id: root.id, label: withIcon(root), type: root.type, selectable: children.length === 0, hidden: !!root.hidden })
     for (const child of children) {
-      result.push({ id: child.id, label: `${root.name} : ${child.name}`, type: child.type, selectable: true, hidden: !!child.hidden })
+      result.push({ id: child.id, label: `${withIcon(root)} : ${withIcon(child)}`, type: child.type, selectable: true, hidden: !!child.hidden })
     }
   }
   return result

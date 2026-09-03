@@ -16,4 +16,5 @@ public class CategorieDTO {
     private TypeCategorie type;
     private boolean hidden;
     private boolean annualized;
+    private String icon;
 }

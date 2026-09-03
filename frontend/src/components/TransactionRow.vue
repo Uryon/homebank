@@ -238,15 +238,19 @@ function accountName(id) {
   return props.accountsById.get(id)?.name || '—'
 }
 
+function withIcon(category) {
+  return category.icon ? `${category.icon} ${category.name}` : category.name
+}
+
 function categoryLabel(categoryId) {
   if (!categoryId) return '—'
   const category = props.categoriesById.get(categoryId)
   if (!category) return '—'
   if (category.parentId) {
     const parent = props.categoriesById.get(category.parentId)
-    if (parent) return `${parent.name} : ${category.name}`
+    if (parent) return `${withIcon(parent)} : ${withIcon(category)}`
   }
-  return category.name
+  return withIcon(category)
 }
 
 function isFuture(iso) {

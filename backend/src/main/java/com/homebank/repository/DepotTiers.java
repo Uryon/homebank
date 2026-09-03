@@ -20,4 +20,15 @@ public interface DepotTiers extends JpaRepository<Tiers, Long> {
     @Modifying
     @Query("update Tiers p set p.category = :target where p.category = :source")
     void reassignCategory(@Param("source") Categorie source, @Param("target") Categorie target);
+
+    /**
+     * Retire la categorie par defaut des tiers qui pointaient vers "category" :
+     * utilise avant la suppression d'une categorie, pour que les tiers qui
+     * l'avaient comme categorie par defaut ne bloquent pas la suppression
+     * (contrainte de cle etrangere) et se retrouvent simplement sans
+     * categorie par defaut plutot que d'empecher l'operation.
+     */
+    @Modifying
+    @Query("update Tiers p set p.category = null where p.category = :category")
+    void clearCategory(@Param("category") Categorie category);
 }

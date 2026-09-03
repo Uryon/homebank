@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h1>Catégories</h1>
-        <div class="subtitle">Cliquez sur une catégorie pour la modifier</div>
+        <div class="subtitle">Cliquez sur une catégorie pour la modifier, ou glissez une sous-catégorie sur une autre catégorie pour la déplacer</div>
       </div>
       <button class="btn" @click="openCreate()">+ Nouvelle catégorie</button>
     </div>
@@ -17,6 +17,11 @@
       <div v-if="selectedIds.length >= 2" class="form-field" style="align-self: flex-end;">
         <button class="btn" @click="openMergeModal">
           Fusionner ({{ selectedIds.length }} sélectionnées)
+        </button>
+      </div>
+      <div v-if="reparentableIds.length" class="form-field" style="align-self: flex-end;">
+        <button class="btn" @click="openReparentModal">
+          Changer la catégorie parente ({{ reparentableIds.length }})
         </button>
       </div>
       <div v-if="selectedIds.length > 0" class="form-field" style="align-self: flex-end;">
@@ -39,17 +44,23 @@
 
         <div v-if="expenseRoots.length">
           <div v-for="root in expenseRoots" :key="'exp-' + root.id" style="margin-bottom: 18px;">
-            <!-- Ligne racine -->
+            <!-- Ligne racine (absente si la racine elle-meme est masquee, voir hasVisibleContent).
+                 Cible de drop pour deplacer une sous-categorie ici par glisser-deposer. -->
             <div
+              v-if="!root.hidden"
               class="cat-row"
-              :class="{ 'cat-row-editing': editingId === root.id }"
+              :class="{ 'cat-row-editing': editingId === root.id, 'cat-row-dropzone': dragOverRootId === root.id }"
               style="border-bottom: 1px solid var(--line);"
               @click="editingId !== root.id && startEdit(root)"
               @keydown.enter.prevent="editingId === root.id && confirmEdit()"
               @keydown.esc="cancelEdit"
+              @dragover="onRootDragOver($event, root)"
+              @dragleave="onRootDragLeave(root)"
+              @drop="onRootDrop($event, root)"
             >
               <template v-if="editingId === root.id">
                 <div class="cat-row-inline" @click.stop>
+                  <input v-model="editForm.icon" placeholder="🙂" maxlength="4" class="icon-field" />
                   <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
                   <select v-model="editForm.type">
                     <option value="EXPENSE">Dépense</option>
@@ -61,38 +72,41 @@
                 </div>
               </template>
               <template v-else>
-                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;" :class="{ 'cat-hidden': root.hidden }">
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
                   <input type="checkbox" :value="root.id" v-model="selectedIds" @click.stop />
-                  <strong>{{ root.name }}</strong>
+                  <strong>{{ iconPrefix(root.icon) }}{{ root.name }}</strong>
                   <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
-                  <span v-if="root.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
                   <span v-if="root.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
                 <div class="cat-actions" @click.stop>
                   <button class="btn secondary cat-btn" @click="openCreate(root)">+ Sous-catégorie</button>
                   <button class="btn secondary cat-btn" @click="toggleAnnualized(root)" title="Lisser les transactions de cette catégorie sur 12 mois dans les rapports (ex : taxe foncière, assurance annuelle)">{{ root.annualized ? 'Annuelle ✓' : 'Annuelle' }}</button>
-                  <button class="btn secondary cat-btn" @click="toggleHidden(root)">{{ root.hidden ? 'Réafficher' : 'Masquer' }}</button>
+                  <button class="btn secondary cat-btn" @click="toggleHidden(root)">Masquer</button>
                   <button class="btn danger cat-btn" @click="remove(root)">Supprimer</button>
                 </div>
               </template>
             </div>
 
-            <!-- Sous-catégories -->
+            <!-- Sous-catégories : glissables vers une autre catégorie racine pour changer leur parent -->
             <div
               v-for="child in filteredChildren(root.id)"
               :key="child.id"
               class="cat-row"
-              :class="{ 'cat-row-editing': editingId === child.id }"
+              :class="{ 'cat-row-editing': editingId === child.id, 'cat-row-dragging': draggedCategoryId === child.id }"
               style="padding-left: 24px; border-bottom: 1px solid var(--line);"
+              draggable="true"
               @click="editingId !== child.id && startEdit(child)"
               @keydown.enter.prevent="editingId === child.id && confirmEdit()"
               @keydown.esc="cancelEdit"
+              @dragstart="onDragStart($event, child)"
+              @dragend="onDragEnd"
             >
               <template v-if="editingId === child.id">
                 <div class="cat-row-inline" @click.stop>
+                  <input v-model="editForm.icon" placeholder="🙂" maxlength="4" class="icon-field" />
                   <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
                   <select v-model.number="editForm.parentId">
-                    <option v-for="r in roots" :key="r.id" :value="r.id">{{ r.name }}</option>
+                    <option v-for="r in roots" :key="r.id" :value="r.id">{{ iconPrefix(r.icon) }}{{ r.name }}</option>
                   </select>
                   <span class="text-muted" style="font-size: 12px;">
                     {{ typeLabel(rootTypeById.get(editForm.parentId)) }} (hérité du parent)
@@ -102,15 +116,14 @@
                 </div>
               </template>
               <template v-else>
-                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);" :class="{ 'cat-hidden': child.hidden }">
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);">
                   <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
-                  <span>{{ child.name }}</span>
-                  <span v-if="child.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
+                  <span>{{ iconPrefix(child.icon) }}{{ child.name }}</span>
                   <span v-if="child.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
                 <div class="cat-actions" @click.stop>
                   <button class="btn secondary cat-btn" @click="toggleAnnualized(child)" title="Lisser les transactions de cette catégorie sur 12 mois dans les rapports (ex : taxe foncière, assurance annuelle)">{{ child.annualized ? 'Annuelle ✓' : 'Annuelle' }}</button>
-                  <button class="btn secondary cat-btn" @click="toggleHidden(child)">{{ child.hidden ? 'Réafficher' : 'Masquer' }}</button>
+                  <button class="btn secondary cat-btn" @click="toggleHidden(child)">Masquer</button>
                   <button class="btn danger cat-btn" @click="remove(child)">Supprimer</button>
                 </div>
               </template>
@@ -134,17 +147,23 @@
 
         <div v-if="incomeRoots.length">
           <div v-for="root in incomeRoots" :key="'inc-' + root.id" style="margin-bottom: 18px;">
-            <!-- Ligne racine -->
+            <!-- Ligne racine (absente si la racine elle-meme est masquee, voir hasVisibleContent).
+                 Cible de drop pour deplacer une sous-categorie ici par glisser-deposer. -->
             <div
+              v-if="!root.hidden"
               class="cat-row"
-              :class="{ 'cat-row-editing': editingId === root.id }"
+              :class="{ 'cat-row-editing': editingId === root.id, 'cat-row-dropzone': dragOverRootId === root.id }"
               style="border-bottom: 1px solid var(--line);"
               @click="editingId !== root.id && startEdit(root)"
               @keydown.enter.prevent="editingId === root.id && confirmEdit()"
               @keydown.esc="cancelEdit"
+              @dragover="onRootDragOver($event, root)"
+              @dragleave="onRootDragLeave(root)"
+              @drop="onRootDrop($event, root)"
             >
               <template v-if="editingId === root.id">
                 <div class="cat-row-inline" @click.stop>
+                  <input v-model="editForm.icon" placeholder="🙂" maxlength="4" class="icon-field" />
                   <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
                   <select v-model="editForm.type">
                     <option value="EXPENSE">Dépense</option>
@@ -156,38 +175,41 @@
                 </div>
               </template>
               <template v-else>
-                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;" :class="{ 'cat-hidden': root.hidden }">
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
                   <input type="checkbox" :value="root.id" v-model="selectedIds" @click.stop />
-                  <strong>{{ root.name }}</strong>
+                  <strong>{{ iconPrefix(root.icon) }}{{ root.name }}</strong>
                   <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
-                  <span v-if="root.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
                   <span v-if="root.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
                 <div class="cat-actions" @click.stop>
                   <button class="btn secondary cat-btn" @click="openCreate(root)">+ Sous-catégorie</button>
                   <button class="btn secondary cat-btn" @click="toggleAnnualized(root)" title="Lisser les transactions de cette catégorie sur 12 mois dans les rapports (ex : taxe foncière, assurance annuelle)">{{ root.annualized ? 'Annuelle ✓' : 'Annuelle' }}</button>
-                  <button class="btn secondary cat-btn" @click="toggleHidden(root)">{{ root.hidden ? 'Réafficher' : 'Masquer' }}</button>
+                  <button class="btn secondary cat-btn" @click="toggleHidden(root)">Masquer</button>
                   <button class="btn danger cat-btn" @click="remove(root)">Supprimer</button>
                 </div>
               </template>
             </div>
 
-            <!-- Sous-catégories -->
+            <!-- Sous-catégories : glissables vers une autre catégorie racine pour changer leur parent -->
             <div
               v-for="child in filteredChildren(root.id)"
               :key="child.id"
               class="cat-row"
-              :class="{ 'cat-row-editing': editingId === child.id }"
+              :class="{ 'cat-row-editing': editingId === child.id, 'cat-row-dragging': draggedCategoryId === child.id }"
               style="padding-left: 24px; border-bottom: 1px solid var(--line);"
+              draggable="true"
               @click="editingId !== child.id && startEdit(child)"
               @keydown.enter.prevent="editingId === child.id && confirmEdit()"
               @keydown.esc="cancelEdit"
+              @dragstart="onDragStart($event, child)"
+              @dragend="onDragEnd"
             >
               <template v-if="editingId === child.id">
                 <div class="cat-row-inline" @click.stop>
+                  <input v-model="editForm.icon" placeholder="🙂" maxlength="4" class="icon-field" />
                   <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
                   <select v-model.number="editForm.parentId">
-                    <option v-for="r in roots" :key="r.id" :value="r.id">{{ r.name }}</option>
+                    <option v-for="r in roots" :key="r.id" :value="r.id">{{ iconPrefix(r.icon) }}{{ r.name }}</option>
                   </select>
                   <span class="text-muted" style="font-size: 12px;">
                     {{ typeLabel(rootTypeById.get(editForm.parentId)) }} (hérité du parent)
@@ -197,15 +219,14 @@
                 </div>
               </template>
               <template v-else>
-                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);" :class="{ 'cat-hidden': child.hidden }">
+                <div style="display:flex; align-items:center; gap:10px; padding: 8px 0; color: var(--text-muted);">
                   <input type="checkbox" :value="child.id" v-model="selectedIds" @click.stop />
-                  <span>{{ child.name }}</span>
-                  <span v-if="child.hidden" class="badge" style="background: var(--ink-700); color: var(--text-faint);">Masquée</span>
+                  <span>{{ iconPrefix(child.icon) }}{{ child.name }}</span>
                   <span v-if="child.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
                 <div class="cat-actions" @click.stop>
                   <button class="btn secondary cat-btn" @click="toggleAnnualized(child)" title="Lisser les transactions de cette catégorie sur 12 mois dans les rapports (ex : taxe foncière, assurance annuelle)">{{ child.annualized ? 'Annuelle ✓' : 'Annuelle' }}</button>
-                  <button class="btn secondary cat-btn" @click="toggleHidden(child)">{{ child.hidden ? 'Réafficher' : 'Masquer' }}</button>
+                  <button class="btn secondary cat-btn" @click="toggleHidden(child)">Masquer</button>
                   <button class="btn danger cat-btn" @click="remove(child)">Supprimer</button>
                 </div>
               </template>
@@ -219,12 +240,70 @@
       {{ searchQuery.trim() ? 'Aucune catégorie ne correspond à cette recherche.' : 'Aucune catégorie. Créez-en une pour classer vos transactions.' }}
     </div>
 
+    <!-- Catégories masquées : encart à part sous les colonnes Dépenses/Revenus -->
+    <div v-if="hiddenCategories.length" class="card hidden-categories-card">
+      <div class="column-title">
+        <span class="column-dot hidden"></span> Catégories masquées ({{ hiddenCategories.length }})
+      </div>
+
+      <div
+        v-for="item in hiddenCategories"
+        :key="'hidden-' + item.id"
+        class="cat-row"
+        :class="{ 'cat-row-editing': editingId === item.id }"
+        style="border-bottom: 1px solid var(--line);"
+        @click="editingId !== item.id && startEdit(item)"
+        @keydown.enter.prevent="editingId === item.id && confirmEdit()"
+        @keydown.esc="cancelEdit"
+      >
+        <template v-if="editingId === item.id">
+          <div class="cat-row-inline" @click.stop>
+            <input v-model="editForm.icon" placeholder="🙂" maxlength="4" class="icon-field" />
+            <input v-model="editForm.name" ref="firstEditField" placeholder="Nom" style="flex: 1;" />
+            <template v-if="!item.parentId">
+              <select v-model="editForm.type">
+                <option value="EXPENSE">Dépense</option>
+                <option value="INCOME">Revenu</option>
+                <option value="BOTH">Les deux</option>
+              </select>
+            </template>
+            <template v-else>
+              <select v-model.number="editForm.parentId">
+                <option v-for="r in roots" :key="r.id" :value="r.id">{{ iconPrefix(r.icon) }}{{ r.name }}</option>
+              </select>
+              <span class="text-muted" style="font-size: 12px;">
+                {{ typeLabel(rootTypeById.get(editForm.parentId)) }} (hérité du parent)
+              </span>
+            </template>
+            <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
+            <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
+          </div>
+        </template>
+        <template v-else>
+          <div class="cat-hidden" style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
+            <span>{{ categoryFullLabel(item) }}</span>
+            <span class="badge" :style="typeBadgeStyle(item.type)">{{ typeLabel(item.type) }}</span>
+            <span v-if="item.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
+          </div>
+          <div class="cat-actions" @click.stop>
+            <button class="btn secondary cat-btn" @click="toggleAnnualized(item)" title="Lisser les transactions de cette catégorie sur 12 mois dans les rapports (ex : taxe foncière, assurance annuelle)">{{ item.annualized ? 'Annuelle ✓' : 'Annuelle' }}</button>
+            <button class="btn secondary cat-btn" @click="toggleHidden(item)">Réafficher</button>
+            <button class="btn danger cat-btn" @click="remove(item)">Supprimer</button>
+          </div>
+        </template>
+      </div>
+    </div>
+
     <!-- Modal création uniquement -->
     <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
       <div class="modal">
         <h2>Nouvelle catégorie</h2>
         <div class="form-grid">
-          <div class="form-field" style="grid-column: span 2;">
+          <div class="form-field">
+            <label>Icône</label>
+            <input v-model="form.icon" placeholder="🙂" maxlength="4" class="icon-field" style="width: 100%;" />
+          </div>
+          <div class="form-field">
             <label>Nom</label>
             <input v-model="form.name" placeholder="Ex : Alimentation" />
           </div>
@@ -232,7 +311,7 @@
             <label>Catégorie parente</label>
             <select v-model.number="form.parentId">
               <option :value="null">Aucune (catégorie racine)</option>
-              <option v-for="r in roots" :key="r.id" :value="r.id">{{ r.name }}</option>
+              <option v-for="r in roots" :key="r.id" :value="r.id">{{ iconPrefix(r.icon) }}{{ r.name }}</option>
             </select>
           </div>
           <div class="form-field" v-if="!form.parentId">
@@ -270,6 +349,22 @@
       @confirm="confirmMerge"
       @cancel="showMergeModal = false"
     />
+
+    <!-- Modal changement groupé de catégorie parente -->
+    <MergeModal
+      v-if="showReparentModal"
+      :title="`Changer la catégorie parente de ${reparentableIds.length} sous-catégories`"
+      description="Toutes les sous-catégories sélectionnées seront déplacées sous la catégorie choisie ci-dessous. Leur type (dépense/revenu) s'aligne automatiquement sur celui de la nouvelle catégorie parente."
+      target-label="Nouvelle catégorie parente"
+      :items="roots"
+      :option-label="r => iconPrefix(r.icon) + r.name"
+      v-model="reparentTargetId"
+      :confirming="reparenting"
+      confirm-label="Changer la catégorie parente"
+      confirming-label="Déplacement…"
+      @confirm="confirmReparent"
+      @cancel="showReparentModal = false"
+    />
   </div>
 </template>
 
@@ -294,8 +389,23 @@ const showMergeModal = ref(false)
 const mergeTargetId = ref(null)
 const merging = ref(false)
 
+const showReparentModal = ref(false)
+const reparentTargetId = ref(null)
+const reparenting = ref(false)
+
+// Id de la sous-catégorie en cours de glissement (drag-and-drop), et id de la
+// catégorie racine actuellement survolée par ce glissement (pour son
+// surlignage, voir .cat-row-dropzone).
+const draggedCategoryId = ref(null)
+const dragOverRootId = ref(null)
+
 function emptyForm() {
-  return { name: '', parentId: null, type: 'EXPENSE' }
+  return { name: '', parentId: null, type: 'EXPENSE', icon: '' }
+}
+
+/** Prefixe un nom de catégorie avec son icône (emoji), suivie d'un espace — chaîne vide si aucune icône. */
+function iconPrefix(icon) {
+  return icon ? `${icon} ` : ''
 }
 
 // Index Map (parentId -> enfants), precalcule une seule fois quand
@@ -328,19 +438,40 @@ const filteredRoots = computed(() => {
 /**
  * Répartition en deux colonnes : Dépenses à gauche, Revenus à droite.
  * Une catégorie marquée "Les deux" apparaît dans les deux colonnes,
- * puisqu'elle s'applique aux deux contextes.
+ * puisqu'elle s'applique aux deux contextes. Une racine masquée n'a sa
+ * place ici que si au moins une de ses sous-catégories reste visible (sa
+ * propre ligne restera alors masquée, voir le v-if sur .cat-row racine
+ * dans le template) : sinon elle et tout son groupe basculent entierement
+ * dans l'encart "Catégories masquées" plus bas.
  */
-const expenseRoots = computed(() => filteredRoots.value.filter(r => r.type === 'EXPENSE' || r.type === 'BOTH'))
-const incomeRoots = computed(() => filteredRoots.value.filter(r => r.type === 'INCOME' || r.type === 'BOTH'))
+function hasVisibleContent(root) {
+  return !root.hidden || children(root.id).some(child => !child.hidden)
+}
+const expenseRoots = computed(() =>
+  filteredRoots.value.filter(r => (r.type === 'EXPENSE' || r.type === 'BOTH') && hasVisibleContent(r))
+)
+const incomeRoots = computed(() =>
+  filteredRoots.value.filter(r => (r.type === 'INCOME' || r.type === 'BOTH') && hasVisibleContent(r))
+)
 
+/** Sous-catégories visibles d'une racine, pour les colonnes Dépenses/Revenus : les masquées en sont exclues (elles apparaissent dans l'encart dédié). */
 function filteredChildren(rootId) {
   const q = normalizeSearch(searchQuery.value)
-  const kids = children(rootId)
+  const kids = children(rootId).filter(child => !child.hidden)
   if (!q) return kids
   const root = roots.value.find(r => r.id === rootId)
   if (root && normalizeSearch(root.name).includes(q)) return kids
   return kids.filter(child => normalizeSearch(child.name).includes(q))
 }
+
+/** Catégories masquées (racines et sous-catégories), regroupées dans un encart à part sous les colonnes Dépenses/Revenus. */
+const hiddenCategories = computed(() => {
+  const q = normalizeSearch(searchQuery.value)
+  return categories.value
+    .filter(c => c.hidden)
+    .filter(c => !q || normalizeSearch(categoryFullLabel(c)).includes(q))
+    .sort((a, b) => categoryFullLabel(a).localeCompare(categoryFullLabel(b), 'fr'))
+})
 
 /**
  * Ids des catégories (racines + enfants) actuellement affichées dans une
@@ -399,9 +530,10 @@ function typeBadgeStyle(type) {
 }
 
 function categoryFullLabel(category) {
-  if (!category.parentId) return category.name
+  if (!category.parentId) return `${iconPrefix(category.icon)}${category.name}`
   const parent = categories.value.find(c => c.id === category.parentId)
-  return parent ? `${parent.name} : ${category.name}` : category.name
+  const ownLabel = `${iconPrefix(category.icon)}${category.name}`
+  return parent ? `${iconPrefix(parent.icon)}${parent.name} : ${ownLabel}` : ownLabel
 }
 
 async function load() {
@@ -425,7 +557,8 @@ async function save() {
   const payload = {
     name: form.value.name,
     type: form.value.type,
-    parentId: form.value.parentId
+    parentId: form.value.parentId,
+    icon: form.value.icon || null
   }
   await CategoriesAPI.create(payload)
   showModal.value = false
@@ -434,8 +567,12 @@ async function save() {
 
 async function remove(category) {
   if (!confirm(`Supprimer la catégorie "${category.name}" ?`)) return
-  await CategoriesAPI.remove(category.id)
-  await load()
+  try {
+    await CategoriesAPI.remove(category.id)
+    await load()
+  } catch (e) {
+    alert('Erreur lors de la suppression : ' + (e.response?.data?.error || e.message))
+  }
 }
 
 /**
@@ -466,7 +603,8 @@ function startEdit(category) {
   editForm.value = {
     name: category.name,
     parentId: category.parentId ?? null,
-    type: category.type
+    type: category.type,
+    icon: category.icon || ''
   }
   nextTick(() => firstEditField.value?.[0]?.focus?.())
 }
@@ -485,7 +623,8 @@ async function confirmEdit() {
   const payload = {
     name: editForm.value.name,
     type: editForm.value.type,
-    parentId: editForm.value.parentId
+    parentId: editForm.value.parentId,
+    icon: editForm.value.icon || null
   }
   const id = editingId.value
   editingId.value = null
@@ -519,6 +658,90 @@ async function confirmMerge() {
     alert('Erreur lors de la fusion : ' + (e.response?.data?.error || e.message))
   } finally {
     merging.value = false
+  }
+}
+
+/* --- Changement groupé de catégorie parente ---
+ * Comme pour l'édition inline d'une sous-catégorie (seule ligne qui expose
+ * déjà un sélecteur de parent), seules les sous-catégories sélectionnées
+ * sont concernées : une catégorie racine n'a pas de parent à changer ici
+ * (elle a ses propres sous-catégories, la reparenter les laisserait
+ * orphelines de niveau). Les racines éventuellement cochées en même temps
+ * (ex. via "sélectionner tout") sont simplement ignorées par cette action.
+ */
+const reparentableIds = computed(() =>
+  selectedCategoryObjects.value.filter(c => c.parentId != null).map(c => c.id)
+)
+
+function openReparentModal() {
+  reparentTargetId.value = roots.value[0]?.id ?? null
+  showReparentModal.value = true
+}
+
+async function confirmReparent() {
+  if (!reparentTargetId.value) return
+  reparenting.value = true
+  try {
+    const categoriesById = new Map(categories.value.map(c => [c.id, c]))
+    await Promise.all(reparentableIds.value.map(id => {
+      const category = categoriesById.get(id)
+      return CategoriesAPI.update(id, { name: category.name, type: category.type, parentId: reparentTargetId.value, icon: category.icon })
+    }))
+    showReparentModal.value = false
+    selectedIds.value = []
+    await load()
+  } catch (e) {
+    alert('Erreur lors du changement de catégorie parente : ' + (e.response?.data?.error || e.message))
+  } finally {
+    reparenting.value = false
+  }
+}
+
+/* --- Glisser-déposer une sous-catégorie vers une autre catégorie racine ---
+ * Seules les sous-catégories sont glissables (même limitation que le
+ * changement groupé ci-dessus : une racine avec ses propres sous-catégories
+ * ne peut pas devenir une sous-catégorie sans les rendre orphelines
+ * d'affichage). Les racines sont uniquement des cibles de dépôt.
+ */
+function onDragStart(event, child) {
+  draggedCategoryId.value = child.id
+  event.dataTransfer.effectAllowed = 'move'
+  // Certains navigateurs exigent des données pour autoriser le drop ; la
+  // valeur elle-meme n'est pas relue, draggedCategoryId suffit cote appli.
+  event.dataTransfer.setData('text/plain', String(child.id))
+}
+
+function onDragEnd() {
+  draggedCategoryId.value = null
+  dragOverRootId.value = null
+}
+
+function onRootDragOver(event, root) {
+  if (draggedCategoryId.value == null) return
+  event.preventDefault() // necessaire pour autoriser le drop (comportement par defaut = refus)
+  event.dataTransfer.dropEffect = 'move'
+  dragOverRootId.value = root.id
+}
+
+function onRootDragLeave(root) {
+  if (dragOverRootId.value === root.id) dragOverRootId.value = null
+}
+
+async function onRootDrop(event, root) {
+  event.preventDefault()
+  const id = draggedCategoryId.value
+  dragOverRootId.value = null
+  draggedCategoryId.value = null
+  if (id == null) return
+
+  const category = categories.value.find(c => c.id === id)
+  if (!category || category.parentId === root.id) return // pas de sous-categorie, ou deja sous cette racine
+
+  try {
+    await CategoriesAPI.update(id, { name: category.name, type: category.type, parentId: root.id, icon: category.icon })
+    await load()
+  } catch (e) {
+    alert('Erreur lors du déplacement : ' + (e.response?.data?.error || e.message))
   }
 }
 
@@ -562,6 +785,11 @@ onMounted(load)
 }
 .column-dot.expense { background: var(--coral); }
 .column-dot.income { background: var(--mint); }
+.column-dot.hidden { background: var(--text-faint); }
+
+.hidden-categories-card {
+  margin-top: 20px;
+}
 
 .cat-row {
   display: flex;
@@ -604,8 +832,25 @@ onMounted(load)
   width: 100%;
   padding: 4px 0;
 }
+/* Champ icône (emoji) : gabarit court et centré, plutôt que la largeur pleine par défaut d'un input. */
+.icon-field {
+  width: 44px;
+  flex: 0 0 auto;
+  text-align: center;
+}
 .cat-row:has(input[type="checkbox"]:checked) {
   background: var(--azure-dim);
+  border-radius: var(--radius-sm);
+}
+.cat-row[draggable="true"] {
+  cursor: grab;
+}
+.cat-row-dragging {
+  opacity: 0.4;
+}
+.cat-row-dropzone {
+  background: var(--azure-dim);
+  box-shadow: inset 0 0 0 2px var(--azure);
   border-radius: var(--radius-sm);
 }
 .text-muted {

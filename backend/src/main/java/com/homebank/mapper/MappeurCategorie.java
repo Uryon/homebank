@@ -17,6 +17,7 @@ public class MappeurCategorie {
                 .type(category.getType())
                 .hidden(category.isHidden())
                 .annualized(category.isAnnualized())
+                .icon(category.getIcon())
                 .build();
     }
 }

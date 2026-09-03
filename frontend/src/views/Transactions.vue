@@ -67,8 +67,8 @@
       </div>
 
       <div class="form-field" style="margin-left: auto;">
-        <label>Recherche (tiers, catégorie, montant, ou &gt; / &lt; / = un montant)</label>
-        <input v-model="searchQuery" placeholder="Ex : Carrefour, Salaire, 42,50 ou > 100" style="min-width: 260px;" />
+        <label title="Tiers, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Ou &gt; / &lt; / = un montant seul.">Recherche (tiers, catégorie, montant, ou &gt; / &lt; / = un montant)</label>
+        <input v-model="searchQuery" placeholder="Ex : Bouygues;29,99 ou > 100" style="min-width: 260px;" />
         <div v-if="amountQuery" class="text-hint">
           {{ amountSearchLoading ? 'Recherche…' : `${filteredTransactions.length} transaction(s) trouvée(s)` }}
         </div>
@@ -106,7 +106,7 @@
               <input
                 type="checkbox"
                 :checked="allPagedSelected"
-                title="Sélectionner/désélectionner toute la page"
+                title="Sélectionner/désélectionner toutes les transactions actuellement affichées"
                 @change="toggleSelectAllPaged"
               />
             </th>
@@ -152,14 +152,12 @@
       </table>
     </div>
 
-    <div v-if="filteredTransactions.length" class="pagination">
+    <div v-if="filteredTransactions.length" class="scroll-status">
       <span class="text-hint">
-        {{ filteredTransactions.length }} transaction(s) — page {{ currentPage }} / {{ totalPages }}
+        {{ pagedTransactions.length }} / {{ filteredTransactions.length }} transaction(s) affichée(s)
       </span>
-      <div class="pagination-buttons">
-        <button class="btn secondary" :disabled="currentPage <= 1" @click="currentPage--">‹ Précédent</button>
-        <button class="btn secondary" :disabled="currentPage >= totalPages" @click="currentPage++">Suivant ›</button>
-      </div>
+      <!-- Sentinelle observée pour charger le lot suivant en approchant du bas (voir loadMoreObserver) : rootMargin la declenche avant d'etre reellement visible, pour un chargement fluide pendant le scroll. -->
+      <div v-if="hasMoreToShow" ref="loadMoreSentinel" class="load-more-sentinel">Chargement…</div>
     </div>
 
     <div v-else class="empty-state">
@@ -382,8 +380,8 @@
 
         <div class="form-grid">
           <div class="form-field">
-            <label>Montant — 1ère partie</label>
-            <AmountInput v-model="splitForm.firstAmount" />
+            <label>Montant — 1ère partie {{ splitTransaction?.amount < 0 ? '(négatif = dépense)' : '(positif = revenu)' }}</label>
+            <AmountInput v-model="splitForm.firstAmount" :allow-relative="false" />
           </div>
           <div class="form-field">
             <label>Catégorie — 1ère partie</label>
@@ -434,7 +432,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   TransactionsAPI
@@ -764,48 +762,82 @@ const statusAndDateFiltered = computed(() => {
   })
 })
 
-const filteredTransactions = computed(() => {
-  const q = normalizeSearch(searchQuery.value)
-  if (!q || amountQuery.value) return statusAndDateFiltered.value
+/**
+ * Un critère (un des termes séparés par ";", déjà normalisé) matche cette
+ * transaction s'il est contenu dans le tiers, la catégorie, ou le montant
+ * (brut, en valeur absolue, ou formaté — virgule ou point acceptés).
+ */
+function transactionMatchesTerm(idx, term) {
+  if (idx.payeeNormalized.includes(term)) return true
+  if (idx.categoryNormalized.includes(term)) return true
+  const termAsAmount = term.replace(',', '.')
+  return (
+    idx.rawAmount.includes(termAsAmount) ||
+    idx.absAmount.includes(termAsAmount) ||
+    idx.amountFormattedNormalized.includes(term)
+  )
+}
 
-  const normalizedQuery = q.replace(',', '.')
+/**
+ * Plusieurs critères séparés par ";" sont tous exigés à la fois (ET), ex :
+ * "Bouygues;29,99" pour retrouver la transaction Bouygues de ce montant
+ * précis parmi plusieurs — chaque critère pris seul reste un simple
+ * "contient" (OR entre tiers/catégorie/montant), comme avant.
+ */
+const filteredTransactions = computed(() => {
+  if (amountQuery.value) return statusAndDateFiltered.value
+
+  const terms = searchQuery.value.split(';').map(normalizeSearch).filter(Boolean)
+  if (!terms.length) return statusAndDateFiltered.value
+
   const index = searchIndexById.value
 
   return statusAndDateFiltered.value.filter(t => {
     const idx = index.get(t.id)
-    if (!idx) return false
-
-    const payeeMatch = idx.payeeNormalized.includes(q)
-    const categoryMatch = idx.categoryNormalized.includes(q)
-
-    const amountMatch =
-      idx.rawAmount.includes(normalizedQuery) ||
-      idx.absAmount.includes(normalizedQuery) ||
-      idx.amountFormattedNormalized.includes(q)
-
-    return payeeMatch || categoryMatch || amountMatch
+    return idx && terms.every(term => transactionMatchesTerm(idx, term))
   })
 })
 
 /**
- * Pagination cote client : avec un historique de plusieurs milliers de
- * transactions, rendre TOUTES les lignes filtrees dans le DOM a chaque
- * frappe (un composant TransactionRow par ligne) rend la recherche
- * inutilisable (reconciliation de milliers de composants a chaque
- * caractere). On ne rend donc jamais plus de PAGE_SIZE lignes a la fois,
- * quelle que soit la taille de filteredTransactions.
+ * Chargement progressif au scroll cote client : avec un historique de
+ * plusieurs milliers de transactions, rendre TOUTES les lignes filtrees dans
+ * le DOM a chaque frappe (un composant TransactionRow par ligne) rend la
+ * recherche inutilisable (reconciliation de milliers de composants a chaque
+ * caractere). On ne rend donc au depart que PAGE_SIZE lignes, puis on
+ * augmente ce nombre par paliers de PAGE_SIZE au fil du scroll (voir
+ * loadMoreSentinel/loadMoreObserver plus bas) plutot que d'exposer une
+ * pagination Precedent/Suivant.
  */
 const PAGE_SIZE = 100
-const currentPage = ref(1)
+const visibleCount = ref(PAGE_SIZE)
 
-const totalPages = computed(() =>
-  Math.max(1, Math.ceil(filteredTransactions.value.length / PAGE_SIZE))
-)
+const pagedTransactions = computed(() => filteredTransactions.value.slice(0, visibleCount.value))
 
-const pagedTransactions = computed(() => {
-  const start = (currentPage.value - 1) * PAGE_SIZE
-  return filteredTransactions.value.slice(start, start + PAGE_SIZE)
+const hasMoreToShow = computed(() => visibleCount.value < filteredTransactions.value.length)
+
+function loadMore() {
+  if (!hasMoreToShow.value) return
+  visibleCount.value += PAGE_SIZE
+}
+
+/**
+ * Sentinelle placee juste apres le tableau : des qu'elle entre dans le
+ * viewport (ou approche, voir rootMargin), on charge le lot suivant. Le
+ * ref change d'element a chaque fois que la sentinelle apparait/disparait du
+ * DOM (v-if="hasMoreToShow"), d'ou le watch qui reobserve a chaque fois
+ * plutot qu'un observe() unique au montage.
+ */
+const loadMoreSentinel = ref(null)
+const loadMoreObserver = new IntersectionObserver((entries) => {
+  if (entries[0]?.isIntersecting) loadMore()
+}, { rootMargin: '600px' })
+
+watch(loadMoreSentinel, (el, oldEl) => {
+  if (oldEl) loadMoreObserver.unobserve(oldEl)
+  if (el) loadMoreObserver.observe(el)
 })
+
+onBeforeUnmount(() => loadMoreObserver.disconnect())
 
 /**
  * Recherche par montant avec operateur (">", "<", "=") : filtree directement
@@ -819,40 +851,42 @@ const amountSearchLoading = ref(false)
 let amountSearchTimer = null
 
 /**
- * Place currentPage sur la page contenant la transaction cochee `id` (voir
- * lastSelectedId), puis fait defiler la ligne correspondante jusqu'au centre
- * de l'ecran une fois le DOM a jour — pour la retrouver avec les
- * transactions voisines visibles autour d'elle. Si la transaction n'est plus
- * dans la liste filtree courante (ex : filtre "À traiter" actif et
- * transaction validee), retombe simplement sur la page 1.
+ * Etend visibleCount pour que la transaction cochee `id` (voir
+ * lastSelectedId) fasse partie du lot actuellement rendu, puis fait defiler
+ * la ligne correspondante jusqu'au centre de l'ecran une fois le DOM a jour
+ * — pour la retrouver avec les transactions voisines visibles autour d'elle.
+ * Si la transaction n'est plus dans la liste filtree courante (ex : filtre
+ * "À traiter" actif et transaction validee), retombe simplement sur le
+ * premier lot.
  */
-function goToSelectedTransactionPage(id) {
+function scrollToSelectedTransaction(id) {
   const index = filteredTransactions.value.findIndex(t => t.id === id)
   if (index === -1) {
-    currentPage.value = 1
+    visibleCount.value = PAGE_SIZE
     return
   }
-  currentPage.value = Math.floor(index / PAGE_SIZE) + 1
+  visibleCount.value = Math.max(visibleCount.value, Math.ceil((index + 1) / PAGE_SIZE) * PAGE_SIZE)
   nextTick(() => {
     document.querySelector(`tr[data-transaction-id="${id}"]`)
       ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   })
 }
 
-// Revenir en page 1 des qu'un filtre change le resultat, pour ne jamais
-// rester bloque sur une page devenue vide ou hors bornes — sauf quand la
-// recherche vient tout juste de se fermer (texte redevenu vide) alors qu'une
-// transaction est cochee : on se repositionne alors sur elle plutot que de
-// revenir en page 1 (voir goToSelectedTransactionPage ci-dessus).
+// Revenir au premier lot des qu'un filtre change le resultat, pour ne jamais
+// rester bloque sur un decompte devenu incoherent avec la nouvelle liste —
+// sauf quand la recherche vient tout juste de se fermer (texte redevenu
+// vide) alors qu'une transaction est cochee : on se repositionne alors sur
+// elle plutot que de revenir au debut (voir scrollToSelectedTransaction
+// ci-dessus).
 watch(
   [searchQuery, filterAccount, filterMonth, filterYear, pendingOnly, uncategorizedOnly, amountSearchResults],
   ([newSearch], [oldSearch]) => {
     const searchJustClosed = !!(oldSearch && oldSearch.trim()) && !(newSearch && newSearch.trim())
     if (searchJustClosed && lastSelectedId.value) {
-      goToSelectedTransactionPage(lastSelectedId.value)
+      scrollToSelectedTransaction(lastSelectedId.value)
       return
     }
-    currentPage.value = 1
+    visibleCount.value = PAGE_SIZE
   }
 )
 
@@ -1338,15 +1372,19 @@ onMounted(async () => {
   color: var(--text-primary);
 }
 
-.pagination {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.scroll-status {
   margin-top: 12px;
 }
-.pagination-buttons {
-  display: flex;
-  gap: 8px;
+
+/* Sentinelle invisible (juste un peu de hauteur pour que l'IntersectionObserver
+   ait quelque chose a observer) : le texte n'est qu'un repli si jamais elle
+   reste visible plus que le temps d'un rendu (chargement quasi instantane,
+   les donnees sont deja en memoire cote client, voir loadMore). */
+.load-more-sentinel {
+  padding: 14px 0;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
 }
 
 /* Montant de la 2e partie (modale de division) : lecture seule, calcule a

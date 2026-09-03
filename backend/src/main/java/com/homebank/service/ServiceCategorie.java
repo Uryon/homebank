@@ -39,6 +39,7 @@ public class ServiceCategorie {
     public Categorie create(CategorieDTO payload) {
         Categorie category = new Categorie();
         category.setName(payload.getName());
+        category.setIcon(payload.getIcon());
         if (payload.getParentId() != null) {
             Categorie parent = findById(payload.getParentId());
             category.setParent(parent);
@@ -55,6 +56,7 @@ public class ServiceCategorie {
     public Categorie update(Long id, CategorieDTO payload) {
         Categorie existing = findById(id);
         existing.setName(payload.getName());
+        existing.setIcon(payload.getIcon());
 
         if (payload.getParentId() != null) {
             if (payload.getParentId().equals(id)) {
@@ -79,7 +81,20 @@ public class ServiceCategorie {
         return categoryRepository.save(existing);
     }
 
+    /**
+     * Supprime une categorie. Les tiers qui l'avaient comme categorie par
+     * defaut (voir Tiers#category) sont d'abord detaches (categorie remise a
+     * null) plutot que de bloquer la suppression via la contrainte de cle
+     * etrangere : contrairement a une transaction, une categorie par defaut
+     * de tiers n'est qu'un raccourci de saisie, sa perte est sans consequence
+     * sur l'historique. Les transactions qui utilisent encore cette
+     * categorie, elles, continuent de bloquer la suppression (voir
+     * GlobalExceptionHandler) — il faut les reaffecter via "Fusionner".
+     */
+    @Transactional
     public void delete(Long id) {
+        Categorie category = findById(id);
+        payeeRepository.clearCategory(category);
         categoryRepository.deleteById(id);
     }
 
