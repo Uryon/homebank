@@ -33,7 +33,9 @@
         />
       </div>
 
-      <div class="form-field" style="align-self: flex-end;">
+      <div class="toolbar-divider" aria-hidden="true"></div>
+
+      <div class="toolbar-actions">
         <button
           class="btn"
           :class="{ secondary: !pendingOnly }"
@@ -42,9 +44,7 @@
         >
           À traiter ({{ pendingCount }})
         </button>
-      </div>
 
-      <div class="form-field" style="align-self: flex-end;">
         <button
           class="btn"
           :class="{ secondary: !uncategorizedOnly }"
@@ -53,9 +53,7 @@
         >
           Non catégorisées ({{ uncategorizedCount }})
         </button>
-      </div>
 
-      <div class="form-field" style="align-self: flex-end;">
         <button
           class="btn"
           :class="{ secondary: pendingCount === 0 }"
@@ -1253,6 +1251,26 @@ onMounted(async () => {
   background: var(--ink-800);
   z-index: 7;
   box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
+}
+
+/*
+ * Separe visuellement les filtres (Compte, Periode) des actions en masse
+ * (À traiter / Non categorisees / Tout valider) dans la barre d'outils :
+ * sans ca, les 6 champs/boutons se suivaient avec le meme poids visuel et le
+ * groupe "actions" se noyait parmi les filtres.
+ */
+.toolbar-divider {
+  align-self: stretch;
+  width: 1px;
+  margin: 2px 2px;
+  background: var(--line);
+}
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .text-hint {

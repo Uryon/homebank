@@ -70,8 +70,8 @@
       <td class="num" @click.stop>
         <span
           class="status-dot"
-          :class="transaction.validated ? 'validated' : 'pending'"
-          :title="transaction.validated ? 'Validée' : 'En attente de validation — cliquer pour valider'"
+          :class="transaction.validated ? 'validated' : (isFuture(transaction.date) ? 'future' : 'pending')"
+          :title="transaction.validated ? 'Validée' : (isFuture(transaction.date) ? 'Prévue — n\'a pas encore eu lieu, pas de rapprochement à faire' : 'En attente de validation — cliquer pour valider')"
           @click="$emit('toggle-validated', transaction)"
         >
           {{ transaction.validated ? '✓' : '' }}
@@ -377,6 +377,16 @@ tr.row-future:hover td {
 .status-dot.pending {
   background: var(--amber-dim);
   border: 2px solid var(--amber);
+}
+/*
+ * Transaction future en attente : ne reprend pas l'anneau ambre de .pending
+ * (reserve aux transactions deja effectuees qui attendent un rapprochement
+ * bancaire) — une transaction prevue n'a rien a rapprocher, l'ambre serait
+ * trompeur. Teinte neutre alignee sur .row-future ci-dessous.
+ */
+.status-dot.future {
+  background: var(--ink-700);
+  border: 2px solid var(--ink-600);
 }
 
 /*
