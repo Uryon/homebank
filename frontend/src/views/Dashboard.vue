@@ -20,7 +20,6 @@
         >{{ monthLabel }}</button>
         <button
           class="month-nav-btn"
-          :disabled="!canGoToNextMonth"
           @click="goToNextMonth"
           title="Mois suivant"
           aria-label="Mois suivant"
@@ -80,7 +79,9 @@
       </div>
       <canvas ref="forecastChart" height="90"></canvas>
       <p class="chart-note">
-        Le prévisionnel est estimé à partir de la variation moyenne du solde observée sur les 12 derniers mois.
+        Le prévisionnel est estimé à partir de la variation moyenne du solde observée sur les 12 derniers mois,
+        soit <strong :class="monthlyTrend >= 0 ? 'amount positive' : 'amount negative'">{{ formatAmount(monthlyTrend) }}</strong>
+        ajoutés au solde chaque mois sur la partie prévisionnelle.
         <template v-if="hasLoans">
           La courbe inclut aussi le capital déjà remboursé sur l'ensemble de vos prêts (connu à l'avance,
           indépendant de la projection de solde).
@@ -243,6 +244,7 @@
             <tr>
               <td class="category-sticky summary-label">Revenus</td>
               <td v-for="month in monthlyAnalysis.summary" :key="'summary-income-' + month.key" class="num"
+                  :class="anomalyClass(month.income, summaryRowValues.income)"
                   @mouseenter="scheduleHover($event, 'Revenus — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income'))"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(month.income) }}
@@ -261,6 +263,7 @@
             <tr>
               <td class="category-sticky summary-label">Dépenses</td>
               <td v-for="month in monthlyAnalysis.summary" :key="'summary-expense-' + month.key" class="num"
+                  :class="anomalyClass(month.expenses, summaryRowValues.expenses)"
                   @mouseenter="scheduleHover($event, 'Dépenses — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense'))"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(month.expenses) }}
@@ -279,7 +282,8 @@
             <tr class="monthly-balance-row">
               <td class="category-sticky summary-label"><strong>Solde du mois</strong></td>
               <td v-for="month in monthlyAnalysis.summary" :key="'summary-net-' + month.key"
-                  class="num" :class="Number(month.net) >= 0 ? 'positive' : 'negative'"
+                  class="num"
+                  :class="[Number(month.net) >= 0 ? 'positive' : 'negative', anomalyClass(month.net, summaryRowValues.net)]"
                   @mouseenter="scheduleHover($event, 'Solde — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, null))"
                   @mouseleave="onCellLeave">
                 <strong>{{ formatAmount(month.net) }}</strong>
@@ -332,7 +336,7 @@
                 <strong>{{ iconPrefix(group.categoryId) }}{{ group.name }}</strong>
               </td>
               <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                  :class="{ 'zero-value': !Number(group.values[month.key]) }"
+                  :class="[{ 'zero-value': !Number(group.values[month.key]) }, anomalyClass(group.values[month.key], Object.values(group.values))]"
                   @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', groupCategoryFilter(group)))"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(group.values[month.key]) }}
@@ -356,7 +360,7 @@
                   └ {{ iconPrefix(child.categoryId) }}{{ child.name }}
                 </td>
                 <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                    :class="{ 'zero-value': !Number(child.values[month.key]) }"
+                    :class="[{ 'zero-value': !Number(child.values[month.key]) }, anomalyClass(child.values[month.key], Object.values(child.values))]"
                     @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', childCategoryFilter(child)))"
                     @mouseleave="onCellLeave">
                   {{ formatAmount(child.values[month.key]) }}
@@ -431,7 +435,7 @@
                 <strong>{{ iconPrefix(group.categoryId) }}{{ group.name }}</strong>
               </td>
               <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                  :class="{ 'zero-value': !Number(group.values[month.key]) }"
+                  :class="[{ 'zero-value': !Number(group.values[month.key]) }, anomalyClass(group.values[month.key], Object.values(group.values))]"
                   @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', groupCategoryFilter(group)))"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(group.values[month.key]) }}
@@ -455,7 +459,7 @@
                   └ {{ iconPrefix(child.categoryId) }}{{ child.name }}
                 </td>
                 <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                    :class="{ 'zero-value': !Number(child.values[month.key]) }"
+                    :class="[{ 'zero-value': !Number(child.values[month.key]) }, anomalyClass(child.values[month.key], Object.values(child.values))]"
                     @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', childCategoryFilter(child)))"
                     @mouseleave="onCellLeave">
                   {{ formatAmount(child.values[month.key]) }}
@@ -545,6 +549,9 @@ const savingsChart = ref(null)
 let forecastChartInstance = null
 let savingsChartInstance = null
 const hasLoans = ref(false)
+
+/** Variation mensuelle moyenne appliquee a la partie previsionnelle de la courbe de solde (voir ServiceRapport#balanceForecast, champ "monthlyTrend"). */
+const monthlyTrend = ref(0)
 
 const exporting = ref(false)
 
@@ -757,18 +764,8 @@ const lastCompletedMonthStart = (() => {
   return new Date(now.getFullYear(), now.getMonth() - 1, 1)
 })()
 
-/**
- * Borne haute de la navigation : on peut avancer dans le futur (les cartes
- * revenus/dépenses/tableaux affichent alors simplement "pas de données"),
- * jusqu'à l'horizon du graphique prévisionnel (12 mois). Au-delà, le solde
- * projeté ne fait que prolonger la même tendance, sans information nouvelle.
- */
-const maxFutureMonthStart = new Date(lastCompletedMonthStart.getFullYear(), lastCompletedMonthStart.getMonth() + 12, 1)
-
-/** Mois actuellement affiché par les cartes "Revenus/Dépenses/Net (mois)", navigable via les flèches du tableau de bord. */
+/** Mois actuellement affiché par les cartes "Revenus/Dépenses/Net (mois)", navigable via les flèches du tableau de bord — sans limite haute (les cartes/tableaux affichent alors simplement "pas de données", et le solde projeté prolonge la tendance, voir renderForecastChart / ServiceRapport#balanceForecast). */
 const viewedMonthStart = ref(lastCompletedMonthStart)
-
-const canGoToNextMonth = computed(() => viewedMonthStart.value < maxFutureMonthStart)
 
 function monthRangeOf(monthStart) {
   const to = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0)
@@ -789,7 +786,6 @@ function goToPreviousMonth() {
 }
 
 function goToNextMonth() {
-  if (!canGoToNextMonth.value) return
   viewedMonthStart.value = new Date(viewedMonthStart.value.getFullYear(), viewedMonthStart.value.getMonth() + 1, 1)
   loadMonthlyReports()
 }
@@ -898,6 +894,40 @@ function monthLabelFor(key) {
   return monthLabelByKey.value.get(key) || key
 }
 
+/** Ecart (en ecarts-types) au-dela duquel une case mensuelle est signalee comme anomalie par rapport a la moyenne de sa ligne. */
+const ANOMALY_STDDEV_THRESHOLD = 1.5
+
+/** Moyenne et ecart-type (population) d'un tableau de valeurs numeriques. */
+function meanStdDev(values) {
+  const nums = values.map(Number)
+  const mean = nums.reduce((sum, v) => sum + v, 0) / (nums.length || 1)
+  const variance = nums.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (nums.length || 1)
+  return { mean, stdDev: Math.sqrt(variance) }
+}
+
+/**
+ * Signale (classe "monthly-anomaly") une case dont la valeur s'ecarte de plus
+ * de ANOMALY_STDDEV_THRESHOLD ecarts-types de la moyenne des `rowValues`
+ * (les valeurs des 12 mois de la meme ligne) — met en evidence les mois
+ * atypiques (depense inhabituelle, revenu exceptionnel...) au premier coup
+ * d'œil. Aucune case signalee si la ligne est quasi constante (stdDev nul).
+ */
+function anomalyClass(value, rowValues) {
+  const { mean, stdDev } = meanStdDev(rowValues)
+  if (!stdDev) return {}
+  return { 'monthly-anomaly': Math.abs(Number(value) - mean) / stdDev > ANOMALY_STDDEV_THRESHOLD }
+}
+
+/** Valeurs mensuelles des lignes Revenus/Depenses/Solde du tableau "Resume mensuel", pour anomalyClass. */
+const summaryRowValues = computed(() => {
+  const summary = monthlyAnalysis.value?.summary || []
+  return {
+    income: summary.map(m => m.income),
+    expenses: summary.map(m => m.expenses),
+    net: summary.map(m => m.net)
+  }
+})
+
 function toggleMonthlyGroup(type, key) {
   collapsedMonthlyGroups.value[type][key] = !collapsedMonthlyGroups.value[type][key]
 }
@@ -950,9 +980,10 @@ async function loadMonthlyReports() {
   whereMoneyData.value = whereMoney
   monthlyAnalysis.value = monthly
   hasLoans.value = loansList.length > 0
+  monthlyTrend.value = Number(forecast.monthlyTrend)
 
   await nextTick()
-  renderForecastChart(forecast, buildLoanOwnedSeries(forecast, loansList, schedules))
+  renderForecastChart(forecast.points, buildLoanOwnedSeries(forecast.points, loansList, schedules))
   renderSavingsChart(savings)
   renderWhereMoneyChart(whereMoneyData.value)
 }
@@ -1641,6 +1672,21 @@ onMounted(loadDashboard)
 .monthly-analysis-table .num.zero-value {
   color: var(--text-faint);
   opacity: 0.45;
+}
+
+/*
+ * Case dont la valeur s'ecarte fortement (voir anomalyClass/ANOMALY_STDDEV_THRESHOLD)
+ * de la moyenne des 12 mois de sa ligne : liseret corail pour la reperer d'un
+ * coup d'œil au milieu du tableau — box-shadow inset plutot qu'une bordure
+ * classique pour ne pas decaler la mise en page des cellules voisines (compte
+ * pour l'element sans agrandir sa boite). Pas de fond colore ici : perdrait
+ * en visibilite sur les lignes a fond alterne (category-group-alt ci-dessous,
+ * de specificite CSS superieure sur cette propriete).
+ */
+.monthly-analysis-table .num.monthly-anomaly {
+  box-shadow: inset 0 0 0 2px var(--coral);
+  color: var(--coral);
+  font-weight: 700;
 }
 
 /*

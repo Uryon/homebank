@@ -438,10 +438,52 @@ class ServiceRapportTest {
         Compte account = compte(1L, "1000.00");
         when(accountRepository.findAll()).thenReturn(List.of(account));
         when(transactionRepository.sumAmountByAccountIdAsOf(eq(1L), any())).thenReturn(BigDecimal.ZERO);
+        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of());
 
-        List<Map<String, Object>> result = service.balanceForecast(null, null);
+        Map<String, Object> result = service.balanceForecast(null, null);
 
-        assertThat(result).hasSize(24);
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> points = (List<Map<String, Object>>) result.get("points");
+        assertThat(points).hasSize(24);
+    }
+
+    @Test
+    void balanceForecast_exposeLaTendanceMensuelleMoyenneBaseeSurLeNet() {
+        Compte account = compte(1L, "1000.00");
+        when(accountRepository.findAll()).thenReturn(List.of(account));
+        when(transactionRepository.sumAmountByAccountIdAsOf(eq(1L), any())).thenReturn(BigDecimal.ZERO);
+        // Aucune transaction sur les 12 mois de reference -> net moyen nul,
+        // quel que soit le solde reel des comptes (voir aussi le test dedie
+        // au calcul base sur le "net" ci-dessous).
+        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of());
+
+        Map<String, Object> result = service.balanceForecast(null, null);
+
+        assertThat(result).containsEntry("monthlyTrend", BigDecimal.ZERO.setScale(2, java.math.RoundingMode.HALF_UP));
+    }
+
+    @Test
+    void balanceForecast_ignoreLesVirementsEtLesTransactionsExceptionnellesDansLaTendance() {
+        Compte account = compte(1L, "1000.00");
+        when(accountRepository.findAll()).thenReturn(List.of(account));
+        when(transactionRepository.sumAmountByAccountIdAsOf(eq(1L), any())).thenReturn(BigDecimal.ZERO);
+
+        LocalDate lastMonthStart = LocalDate.now().withDayOfMonth(1).minusMonths(1);
+        Transaction normale = transaction(1L, account, lastMonthStart.plusDays(1), "100.00", null);
+        Transaction virement = transaction(2L, account, lastMonthStart.plusDays(2), "5000.00", null);
+        virement.setPaymentMode(ModePaiement.TRANSFER);
+        Transaction exceptionnelle = transaction(3L, account, lastMonthStart.plusDays(3), "3000.00", null);
+        exceptionnelle.setExceptional(true);
+
+        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of());
+        when(transactionRepository.findByDateBetween(eq(lastMonthStart), any()))
+                .thenReturn(List.of(normale, virement, exceptionnelle));
+
+        Map<String, Object> result = service.balanceForecast(null, null);
+
+        // Seule la transaction normale (100.00) compte sur ce mois -> moyenne sur 12 mois = 100/12.
+        assertThat(result).containsEntry("monthlyTrend",
+                new BigDecimal("100.00").divide(BigDecimal.valueOf(12), 2, java.math.RoundingMode.HALF_UP));
     }
 
     @Test
@@ -449,6 +491,7 @@ class ServiceRapportTest {
         Compte account = compte(5L, "500.00");
         when(accountRepository.findById(5L)).thenReturn(Optional.of(account));
         when(transactionRepository.sumAmountByAccountIdAsOf(eq(5L), any())).thenReturn(BigDecimal.ZERO);
+        when(transactionRepository.findByAccountIdAndDateBetween(eq(5L), any(), any())).thenReturn(List.of());
 
         service.balanceForecast(5L, null);
 

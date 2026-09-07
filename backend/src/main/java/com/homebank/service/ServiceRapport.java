@@ -16,6 +16,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 @Service
@@ -67,8 +68,10 @@ public class ServiceRapport {
      * meme quand la date reelle du paiement elle-meme est hors periode. Une
      * transaction d'une categorie annuelle ne compte donc jamais en une fois
      * sur son seul mois de paiement : uniquement lissee sur les 12 mois
-     * suivants. Le solde reel des comptes (balanceForecast) n'utilise jamais
-     * cette methode : il reste base sur la date et le montant reels.
+     * suivants. Les points "historique"/"previsionnel" de balanceForecast
+     * restent bases sur le solde reel des comptes (balanceAsOf, jamais lisse) ;
+     * seule sa tendance mensuelle moyenne (avgMonthlyNet) passe par summary()
+     * et donc par cette methode.
      * <p>
      * Une transaction marquee "exceptionnelle" (voir Transaction#exceptional)
      * est totalement exclue de attributedTransactions, quel que soit le
@@ -296,8 +299,24 @@ public class ServiceRapport {
      * termine, il releve deja entierement du previsionnel. Chaque point
      * precise son "type" (historique | previsionnel) pour permettre au
      * frontend de les distinguer visuellement.
+     * La navigation dans le tableau de bord n'est plus bornee dans le futur :
+     * si la fenetre affichee (12 mois avant/apres referenceMonth) ne touche
+     * plus le mois reel en cours, "projected" est d'abord avance du nombre de
+     * mois qui separent aujourd'hui du debut de cette fenetre, pour que la
+     * tendance continue de composer mois par mois au lieu d'etre sous-estimee.
+     * Le resultat expose aussi "monthlyTrend" (la variation mensuelle moyenne
+     * elle-meme, voir avgMonthlyNet) a cote de "points", pour que le frontend
+     * puisse afficher le montant ajoute chaque mois a la courbe previsionnelle.
+     * <p>
+     * avgMonthlyNet est la moyenne du "net" (revenus - depenses) des 12 vrais
+     * derniers mois termines, calcule via {@link #summary} exactement comme
+     * partout ailleurs dans le tableau de bord (virements, transactions
+     * futures et marquees "exceptionnelles" exclus, voir isExcludedFromReports)
+     * — plutot que l'ecart brut de solde entre compte, qui aurait inclus ces
+     * mouvements ponctuels et rendu la tendance incoherente avec le "Net"
+     * affiche ailleurs (cartes Revenus/Depenses, Resume mensuel).
      */
-    public List<Map<String, Object>> balanceForecast(Long accountId, LocalDate referenceMonth) {
+    public Map<String, Object> balanceForecast(Long accountId, LocalDate referenceMonth) {
         List<Map<String, Object>> result = new ArrayList<>();
         LocalDate firstOfCurrentMonth = anchorMonth(referenceMonth);
         LocalDate currentMonthStart = LocalDate.now(ZoneId.systemDefault()).withDayOfMonth(1);
@@ -305,18 +324,13 @@ public class ServiceRapport {
         // chaque appel de balanceAsOf (findAll()/findById() repete).
         List<Compte> accounts = loadAccounts(accountId);
 
-        List<BigDecimal> trendBalances = new ArrayList<>();
+        BigDecimal totalNet = BigDecimal.ZERO;
         for (int i = 12; i >= 1; i--) {
-            LocalDate monthEnd = currentMonthStart.minusMonths(i).plusMonths(1).minusDays(1);
-            trendBalances.add(balanceAsOf(monthEnd, accounts));
+            LocalDate monthStart = currentMonthStart.minusMonths(i);
+            LocalDate monthEnd = monthStart.plusMonths(1).minusDays(1);
+            totalNet = totalNet.add((BigDecimal) summary(monthStart, monthEnd, accountId).get("net"));
         }
-        BigDecimal avgMonthlyNet = BigDecimal.ZERO;
-        if (trendBalances.size() >= 2) {
-            BigDecimal totalChange = trendBalances.get(trendBalances.size() - 1)
-                    .subtract(trendBalances.get(0));
-            avgMonthlyNet = totalChange.divide(
-                    BigDecimal.valueOf((long) trendBalances.size() - 1), 2, RoundingMode.HALF_UP);
-        }
+        BigDecimal avgMonthlyNet = totalNet.divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
 
         // Chaque point = le precedent + la variation mensuelle moyenne des
         // qu'on entre dans le previsionnel, en partant du dernier solde reel
@@ -324,7 +338,19 @@ public class ServiceRapport {
         // mois en cours melangerait donnees reelles partielles et moyenne,
         // avec un point previsionnel incoherent par rapport aux mois
         // suivants (ex : en baisse alors que la tendance moyenne monte).
-        BigDecimal projected = trendBalances.get(trendBalances.size() - 1);
+        BigDecimal projected = balanceAsOf(currentMonthStart.minusDays(1), accounts);
+
+        // Navigation loin dans le futur (au-dela de l'horizon usuel de 12
+        // mois) : le debut de la fenetre affichee peut lui-meme etre deja
+        // dans le previsionnel. Sans ce rattrapage, la boucle ci-dessous ne
+        // composerait qu'un seul mois de tendance sur ce premier point, quel
+        // que soit le nombre de mois reellement ecoules depuis aujourd'hui.
+        LocalDate windowStart = firstOfCurrentMonth.minusMonths(12);
+        long monthsBeforeWindow = ChronoUnit.MONTHS.between(currentMonthStart, windowStart);
+        if (monthsBeforeWindow > 0) {
+            projected = projected.add(avgMonthlyNet.multiply(BigDecimal.valueOf(monthsBeforeWindow)));
+        }
+
         for (int i = -12; i <= 11; i++) {
             LocalDate monthStart = firstOfCurrentMonth.plusMonths(i);
             LocalDate monthEnd = monthStart.plusMonths(1).minusDays(1);
@@ -337,7 +363,10 @@ public class ServiceRapport {
             }
         }
 
-        return result;
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("points", result);
+        response.put("monthlyTrend", avgMonthlyNet);
+        return response;
     }
 
     /**

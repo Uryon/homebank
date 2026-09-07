@@ -56,9 +56,14 @@ public class ControleurRapport {
         return reportService.monthlySavings(months, accountId, referenceMonth);
     }
 
-    /** Solde : 12 mois historiques + present + 12 mois prevus, ancres sur referenceMonth (omis = dernier mois calendaire deja termine). */
+    /**
+     * Solde : 12 mois historiques + present + 12 mois prevus, ancres sur
+     * referenceMonth (omis = dernier mois calendaire deja termine). Renvoie
+     * "points" (la serie) et "monthlyTrend" (variation mensuelle moyenne
+     * appliquee a la partie previsionnelle, voir ServiceRapport#balanceForecast).
+     */
     @GetMapping("/balance-forecast")
-    public List<Map<String, Object>> balanceForecast(
+    public Map<String, Object> balanceForecast(
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate referenceMonth) {
         return reportService.balanceForecast(accountId, referenceMonth);
