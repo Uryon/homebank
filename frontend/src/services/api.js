@@ -27,6 +27,8 @@ export const TransactionsAPI = {
     create: (payload) => api.post('/transactions', payload).then(r => r.data),
     update: (id, payload) => api.put(`/transactions/${id}`, payload).then(r => r.data),
     remove: (id) => api.delete(`/transactions/${id}`),
+    removeBulk: (ids) => api.delete('/transactions/bulk', { data: ids }).then(r => r.data),
+    removePending: () => api.delete('/transactions/pending').then(r => r.data),
     split: (id, payload) => api.post(`/transactions/${id}/split`, payload).then(r => r.data),
     validateAll: () => api.post('/transactions/validate-all').then(r => r.data),
     toggleValidated: (id) => api.post(`/transactions/${id}/toggle-validated`).then(r => r.data),

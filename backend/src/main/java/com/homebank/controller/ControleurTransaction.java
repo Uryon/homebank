@@ -150,4 +150,21 @@ public class ControleurTransaction {
         transactionService.delete(id);
         return ResponseEntity.noContent().build();
     }
+
+    /**
+     * Supprime plusieurs transactions a la fois (ids fournis par la selection
+     * multiple de l'onglet Transactions).
+     */
+    @DeleteMapping("/bulk")
+    public Map<String, Integer> deleteBulk(@RequestBody List<Long> ids) {
+        return Map.of("deleted", transactionService.deleteBulk(ids));
+    }
+
+    /**
+     * Supprime toutes les transactions en attente (non validees).
+     */
+    @DeleteMapping("/pending")
+    public Map<String, Integer> deletePending() {
+        return Map.of("deleted", transactionService.deleteAllPending());
+    }
 }

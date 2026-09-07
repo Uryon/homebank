@@ -310,6 +310,55 @@ public class ServiceTransaction {
     }
 
     /**
+     * Supprime plusieurs transactions a la fois (selection multiple de
+     * l'onglet Transactions) : meme empreinte de suppression (recordDeletion)
+     * qu'une suppression unitaire (voir delete), pour qu'un futur reimport du
+     * releve source ne les fasse pas reapparaitre. Renvoie le nombre de
+     * transactions effectivement supprimees.
+     */
+    @Transactional
+    public int deleteBulk(List<Long> ids) {
+        return deleteTransactions(ids, true);
+    }
+
+    /**
+     * Supprime toutes les transactions en attente (non validees) — pendant
+     * equivalent de validateAllPending. Contrairement a deleteBulk, ne laisse
+     * PAS d'empreinte de suppression (recordDeletion) : une transaction en
+     * attente n'a jamais ete rapprochee/confirmee, ce nettoyage sert
+     * generalement a repartir d'une base propre avant un reimport du meme
+     * releve, qui doit alors pouvoir la recreer normalement plutot que de la
+     * rejeter a tort comme doublon.
+     */
+    @Transactional
+    public int deleteAllPending() {
+        List<Long> pendingIds = transactionRepository.findByValidatedFalse().stream()
+                .map(Transaction::getId)
+                .toList();
+        return pendingIds.isEmpty() ? 0 : deleteTransactions(pendingIds, false);
+    }
+
+    /** Suppression en masse factorisee entre deleteBulk et deleteAllPending (voir leur javadoc pour la difference de comportement sur recordTombstone). */
+    private int deleteTransactions(List<Long> ids, boolean recordTombstone) {
+        if (ids == null || ids.isEmpty()) {
+            throw new IllegalArgumentException("Aucune transaction selectionnee");
+        }
+
+        List<Transaction> transactions = transactionRepository.findAllById(ids);
+        List<Tiers> orphanCandidates = new ArrayList<>();
+        for (Transaction t : transactions) {
+            if (recordTombstone) recordDeletion(t);
+            if (t.getPayee() != null) orphanCandidates.add(t.getPayee());
+        }
+        transactionRepository.deleteAll(transactions);
+
+        cleanupOrphanPayees(orphanCandidates);
+        log.info("Suppression en masse de {} transaction(s) (empreinte de suppression : {})", transactions.size(), recordTombstone);
+
+        return transactions.size();
+    }
+
+    /**
      * Enregistre une empreinte de la transaction avant sa suppression (voir
      * TransactionSupprimee), pour que ServiceImport#isDuplicate la reconnaisse
      * et evite de la reimporter si le releve bancaire source la contient

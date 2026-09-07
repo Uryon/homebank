@@ -38,6 +38,9 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
 
     List<Transaction> findByPeriodicExpenseTrueOrderByDateDescIdDesc();
 
+    /** Transactions en attente de validation (rapprochement bancaire), pour la suppression en masse. */
+    List<Transaction> findByValidatedFalse();
+
     /**
      * Transactions dont la categorie est marquee "annuelle" (lissees sur 12
      * mois dans les rapports, voir Categorie#annualized /

@@ -62,6 +62,15 @@
         >
           {{ validating ? 'Validation…' : `Tout valider (${pendingCount} en attente)` }}
         </button>
+
+        <button
+          class="btn danger"
+          :class="{ secondary: pendingCount === 0 }"
+          :disabled="pendingCount === 0 || deletingPending"
+          @click="deletePending"
+        >
+          {{ deletingPending ? 'Suppression…' : `Supprimer les non validées (${pendingCount})` }}
+        </button>
       </div>
 
       <div class="form-field" style="margin-left: auto;">
@@ -79,6 +88,9 @@
         Total : {{ formatAmount(selectedTotal) }}
       </span>
       <button class="btn" @click="openBulkEdit">Modifier en masse</button>
+      <button class="btn danger" :disabled="deletingSelection" @click="deleteSelected">
+        {{ deletingSelection ? 'Suppression…' : 'Supprimer la sélection' }}
+      </button>
       <button class="btn secondary" @click="clearSelection">Désélectionner tout</button>
     </div>
 
@@ -733,7 +745,13 @@ const searchIndexById = computed(() => {
       categoryNormalized: normalizeSearch(labels.get(t.categoryId) || ''),
       rawAmount: String(t.amount ?? '').toLowerCase(),
       absAmount: String(Math.abs(t.amount ?? 0)),
-      amountFormattedNormalized: normalizeSearch(formatAmount(t.amount))
+      // Montant formate ("0,60 €") avec la virgule decimale remplacee par un
+      // point, pour que la recherche matche qu'on tape "0,60" ou "0.60" (voir
+      // transactionMatchesTerm, qui convertit le terme tape de la meme facon).
+      // Sans ca, un montant a 2 decimales tape avec un point (ex : "0.60")
+      // ne matchait ni ce champ (virgule attendue) ni rawAmount/absAmount
+      // (qui n'ont pas le zero final, ex : "0.6" pour 0,60€).
+      amountFormattedNormalized: normalizeSearch(formatAmount(t.amount)).replace(',', '.')
     })
   }
   return index
@@ -780,7 +798,7 @@ function transactionMatchesTerm(idx, term) {
   return (
     idx.rawAmount.includes(termAsAmount) ||
     idx.absAmount.includes(termAsAmount) ||
-    idx.amountFormattedNormalized.includes(term)
+    idx.amountFormattedNormalized.includes(termAsAmount)
   )
 }
 
@@ -1169,6 +1187,37 @@ async function validateAll() {
     await load()
   } finally {
     validating.value = false
+  }
+}
+
+const deletingPending = ref(false)
+
+/** Supprime d'un coup toutes les transactions en attente de validation, sans passer par la selection manuelle. */
+async function deletePending() {
+  if (pendingCount.value === 0) return
+  if (!confirm(`Supprimer définitivement les ${pendingCount.value} transaction(s) non validée(s) ?`)) return
+  deletingPending.value = true
+  try {
+    await TransactionsAPI.removePending()
+    await load()
+  } finally {
+    deletingPending.value = false
+  }
+}
+
+const deletingSelection = ref(false)
+
+/** Supprime d'un coup toutes les transactions actuellement cochees (voir selectedIds). */
+async function deleteSelected() {
+  if (!selectedIds.value.size) return
+  if (!confirm(`Supprimer définitivement les ${selectedIds.value.size} transaction(s) sélectionnée(s) ?`)) return
+  deletingSelection.value = true
+  try {
+    await TransactionsAPI.removeBulk(Array.from(selectedIds.value))
+    clearSelection()
+    await load()
+  } finally {
+    deletingSelection.value = false
   }
 }
 
