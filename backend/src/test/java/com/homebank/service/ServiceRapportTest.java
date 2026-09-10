@@ -16,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -347,6 +348,71 @@ class ServiceRapportTest {
                 .containsEntry("savings", new BigDecimal("-200.00"));
     }
 
+    /**
+     * Navigue vers le mois calendaire reel en cours (referenceMonth =
+     * currentMonthStart, meme situation qu'un clic sur "mois suivant" depuis
+     * le dernier mois complet par defaut) : ce dernier point est
+     * previsionnel, rempli avec avgMonthlyNetOverTrailing12Months — la
+     * moyenne sur les 12 VRAIS derniers mois (TOUJOURS divisee par 12, mois
+     * sans transaction inclus), plutot qu'une epargne reelle forcement
+     * nulle.
+     */
+    @Test
+    void monthlySavings_moisCourantEnCours_estPrevisionnelRempliParLaMoyenneDesMoisPasses() {
+        LocalDate currentMonthStart = LocalDate.now().withDayOfMonth(1);
+        Compte account = compte(1L, "0");
+        Transaction moisMoins2 = transaction(1L, account, currentMonthStart.minusMonths(2).plusDays(5), "1000.00", null);
+        Transaction moisMoins1 = transaction(2L, account, currentMonthStart.minusMonths(1).plusDays(5), "-200.00", null);
+        when(transactionRepository.findByDateBetween(any(), any())).thenAnswer(inv -> {
+            LocalDate from = inv.getArgument(0);
+            if (from.equals(currentMonthStart.minusMonths(2))) return List.of(moisMoins2);
+            if (from.equals(currentMonthStart.minusMonths(1))) return List.of(moisMoins1);
+            return List.of();
+        });
+
+        List<Map<String, Object>> result = service.monthlySavings(3, null, currentMonthStart);
+
+        assertThat(result).hasSize(3);
+        assertThat(result.get(0))
+                .containsEntry("date", currentMonthStart.minusMonths(2).toString())
+                .containsEntry("savings", new BigDecimal("1000.00"))
+                .containsEntry("forecast", false);
+        assertThat(result.get(1))
+                .containsEntry("date", currentMonthStart.minusMonths(1).toString())
+                .containsEntry("savings", new BigDecimal("-200.00"))
+                .containsEntry("forecast", false);
+        // Moyenne sur les 12 VRAIS derniers mois (dont les 2 ci-dessus, le reste a 0) : (1000 - 200) / 12 = 66.67.
+        assertThat(result.get(2))
+                .containsEntry("date", currentMonthStart.toString())
+                .containsEntry("savings", new BigDecimal("66.67"))
+                .containsEntry("forecast", true);
+    }
+
+    /**
+     * Navigue tres loin dans le futur : la fenetre affichee (monthsBack
+     * points avant referenceMonth) ne touche plus du tout les 12 vrais
+     * derniers mois, mais la projection doit rester la MEME que juste apres
+     * le mois calendaire en cours — jamais nulle.
+     */
+    @Test
+    void monthlySavings_naviguerTresLoinDansLeFutur_gardeLaMemeProjectionQueLeMoisCourant() {
+        LocalDate currentMonthStart = LocalDate.now().withDayOfMonth(1);
+        Compte account = compte(1L, "0");
+        Transaction moisMoins1 = transaction(1L, account, currentMonthStart.minusMonths(1).plusDays(5), "2400.00", null);
+        when(transactionRepository.findByDateBetween(any(), any())).thenAnswer(inv -> {
+            LocalDate from = inv.getArgument(0);
+            return from.equals(currentMonthStart.minusMonths(1)) ? List.of(moisMoins1) : List.of();
+        });
+
+        List<Map<String, Object>> result = service.monthlySavings(1, null, currentMonthStart.plusMonths(15));
+
+        // Moyenne sur les 12 VRAIS derniers mois (une seule transaction a 2400) : 2400 / 12 = 200.00.
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0))
+                .containsEntry("savings", new BigDecimal("200.00"))
+                .containsEntry("forecast", true);
+    }
+
     // --- periodicExpensesSummary ---
 
     @Test
@@ -566,5 +632,113 @@ class ServiceRapportTest {
         List<Map<String, Object>> expenseRows = (List<Map<String, Object>>) result.get("expenses");
         assertThat(months).hasSize(12);
         assertThat(expenseRows).isEmpty();
+    }
+
+    /**
+     * Navigue vers le mois calendaire reel en cours (referenceMonth =
+     * currentMonthStart : meme situation qu'un clic sur "mois suivant" depuis
+     * le dernier mois complet par defaut, voir Dashboard.vue#goToNextMonth) :
+     * ce dernier mois de la fenetre est "previsionnel" (voir buildMonthsWindow),
+     * rempli avec la moyenne des 12 VRAIS derniers mois (voir
+     * categoryForecastAverages, TOUJOURS divisee par 12, mois sans
+     * transaction inclus) — jamais a 0, meme si aucune transaction reelle
+     * n'existe encore ce mois-la.
+     */
+    @Test
+    void monthlyCategoryAnalysis_moisCourantEnCours_estPrevisionnelRempliParLaMoyenneDesMoisPasses() {
+        LocalDate currentMonthStart = LocalDate.now().withDayOfMonth(1);
+        Compte account = compte(1L, "0");
+        Categorie salaire = categorie(3L, "Salaire", null, false);
+        Transaction revenu1 = transaction(1L, account, currentMonthStart.minusMonths(3).plusDays(4), "1000.00", salaire);
+        Transaction revenu2 = transaction(2L, account, currentMonthStart.minusMonths(2).plusDays(4), "3000.00", salaire);
+        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(revenu1, revenu2));
+
+        Map<String, Object> result = service.monthlyCategoryAnalysis(null, currentMonthStart);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> months = (List<Map<String, Object>>) result.get("months");
+        assertThat(months).hasSize(12);
+        assertThat(months.get(11)).containsEntry("key", currentMonthStart.toString()).containsEntry("forecast", true);
+        assertThat(months.get(10)).containsEntry("forecast", false);
+
+        // Moyenne sur les 12 VRAIS derniers mois (dont 2 a 1000/3000, le reste a 0) : 4000 / 12.
+        BigDecimal expectedAverage = new BigDecimal("4000.00").divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> incomeRows = (List<Map<String, Object>>) result.get("income");
+        Map<String, Object> ligneSalaire = incomeRows.stream()
+                .filter(r -> "Salaire".equals(r.get("name"))).findFirst().orElseThrow();
+        @SuppressWarnings("unchecked")
+        Map<String, BigDecimal> valuesSalaire = (Map<String, BigDecimal>) ligneSalaire.get("values");
+        assertThat(valuesSalaire.get(currentMonthStart.toString())).isEqualByComparingTo(expectedAverage);
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> incomeTotal = (Map<String, Object>) result.get("incomeTotal");
+        @SuppressWarnings("unchecked")
+        Map<String, BigDecimal> incomeTotalValues = (Map<String, BigDecimal>) incomeTotal.get("values");
+        assertThat(incomeTotalValues.get(currentMonthStart.toString())).isEqualByComparingTo(expectedAverage);
+
+        // Le resume mensuel (Revenus/Depenses/Solde) reprend lui aussi le previsionnel, pas 0.
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> summary = (List<Map<String, Object>>) result.get("summary");
+        Map<String, Object> moisCourant = summary.stream()
+                .filter(m -> currentMonthStart.toString().equals(m.get("key"))).findFirst().orElseThrow();
+        assertThat((BigDecimal) moisCourant.get("income")).isEqualByComparingTo(expectedAverage);
+        assertThat(moisCourant).containsEntry("forecast", true);
+    }
+
+    /**
+     * Navigue tres loin dans le futur (bien au-dela des 12 mois de la
+     * fenetre affichee) : celle-ci ne contient alors plus AUCUN mois reel,
+     * mais le previsionnel doit rester base sur les 12 VRAIS derniers mois
+     * (ancres sur aujourd'hui, voir categoryForecastAverages), jamais sur les
+     * mois reels de la fenetre affichee (puisqu'il n'y en a plus) — sans quoi
+     * les montants retombent a 0, precisement le bug corrige ici.
+     */
+    @Test
+    void monthlyCategoryAnalysis_naviguerTresLoinDansLeFutur_gardeLaMemeProjectionQueLeMoisCourant() {
+        LocalDate currentMonthStart = LocalDate.now().withDayOfMonth(1);
+        Compte account = compte(1L, "0");
+        Categorie salaire = categorie(3L, "Salaire", null, false);
+        Transaction revenu = transaction(1L, account, currentMonthStart.minusMonths(2).plusDays(4), "2400.00", salaire);
+        // Stub sensible a la plage interrogee (comme le ferait vraiment le
+        // repository) : la fenetre affichee (tres loin dans le futur) et la
+        // fenetre de reference du previsionnel (12 vrais derniers mois) ne se
+        // recoupent pas, il ne faut donc PAS renvoyer la transaction pour
+        // n'importe quelle plage (thenReturn), sans quoi elle "fuite" dans
+        // des mois hors fenetre affichee.
+        when(transactionRepository.findByDateBetween(any(), any())).thenAnswer(inv -> {
+            LocalDate from = inv.getArgument(0);
+            LocalDate to = inv.getArgument(1);
+            LocalDate date = revenu.getDate();
+            return !date.isBefore(from) && !date.isAfter(to) ? List.of(revenu) : List.of();
+        });
+
+        // 15 mois dans le futur : la fenetre de 12 mois affichee ([+4 ; +15])
+        // ne touche plus du tout les 12 vrais derniers mois ([-12 ; -1]).
+        LocalDate loinDansLeFutur = currentMonthStart.plusMonths(15);
+        Map<String, Object> result = service.monthlyCategoryAnalysis(null, loinDansLeFutur);
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> months = (List<Map<String, Object>>) result.get("months");
+        assertThat(months).allMatch(m -> Boolean.TRUE.equals(m.get("forecast")));
+
+        // Moyenne sur les 12 VRAIS derniers mois (une seule transaction a 2400) : 2400 / 12 = 200.00.
+        BigDecimal expectedAverage = new BigDecimal("2400.00").divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
+        assertThat(expectedAverage).isEqualByComparingTo("200.00");
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> incomeRows = (List<Map<String, Object>>) result.get("income");
+        Map<String, Object> ligneSalaire = incomeRows.stream()
+                .filter(r -> "Salaire".equals(r.get("name"))).findFirst().orElseThrow();
+        @SuppressWarnings("unchecked")
+        Map<String, BigDecimal> valuesSalaire = (Map<String, BigDecimal>) ligneSalaire.get("values");
+        assertThat(valuesSalaire.values()).allSatisfy(v -> assertThat(v).isEqualByComparingTo(expectedAverage));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> incomeTotal = (Map<String, Object>) result.get("incomeTotal");
+        @SuppressWarnings("unchecked")
+        Map<String, BigDecimal> incomeTotalValues = (Map<String, BigDecimal>) incomeTotal.get("values");
+        assertThat(incomeTotalValues.values()).allSatisfy(v -> assertThat(v).isEqualByComparingTo(expectedAverage));
     }
 }

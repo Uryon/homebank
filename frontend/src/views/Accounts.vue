@@ -78,7 +78,7 @@
           </div>
           <div class="form-field">
             <label for="transfer-amount">Montant</label>
-            <AmountInput id="transfer-amount" v-model="transferForm.amount" />
+            <AmountInput id="transfer-amount" v-model="transferForm.amount" :allow-relative="false" />
           </div>
           <div class="form-field">
             <label for="transfer-date">Date</label>

@@ -45,7 +45,7 @@
         <input v-model="editForm.memo" aria-label="Mémo" placeholder="Note libre" />
       </td>
       <td class="num" colspan="2" @click.stop>
-        <AmountInput v-model="editForm.amount" aria-label="Montant" style="text-align: right;" />
+        <AmountInput v-model="editForm.amount" aria-label="Montant" style="text-align: right;" :allow-relative="false" />
       </td>
       <td class="num" @click.stop>
         <input type="checkbox" v-model="editForm.periodicExpense" title="Dépense périodique récurrente" aria-label="Dépense périodique récurrente" />

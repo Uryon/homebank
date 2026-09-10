@@ -20,8 +20,8 @@
 
     <div class="toolbar">
       <div class="form-field">
-        <label for="payees-search" title="Nom, motif, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99">Recherche</label>
-        <input id="payees-search" v-model="searchQuery" placeholder="Ex : Bouygues;29,99" style="min-width: 240px;" />
+        <label for="payees-search" title="Nom, motif, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Entourez un critère de guillemets pour une correspondance exacte, ex : &quot;CAF&quot;">Recherche</label>
+        <input id="payees-search" v-model="searchQuery" placeholder='Ex : Bouygues;29,99 ou "CAF"' style="min-width: 240px;" />
       </div>
 
       <div class="form-field" style="align-self: flex-end;">
@@ -95,7 +95,7 @@
               <td @click.stop><input v-model="editForm.name" ref="firstEditField" aria-label="Nom" /></td>
               <td @click.stop><input v-model="editForm.pattern" aria-label="Motif de reconnaissance" placeholder="Ex : Carrefour" /></td>
               <td class="num" @click.stop>
-                <AmountInput v-model="editForm.amount" aria-label="Montant" style="text-align:right;" placeholder="Tous montants" />
+                <AmountInput v-model="editForm.amount" aria-label="Montant" style="text-align:right;" placeholder="Tous montants" :allow-relative="false" />
               </td>
               <td @click.stop>
                 <label for="payee-edit-category" class="sr-only">Catégorie associée</label>
@@ -167,7 +167,7 @@
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label for="new-payee-amount">Montant associé (laisser vide = s'applique à tous les montants)</label>
-            <AmountInput id="new-payee-amount" v-model="form.amount" placeholder="Ex : 10" />
+            <AmountInput id="new-payee-amount" v-model="form.amount" placeholder="Ex : 10" :allow-relative="false" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label for="new-payee-category">Catégorie associée (appliquée automatiquement aux transactions de ce tiers)</label>
@@ -226,7 +226,7 @@ import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { PayeesAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
-import { normalizeSearch } from '../services/search'
+import { normalizeSearch, parseSearchTerms } from '../services/search'
 import { flattenCategories } from '../services/categories'
 import { formatAmount } from '../services/format'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
@@ -288,16 +288,28 @@ const payeeSearchIndexById = computed(() => {
 })
 
 /**
- * Un critère (un des termes séparés par ";", déjà normalisé) matche ce tiers
- * s'il est contenu dans le nom, le motif, la catégorie associée, ou le
+ * Un critère matche ce tiers : en mode "contient" (défaut) il suffit que le
+ * terme soit inclus dans le nom, le motif, la catégorie associée, ou le
  * montant (comparé à la fois brut et formaté, virgule ou point acceptés —
- * même logique que la recherche par montant de Transactions.vue).
+ * même logique que la recherche par montant de Transactions.vue) ; en mode
+ * "exact" (terme entre guillemets, ex : "CAF") il faut une égalité stricte
+ * avec le nom, le motif ou la catégorie, pour retrouver "CAF" sans remonter
+ * aussi un tiers comme "Décaféiné".
  */
-function payeeMatchesTerm(idx, term) {
+function payeeMatchesTerm(idx, { term, exact }) {
+  const termAsAmount = term.replace(',', '.')
+  if (exact) {
+    return (
+      idx.nameNormalized === term ||
+      idx.patternNormalized === term ||
+      idx.categoryNormalized === term ||
+      idx.rawAmount === termAsAmount ||
+      idx.amountFormattedNormalized === termAsAmount
+    )
+  }
   if (idx.nameNormalized.includes(term)) return true
   if (idx.patternNormalized.includes(term)) return true
   if (idx.categoryNormalized.includes(term)) return true
-  const termAsAmount = term.replace(',', '.')
   return idx.rawAmount.includes(termAsAmount) || idx.amountFormattedNormalized.includes(term)
 }
 
@@ -305,16 +317,18 @@ function payeeMatchesTerm(idx, term) {
  * Plusieurs critères séparés par ";" sont tous exigés à la fois (ET), ex :
  * "Bouygues;29,99" pour retrouver le tiers Bouygues associé à ce montant
  * précis — chaque critère pris seul reste un simple "contient" (OR entre les
- * champs), comme avant.
+ * champs), sauf s'il est entre guillemets ("CAF"), auquel cas seule une
+ * correspondance exacte est retenue — voir parseSearchTerms dans
+ * services/search.js.
  */
 const filteredPayees = computed(() => {
-  const terms = searchQuery.value.split(';').map(normalizeSearch).filter(Boolean)
+  const terms = parseSearchTerms(searchQuery.value)
   const base = withoutCategoryOnly.value ? payees.value.filter(p => !p.categoryId) : payees.value
   if (!terms.length) return base
   const index = payeeSearchIndexById.value
   return base.filter(p => {
     const idx = index.get(p.id)
-    return idx && terms.every(term => payeeMatchesTerm(idx, term))
+    return idx && terms.every(criterion => payeeMatchesTerm(idx, criterion))
   })
 })
 

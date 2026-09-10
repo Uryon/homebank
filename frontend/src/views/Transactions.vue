@@ -74,8 +74,8 @@
       </div>
 
       <div class="form-field" style="margin-left: auto;">
-        <label for="tx-search" title="Tiers, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Ou &gt; / &lt; / = un montant seul.">Recherche (tiers, catégorie, montant, ou &gt; / &lt; / = un montant)</label>
-        <input id="tx-search" v-model="searchQuery" placeholder="Ex : Bouygues;29,99 ou > 100" style="min-width: 260px;" />
+        <label for="tx-search" title="Tiers, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Entre guillemets (&quot;CAF&quot;), le critère doit correspondre exactement au lieu de simplement le contenir. Ou &gt; / &lt; / = un montant seul.">Recherche (tiers, catégorie, montant, ou &gt; / &lt; / = un montant)</label>
+        <input id="tx-search" v-model="searchQuery" placeholder='Ex : Bouygues;29,99 ou "CAF" ou > 100' style="min-width: 260px;" />
         <div v-if="amountQuery" class="text-hint">
           {{ amountSearchLoading ? 'Recherche…' : `${filteredTransactions.length} transaction(s) trouvée(s)` }}
         </div>
@@ -206,7 +206,7 @@
 
           <div class="form-field">
             <label for="new-tx-amount">Montant (négatif = dépense)</label>
-            <AmountInput id="new-tx-amount" v-model="form.amount" />
+            <AmountInput id="new-tx-amount" v-model="form.amount" :allow-relative="false" />
           </div>
 
           <div class="form-field">
@@ -446,6 +446,13 @@
         </div>
       </div>
     </div>
+
+    <div v-if="lastAction" class="undo-bar" role="status">
+      <span>{{ lastAction.label }}</span>
+      <button class="btn secondary" :disabled="undoing" @click="runLastAction">
+        {{ undoing ? 'Annulation…' : 'Annuler' }}
+      </button>
+    </div>
   </div>
 </template>
 
@@ -456,7 +463,7 @@ import {
   TransactionsAPI
 } from '../services/api'
 import { dataStore } from '../services/dataStore'
-import { normalizeSearch, parseAmountQuery } from '../services/search'
+import { normalizeSearch, parseAmountQuery, parseSearchTerms, matchesSearchTerm } from '../services/search'
 import { flattenCategories } from '../services/categories'
 import PayeeAutocomplete from '../components/PayeeAutocomplete.vue'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
@@ -499,6 +506,68 @@ const availableYears = computed(() => {
   }
   return Array.from(years).sort((a, b) => b - a)
 })
+
+/**
+ * Annulation de la derniere action destructive/de masse (creation, edition,
+ * suppression, validation...) : un seul niveau (pas d'historique complet),
+ * expose comme un bandeau "Annuler" tant que lastAction n'est pas null.
+ * setLastAction remplace toujours l'action precedente (un seul "dernier" a
+ * la fois) et se dissipe seule apres UNDO_TIMEOUT_MS pour ne pas rester
+ * affichee indefiniment une fois qu'elle n'est plus pertinente.
+ */
+const UNDO_TIMEOUT_MS = 10000
+const lastAction = ref(null) // { label, undo: () => Promise<void> }
+const undoing = ref(false)
+let lastActionTimer = null
+
+function setLastAction(label, undo) {
+  if (lastActionTimer) clearTimeout(lastActionTimer)
+  lastAction.value = { label, undo }
+  lastActionTimer = setTimeout(() => { lastAction.value = null }, UNDO_TIMEOUT_MS)
+}
+
+function clearLastAction() {
+  if (lastActionTimer) clearTimeout(lastActionTimer)
+  lastActionTimer = null
+  lastAction.value = null
+}
+
+async function runLastAction() {
+  if (!lastAction.value || undoing.value) return
+  const { undo } = lastAction.value
+  undoing.value = true
+  try {
+    await undo()
+  } finally {
+    undoing.value = false
+    clearLastAction()
+  }
+}
+
+onBeforeUnmount(clearLastAction)
+
+/**
+ * Reconstruit le payload API (meme forme que TransactionDTO cote backend, et
+ * que le payload envoye par save() ci-dessous) a partir d'une transaction
+ * deja chargee — utilise pour recreer/restaurer une transaction lors d'une
+ * annulation (voir setLastAction).
+ */
+function transactionPayloadFrom(t) {
+  return {
+    accountId: t.accountId,
+    date: t.date,
+    payee: t.payee,
+    amount: t.amount,
+    categoryId: t.categoryId,
+    paymentMode: t.paymentMode,
+    memo: t.memo,
+    tags: t.tags,
+    transferTransactionId: t.transferTransactionId,
+    periodicExpense: t.periodicExpense,
+    exceptional: t.exceptional,
+    validated: t.validated
+  }
+}
 
 const showModal = ref(false)
 const form = ref(emptyForm())
@@ -668,12 +737,20 @@ async function saveBulkEdit() {
     payload.validated = bulkForm.value.validated
   }
 
+  const previousSnapshots = transactions.value
+    .filter(t => selectedIds.value.has(t.id))
+    .map(t => ({ id: t.id, payload: transactionPayloadFrom(t) }))
+
   bulkSaving.value = true
   try {
     await TransactionsAPI.bulkUpdate(payload)
     showBulkEditModal.value = false
     clearSelection()
     await load()
+    setLastAction(`Modification de ${previousSnapshots.length} transaction(s)`, async () => {
+      await Promise.all(previousSnapshots.map(s => TransactionsAPI.update(s.id, s.payload)))
+      await load()
+    })
   } finally {
     bulkSaving.value = false
   }
@@ -727,6 +804,19 @@ const categoryLabelById = computed(() => {
 })
 
 /**
+ * Nom "brut" de la categorie (juste "Salaire", sans le prefixe parent ni
+ * l'icone) par id — distinct de categoryLabelById ci-dessus : une recherche
+ * exacte ("Salaire" entre guillemets) doit matcher ce nom precis, alors que
+ * le libelle complet ("Traitements et salaires : Salaire") ne serait jamais
+ * strictement egal a ce que l'utilisateur tape.
+ */
+const categoryNameById = computed(() => {
+  const map = new Map()
+  for (const c of categories.value) map.set(c.id, c.name)
+  return map
+})
+
+/**
  * Champs de recherche normalises (tiers, categorie, montant formate) par
  * transaction, precalcules en Map une seule fois quand la liste de
  * transactions change (chargement, changement de filtre compte...), et non
@@ -739,10 +829,12 @@ const categoryLabelById = computed(() => {
 const searchIndexById = computed(() => {
   const index = new Map()
   const labels = categoryLabelById.value
+  const names = categoryNameById.value
   for (const t of transactions.value) {
     index.set(t.id, {
       payeeNormalized: normalizeSearch(t.payee),
       categoryNormalized: normalizeSearch(labels.get(t.categoryId) || ''),
+      categoryNameNormalized: normalizeSearch(names.get(t.categoryId) || ''),
       rawAmount: String(t.amount ?? '').toLowerCase(),
       absAmount: String(Math.abs(t.amount ?? 0)),
       // Montant formate ("0,60 €") avec la virgule decimale remplacee par un
@@ -787,38 +879,24 @@ const statusAndDateFiltered = computed(() => {
 })
 
 /**
- * Un critère (un des termes séparés par ";", déjà normalisé) matche cette
- * transaction s'il est contenu dans le tiers, la catégorie, ou le montant
- * (brut, en valeur absolue, ou formaté — virgule ou point acceptés).
- */
-function transactionMatchesTerm(idx, term) {
-  if (idx.payeeNormalized.includes(term)) return true
-  if (idx.categoryNormalized.includes(term)) return true
-  const termAsAmount = term.replace(',', '.')
-  return (
-    idx.rawAmount.includes(termAsAmount) ||
-    idx.absAmount.includes(termAsAmount) ||
-    idx.amountFormattedNormalized.includes(termAsAmount)
-  )
-}
-
-/**
  * Plusieurs critères séparés par ";" sont tous exigés à la fois (ET), ex :
  * "Bouygues;29,99" pour retrouver la transaction Bouygues de ce montant
- * précis parmi plusieurs — chaque critère pris seul reste un simple
- * "contient" (OR entre tiers/catégorie/montant), comme avant.
+ * précis parmi plusieurs. Un critère pris seul est un "contient" (OR entre
+ * tiers/catégorie/montant) sauf s'il est entre guillemets ("CAF"), auquel
+ * cas seule une correspondance exacte est retenue — voir parseSearchTerms
+ * et matchesSearchTerm dans services/search.js.
  */
 const filteredTransactions = computed(() => {
   if (amountQuery.value) return statusAndDateFiltered.value
 
-  const terms = searchQuery.value.split(';').map(normalizeSearch).filter(Boolean)
+  const terms = parseSearchTerms(searchQuery.value)
   if (!terms.length) return statusAndDateFiltered.value
 
   const index = searchIndexById.value
 
   return statusAndDateFiltered.value.filter(t => {
     const idx = index.get(t.id)
-    return idx && terms.every(term => transactionMatchesTerm(idx, term))
+    return idx && terms.every(criterion => matchesSearchTerm(idx, criterion))
   })
 })
 
@@ -1033,24 +1111,15 @@ async function save() {
     return
   }
 
-  const payload = {
-    accountId: form.value.accountId,
-    date: form.value.date,
-    payee: form.value.payee,
-    amount: form.value.amount,
-    categoryId: form.value.categoryId,
-    paymentMode: form.value.paymentMode,
-    memo: form.value.memo,
-    tags: form.value.tags,
-    transferTransactionId: form.value.transferTransactionId,
-    periodicExpense: form.value.periodicExpense,
-    exceptional: form.value.exceptional,
-    validated: form.value.validated
-  }
+  const payload = transactionPayloadFrom(form.value)
 
-  await TransactionsAPI.create(payload)
+  const created = await TransactionsAPI.create(payload)
   showModal.value = false
   await load()
+  setLastAction('Transaction créée', async () => {
+    await TransactionsAPI.remove(created.id)
+    await load()
+  })
 }
 
 /* --- Édition inline : clic sur une ligne --- */
@@ -1066,16 +1135,29 @@ function cancelEdit() {
 async function confirmEdit(payload) {
   if (!editingId.value) return
   const id = editingId.value
+  const before = transactions.value.find(t => t.id === id)
   editingId.value = null
 
   await TransactionsAPI.update(id, payload)
   await load()
+  if (before) {
+    const previousPayload = transactionPayloadFrom(before)
+    setLastAction('Transaction modifiée', async () => {
+      await TransactionsAPI.update(id, previousPayload)
+      await load()
+    })
+  }
 }
 
 async function remove(transaction) {
   if (!confirm('Supprimer cette transaction ?')) return
+  const payload = transactionPayloadFrom(transaction)
   await TransactionsAPI.remove(transaction.id)
   await load()
+  setLastAction('Transaction supprimée', async () => {
+    await TransactionsAPI.create(payload)
+    await load()
+  })
 }
 
 /* --- Division d'une transaction en deux --- */
@@ -1154,12 +1236,20 @@ async function saveSplit() {
 async function togglePeriodic(transaction) {
   await TransactionsAPI.togglePeriodicExpense(transaction.id)
   await load()
+  setLastAction('Statut "dépense périodique" modifié', async () => {
+    await TransactionsAPI.togglePeriodicExpense(transaction.id)
+    await load()
+  })
 }
 
 /** Bascule directement le statut "exceptionnelle" sans passer par l'édition complète. */
 async function toggleExceptional(transaction) {
   await TransactionsAPI.toggleExceptional(transaction.id)
   await load()
+  setLastAction('Statut "exceptionnelle" modifié', async () => {
+    await TransactionsAPI.toggleExceptional(transaction.id)
+    await load()
+  })
 }
 
 /* --- Validation / rapprochement (façon "reconcile" YNAB) --- */
@@ -1170,6 +1260,10 @@ const validating = ref(false)
 async function toggleValidated(transaction) {
   await TransactionsAPI.toggleValidated(transaction.id)
   await load()
+  setLastAction('Statut "validée" modifié', async () => {
+    await TransactionsAPI.toggleValidated(transaction.id)
+    await load()
+  })
 }
 
 /**
@@ -1182,9 +1276,19 @@ async function validateAll() {
   if (pendingCount.value === 0) return
   if (!confirm(`Valider les ${pendingCount.value} transaction(s) en attente ?`)) return
   validating.value = true
+  // Valide TOUTES les transactions en attente cote backend (pas seulement
+  // celles du compte/filtre courant, voir ServiceTransaction#validateAllPending)
+  // : le snapshot pour l'annulation doit donc venir de la liste globale
+  // (dataStore.state.transactions), pas de `transactions` qui peut etre
+  // restreinte par filterAccount.
+  const pendingIds = dataStore.state.transactions.filter(t => !t.validated).map(t => t.id)
   try {
     await TransactionsAPI.validateAll()
     await load()
+    setLastAction(`Validation de ${pendingIds.length} transaction(s)`, async () => {
+      await Promise.all(pendingIds.map(id => TransactionsAPI.toggleValidated(id)))
+      await load()
+    })
   } finally {
     validating.value = false
   }
@@ -1197,9 +1301,17 @@ async function deletePending() {
   if (pendingCount.value === 0) return
   if (!confirm(`Supprimer définitivement les ${pendingCount.value} transaction(s) non validée(s) ?`)) return
   deletingPending.value = true
+  // Supprime TOUTES les transactions en attente cote backend (voir
+  // ServiceTransaction#deleteAllPending, pas filtre par compte) : meme
+  // remarque que validateAll ci-dessus pour le snapshot d'annulation.
+  const pendingPayloads = dataStore.state.transactions.filter(t => !t.validated).map(transactionPayloadFrom)
   try {
     await TransactionsAPI.removePending()
     await load()
+    setLastAction(`Suppression de ${pendingPayloads.length} transaction(s)`, async () => {
+      await Promise.all(pendingPayloads.map(p => TransactionsAPI.create(p)))
+      await load()
+    })
   } finally {
     deletingPending.value = false
   }
@@ -1212,10 +1324,16 @@ async function deleteSelected() {
   if (!selectedIds.value.size) return
   if (!confirm(`Supprimer définitivement les ${selectedIds.value.size} transaction(s) sélectionnée(s) ?`)) return
   deletingSelection.value = true
+  const ids = Array.from(selectedIds.value)
+  const payloads = transactions.value.filter(t => selectedIds.value.has(t.id)).map(transactionPayloadFrom)
   try {
-    await TransactionsAPI.removeBulk(Array.from(selectedIds.value))
+    await TransactionsAPI.removeBulk(ids)
     clearSelection()
     await load()
+    setLastAction(`Suppression de ${payloads.length} transaction(s)`, async () => {
+      await Promise.all(payloads.map(p => TransactionsAPI.create(p)))
+      await load()
+    })
   } finally {
     deletingSelection.value = false
   }
@@ -1244,6 +1362,37 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/*
+ * Bandeau d'annulation de la derniere action (voir setLastAction/runLastAction) :
+ * position fixe en bas de l'ecran pour rester visible quel que soit le
+ * scroll de la page/du tableau, au-dessus des modales (z-index superieur a
+ * .modal-overlay, voir style.css) au cas ou une action serait annulee alors
+ * qu'une modale est deja ouverte.
+ */
+.undo-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  background: var(--text-primary);
+  color: var(--ink-900);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: 60;
+}
+.undo-bar .btn.secondary {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: var(--ink-900);
+}
+.undo-bar .btn.secondary:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 /*
  * Volontairement pas d'overflow-x ici : un position:sticky sur le thead
  * (ci-dessous) ne colle au scroll de la PAGE que si aucun ancêtre entre lui

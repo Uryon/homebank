@@ -112,7 +112,7 @@
           </div>
           <div class="form-field">
             <label for="loan-principal">Capital emprunté</label>
-            <AmountInput id="loan-principal" v-model="form.principal" />
+            <AmountInput id="loan-principal" v-model="form.principal" :allow-relative="false" />
           </div>
           <div class="form-field">
             <label for="loan-rate">Taux annuel (%)</label>
@@ -128,11 +128,11 @@
           </div>
           <div class="form-field">
             <label for="loan-monthly-payment">Mensualité (hors assurance)</label>
-            <AmountInput id="loan-monthly-payment" v-model="form.monthlyPayment" />
+            <AmountInput id="loan-monthly-payment" v-model="form.monthlyPayment" :allow-relative="false" />
           </div>
           <div class="form-field">
             <label for="loan-monthly-insurance">Assurance mensuelle (optionnel)</label>
-            <AmountInput id="loan-monthly-insurance" v-model="form.monthlyInsurance" />
+            <AmountInput id="loan-monthly-insurance" v-model="form.monthlyInsurance" :allow-relative="false" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label for="loan-notes">Notes</label>

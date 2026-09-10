@@ -23,7 +23,7 @@
         </div>
         <div class="form-field">
           <label for="account-modal-balance">Solde initial</label>
-          <AmountInput id="account-modal-balance" v-model="form.initialBalance" />
+          <AmountInput id="account-modal-balance" v-model="form.initialBalance" :allow-relative="false" />
         </div>
         <div class="form-field" style="grid-column: span 2;">
           <label for="account-modal-notes">Notes</label>

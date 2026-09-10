@@ -10,8 +10,8 @@
 
     <div class="toolbar">
       <div class="form-field">
-        <label for="categories-search">Recherche</label>
-        <input id="categories-search" v-model="searchQuery" placeholder="Ex : Alimentation" style="min-width: 240px;" />
+        <label for="categories-search" title="Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET). Entourez un critère de guillemets pour une correspondance exacte, ex : &quot;CAF&quot;">Recherche</label>
+        <input id="categories-search" v-model="searchQuery" placeholder='Ex : Alimentation ou "CAF"' style="min-width: 240px;" />
       </div>
 
       <div v-if="selectedIds.length >= 2" class="form-field" style="align-self: flex-end;">
@@ -373,7 +373,7 @@
 <script setup>
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { CategoriesAPI } from '../services/api'
-import { normalizeSearch } from '../services/search'
+import { normalizeSearch, parseSearchTerms } from '../services/search'
 import MergeModal from '../components/MergeModal.vue'
 
 const categories = ref([])
@@ -428,12 +428,32 @@ function children(rootId) {
   return childrenByParentId.value.get(rootId) || []
 }
 
+/**
+ * Un critère matche un nom de catégorie : en mode "contient" (défaut) il
+ * suffit que le terme soit inclus dans le nom normalisé ; en mode "exact"
+ * (terme entre guillemets, ex : "CAF") il faut une égalité stricte, pour
+ * retrouver "CAF" sans remonter aussi une catégorie contenant "caf".
+ */
+function nameMatchesTerm(name, { term, exact }) {
+  const normalized = normalizeSearch(name)
+  return exact ? normalized === term : normalized.includes(term)
+}
+
+/**
+ * Plusieurs critères séparés par ";" sont tous exigés à la fois (ET) — même
+ * logique que la recherche de Transactions.vue/Payees.vue, voir
+ * parseSearchTerms dans services/search.js.
+ */
+const searchTerms = computed(() => parseSearchTerms(searchQuery.value))
+
 const filteredRoots = computed(() => {
-  const q = normalizeSearch(searchQuery.value)
-  if (!q) return roots.value
+  const terms = searchTerms.value
+  if (!terms.length) return roots.value
   return roots.value.filter(root =>
-    normalizeSearch(root.name).includes(q) ||
-    children(root.id).some(child => normalizeSearch(child.name).includes(q))
+    terms.every(criterion =>
+      nameMatchesTerm(root.name, criterion) ||
+      children(root.id).some(child => nameMatchesTerm(child.name, criterion))
+    )
   )
 })
 
@@ -458,20 +478,20 @@ const incomeRoots = computed(() =>
 
 /** Sous-catégories visibles d'une racine, pour les colonnes Dépenses/Revenus : les masquées en sont exclues (elles apparaissent dans l'encart dédié). */
 function filteredChildren(rootId) {
-  const q = normalizeSearch(searchQuery.value)
+  const terms = searchTerms.value
   const kids = children(rootId).filter(child => !child.hidden)
-  if (!q) return kids
+  if (!terms.length) return kids
   const root = roots.value.find(r => r.id === rootId)
-  if (root && normalizeSearch(root.name).includes(q)) return kids
-  return kids.filter(child => normalizeSearch(child.name).includes(q))
+  if (root && terms.every(criterion => nameMatchesTerm(root.name, criterion))) return kids
+  return kids.filter(child => terms.every(criterion => nameMatchesTerm(child.name, criterion)))
 }
 
 /** Catégories masquées (racines et sous-catégories), regroupées dans un encart à part sous les colonnes Dépenses/Revenus. */
 const hiddenCategories = computed(() => {
-  const q = normalizeSearch(searchQuery.value)
+  const terms = searchTerms.value
   return categories.value
     .filter(c => c.hidden)
-    .filter(c => !q || normalizeSearch(categoryFullLabel(c)).includes(q))
+    .filter(c => !terms.length || terms.every(criterion => nameMatchesTerm(categoryFullLabel(c), criterion)))
     .sort((a, b) => categoryFullLabel(a).localeCompare(categoryFullLabel(b), 'fr'))
 })
 
