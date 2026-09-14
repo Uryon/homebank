@@ -32,6 +32,7 @@ public class ServiceImport {
     private final DepotTransaction transactionRepository;
     private final DepotTransactionSupprimee deletedTransactionRepository;
     private final ServiceTiers payeeService;
+    private final ServiceDernierImport dernierImportService;
 
     private static final List<DateTimeFormatter> DATE_FORMATS = List.of(
             DateTimeFormatter.ofPattern("dd-MM-yy"),
@@ -46,12 +47,14 @@ public class ServiceImport {
     public ServiceImport(ServiceCompte accountService, ServiceCategorie categoryService,
                           DepotTransaction transactionRepository,
                           DepotTransactionSupprimee deletedTransactionRepository,
-                          ServiceTiers payeeService) {
+                          ServiceTiers payeeService,
+                          ServiceDernierImport dernierImportService) {
         this.accountService = accountService;
         this.categoryService = categoryService;
         this.transactionRepository = transactionRepository;
         this.deletedTransactionRepository = deletedTransactionRepository;
         this.payeeService = payeeService;
+        this.dernierImportService = dernierImportService;
     }
 
     // Champs prives (accessibles depuis ServiceImport, classe englobante) :
@@ -182,6 +185,7 @@ public class ServiceImport {
      */
     public ImportResult importCsv(MultipartFile file, Long accountId) {
         Compte account = accountService.findById(accountId);
+        dernierImportService.enregistrerImport();
         ImportResult result = new ImportResult();
         List<Tiers> knownPayees = payeeService.findAllForMatching();
         Set<CleDoublon> existingKeys = loadDuplicateKeys(accountId);
@@ -312,6 +316,7 @@ public class ServiceImport {
      */
     public ImportResult importQif(MultipartFile file, Long accountId) {
         Compte account = accountService.findById(accountId);
+        dernierImportService.enregistrerImport();
         ImportResult result = new ImportResult();
         List<Tiers> knownPayees = payeeService.findAllForMatching();
         Set<CleDoublon> existingKeys = loadDuplicateKeys(accountId);

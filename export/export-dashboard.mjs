@@ -2,7 +2,7 @@
 // qu'elle est reellement rendue (graphiques Chart.js compris) — evite de
 // dupliquer la mise en page du tableau de bord dans un template PDF separe.
 // Appele par ServiceExport (backend) via ProcessBuilder :
-//   node export-dashboard.mjs <dossier-sortie> [url-tableau-de-bord]
+//   node export-dashboard.mjs <dossier-sortie> [url-tableau-de-bord] [date-dernier-import-iso]
 //
 // Prerequis (une seule fois) : npm install && npx playwright install chromium
 //
@@ -12,18 +12,21 @@
 // a distance). On capture donc la meme page deux fois avec des classes CSS
 // qui masquent alternativement l'une ou l'autre partie, puis on fusionne les
 // deux PDF resultants avec pdf-lib — qui sert aussi a numeroter les pages et
-// poser la date de generation en pied de page (Playwright numeroterait
-// chaque partie independamment si on utilisait son displayHeaderFooter).
+// poser la date du dernier import de fichier en en-tete de la premiere page
+// (plus utile pour juger de la fraicheur des donnees que l'instant de
+// generation du PDF, voir ServiceDernierImport cote backend) et la date de
+// generation en pied de chaque page (Playwright numeroterait chaque partie
+// independamment si on utilisait son displayHeaderFooter).
 
 import { chromium } from 'playwright'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
-const [, , dossierSortie, urlTableauDeBord] = process.argv
+const [, , dossierSortie, urlTableauDeBord, dateDernierImportIso] = process.argv
 
 if (!dossierSortie) {
-  console.error('Usage: node export-dashboard.mjs <dossier-sortie> [url-tableau-de-bord]')
+  console.error('Usage: node export-dashboard.mjs <dossier-sortie> [url-tableau-de-bord] [date-dernier-import-iso]')
   process.exit(1)
 }
 
@@ -63,13 +66,36 @@ try {
 
   const police = await documentFinal.embedFont(StandardFonts.Helvetica)
   const dateGeneration = new Date().toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' })
+  // LocalDateTime cote backend (pas de fuseau) : interprete en heure locale,
+  // coherent avec dateGeneration ci-dessus (meme machine).
+  const dateDernierImport = dateDernierImportIso
+    ? new Date(dateDernierImportIso).toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' })
+    : null
   const nombreTotalPages = documentFinal.getPageCount()
   documentFinal.getPages().forEach((p, i) => {
-    const { width } = p.getSize()
-    const texte = `Genere le ${dateGeneration} — page ${i + 1}/${nombreTotalPages}`
+    const { width, height } = p.getSize()
     const taille = 8
-    p.drawText(texte, {
-      x: width - police.widthOfTextAtSize(texte, taille) - 24,
+
+    if (i === 0) {
+      // Date du dernier import de fichier en haut de la premiere page, pour
+      // la voir sans avoir a faire defiler (le pied de page ci-dessous,
+      // present sur chaque page, garde lui la date de generation du PDF —
+      // utile pour verifier une page isolee/imprimee).
+      const texteEntete = dateDernierImport
+        ? `Dernier import de fichier : ${dateDernierImport}`
+        : 'Dernier import de fichier : aucun'
+      p.drawText(texteEntete, {
+        x: 24,
+        y: height - 16,
+        size: taille,
+        font: police,
+        color: rgb(0.55, 0.55, 0.55)
+      })
+    }
+
+    const textePied = `Genere le ${dateGeneration} — page ${i + 1}/${nombreTotalPages}`
+    p.drawText(textePied, {
+      x: width - police.widthOfTextAtSize(textePied, taille) - 24,
       y: 18,
       size: taille,
       font: police,

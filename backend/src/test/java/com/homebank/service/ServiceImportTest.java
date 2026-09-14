@@ -45,6 +45,8 @@ class ServiceImportTest {
     private DepotTransactionSupprimee deletedTransactionRepository;
     @Mock
     private ServiceTiers payeeService;
+    @Mock
+    private ServiceDernierImport dernierImportService;
 
     private ServiceImport service;
     private final Compte account = new Compte();
@@ -52,7 +54,7 @@ class ServiceImportTest {
     @BeforeEach
     void setUp() {
         service = new ServiceImport(accountService, categoryService, transactionRepository,
-                deletedTransactionRepository, payeeService);
+                deletedTransactionRepository, payeeService, dernierImportService);
         account.setId(1L);
         when(accountService.findById(1L)).thenReturn(account);
     }
@@ -274,6 +276,34 @@ class ServiceImportTest {
         assertThat(result.getSkipped()).isEqualTo(1);
         assertThat(result.getImported()).isEqualTo(1);
         assertThat(result.getErrors()).hasSize(1);
+    }
+
+    @Test
+    void importCsv_enregistreLaDateDuDernierImportUneFoisLeCompteResolu() {
+        String csv = """
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                01/03/2024;;;Carrefour;;-10,00;;
+                """;
+        when(payeeService.resolveOrCreate(anyString(), any(), anyList())).thenReturn(null);
+
+        service.importCsv(csvFile(csv), 1L);
+
+        verify(dernierImportService).enregistrerImport();
+    }
+
+    @Test
+    void importQif_enregistreLaDateDuDernierImportUneFoisLeCompteResolu() {
+        String qif = """
+                !Type:Bank
+                D01/03/2024
+                T-10,00
+                PMonoprix
+                ^
+                """;
+
+        service.importQif(qifFile(qif), 1L);
+
+        verify(dernierImportService).enregistrerImport();
     }
 
     @Test

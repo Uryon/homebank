@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -28,6 +29,7 @@ public class ServiceExport {
     private final String urlTableauDeBord;
     private final String cheminScript;
     private final String cheminNode;
+    private final ServiceDernierImport dernierImportService;
 
     public ServiceExport(
             @Value("${export.dossier-sortie}") String dossierSortie,
@@ -37,11 +39,13 @@ public class ServiceExport {
             // historique, portable) ; peut etre epingle a un chemin absolu via
             // EXPORT_CHEMIN_NODE si on veut eliminer toute dependance au PATH
             // (voir le hotspot Sonar "PATH variable" sur cet appel).
-            @Value("${export.chemin-node:node}") String cheminNode) {
+            @Value("${export.chemin-node:node}") String cheminNode,
+            ServiceDernierImport dernierImportService) {
         this.dossierSortie = dossierSortie;
         this.urlTableauDeBord = urlTableauDeBord;
         this.cheminScript = cheminScript;
         this.cheminNode = cheminNode;
+        this.dernierImportService = dernierImportService;
     }
 
     public void exporterTableauDeBord() {
@@ -52,7 +56,17 @@ public class ServiceExport {
                             + "(Google Drive pour ordinateur...).");
         }
 
-        ProcessBuilder pb = new ProcessBuilder(cheminNode, cheminScript, dossierSortie, urlTableauDeBord)
+        // Transmis au script au lieu de laisser Node calculer sa propre date
+        // "maintenant" : la date affichee dans l'export doit refleter la
+        // fraicheur reelle des donnees (dernier import de fichier), pas
+        // l'instant de generation du PDF, qui peut tourner sans nouvel
+        // import (bouton manuel repete, export automatique...). Chaine vide
+        // si aucun import n'a encore ete effectue (voir ServiceDernierImport).
+        LocalDateTime dateDernierImport = dernierImportService.dateDernierImport();
+        String argDateDernierImport = dateDernierImport != null ? dateDernierImport.toString() : "";
+
+        ProcessBuilder pb = new ProcessBuilder(
+                cheminNode, cheminScript, dossierSortie, urlTableauDeBord, argDateDernierImport)
                 .redirectErrorStream(true);
         try {
             Process process = pb.start();
