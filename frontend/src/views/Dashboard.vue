@@ -256,7 +256,7 @@
               <td class="category-sticky summary-label">Revenus</td>
               <td v-for="month in monthlyAnalysis.summary" :key="'summary-income-' + month.key" class="num"
                   :class="[anomalyClass(month.income, summaryRowValues.income), { 'forecast-cell': month.forecast }]"
-                  @mouseenter="scheduleHover($event, 'Revenus — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income'))"
+                  @mouseenter="scheduleMonthHover($event, 'Revenus — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income'), month.forecast)"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(month.income) }}
               </td>
@@ -275,7 +275,7 @@
               <td class="category-sticky summary-label">Dépenses</td>
               <td v-for="month in monthlyAnalysis.summary" :key="'summary-expense-' + month.key" class="num"
                   :class="[anomalyClass(month.expenses, summaryRowValues.expenses), { 'forecast-cell': month.forecast }]"
-                  @mouseenter="scheduleHover($event, 'Dépenses — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense'))"
+                  @mouseenter="scheduleMonthHover($event, 'Dépenses — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense'), month.forecast)"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(month.expenses) }}
               </td>
@@ -295,7 +295,7 @@
               <td v-for="month in monthlyAnalysis.summary" :key="'summary-net-' + month.key"
                   class="num"
                   :class="[Number(month.net) >= 0 ? 'positive' : 'negative', anomalyClass(month.net, summaryRowValues.net), { 'forecast-cell': month.forecast }]"
-                  @mouseenter="scheduleHover($event, 'Solde — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, null))"
+                  @mouseenter="scheduleMonthHover($event, 'Solde — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, null), month.forecast)"
                   @mouseleave="onCellLeave">
                 <strong>{{ formatAmount(month.net) }}</strong>
               </td>
@@ -350,7 +350,7 @@
               </td>
               <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
                   :class="[{ 'zero-value': !Number(group.values[month.key]) }, anomalyClass(group.values[month.key], Object.values(group.values)), { 'forecast-cell': month.forecast }]"
-                  @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', groupCategoryFilter(group)))"
+                  @mouseenter="scheduleMonthHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', groupCategoryFilter(group)), month.forecast)"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(group.values[month.key]) }}
               </td>
@@ -374,7 +374,7 @@
                 </td>
                 <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
                     :class="[{ 'zero-value': !Number(child.values[month.key]) }, anomalyClass(child.values[month.key], Object.values(child.values)), { 'forecast-cell': month.forecast }]"
-                    @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', childCategoryFilter(child)))"
+                    @mouseenter="scheduleMonthHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense', childCategoryFilter(child)), month.forecast)"
                     @mouseleave="onCellLeave">
                   {{ formatAmount(child.values[month.key]) }}
                 </td>
@@ -397,7 +397,7 @@
               <td class="category-sticky"><strong>{{ monthlyAnalysis.expenseTotal.name }}</strong></td>
               <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
                   :class="{ 'forecast-cell': month.forecast }"
-                  @mouseenter="scheduleHover($event, 'Total dépenses — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense'))"
+                  @mouseenter="scheduleMonthHover($event, 'Total dépenses — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense'), month.forecast)"
                   @mouseleave="onCellLeave">
                 <strong>{{ formatAmount(monthlyAnalysis.expenseTotal.values[month.key]) }}</strong>
               </td>
@@ -452,7 +452,7 @@
               </td>
               <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
                   :class="[{ 'zero-value': !Number(group.values[month.key]) }, anomalyClass(group.values[month.key], Object.values(group.values)), { 'forecast-cell': month.forecast }]"
-                  @mouseenter="scheduleHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', groupCategoryFilter(group)))"
+                  @mouseenter="scheduleMonthHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', groupCategoryFilter(group)), month.forecast)"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(group.values[month.key]) }}
               </td>
@@ -476,7 +476,7 @@
                 </td>
                 <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
                     :class="[{ 'zero-value': !Number(child.values[month.key]) }, anomalyClass(child.values[month.key], Object.values(child.values)), { 'forecast-cell': month.forecast }]"
-                    @mouseenter="scheduleHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', childCategoryFilter(child)))"
+                    @mouseenter="scheduleMonthHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', childCategoryFilter(child)), month.forecast)"
                     @mouseleave="onCellLeave">
                   {{ formatAmount(child.values[month.key]) }}
                 </td>
@@ -499,7 +499,7 @@
               <td class="category-sticky"><strong>{{ monthlyAnalysis.incomeTotal.name }}</strong></td>
               <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
                   :class="{ 'forecast-cell': month.forecast }"
-                  @mouseenter="scheduleHover($event, 'Total revenus — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income'))"
+                  @mouseenter="scheduleMonthHover($event, 'Total revenus — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income'), month.forecast)"
                   @mouseleave="onCellLeave">
                 <strong>{{ formatAmount(monthlyAnalysis.incomeTotal.values[month.key]) }}</strong>
               </td>
@@ -539,6 +539,7 @@ import { ref, onMounted, computed, nextTick } from 'vue'
 import { AccountsAPI, ReportsAPI, LoansAPI, ExportAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { formatAmount } from '../services/format'
+import { alertApiError } from '../services/errors'
 import CellTransactionsPopover from '../components/CellTransactionsPopover.vue'
 import Chart from 'chart.js/auto'
 
@@ -578,7 +579,7 @@ async function exportDashboard() {
   try {
     await ExportAPI.dashboardPdf()
   } catch (e) {
-    alert('Export PDF échoué : ' + (e.response?.data?.error || e.message))
+    alertApiError('Export PDF échoué', e)
   } finally {
     exporting.value = false
   }
@@ -693,6 +694,20 @@ function scheduleHover(event, title, loadRows) {
       hover.value = { ...hover.value, loading: false }
     }
   }, HOVER_DELAY_MS)
+}
+
+/**
+ * Comme scheduleHover, mais sans effet sur une case previsionnelle (mois pas
+ * encore termine, badge "Prevu" : voir ServiceRapport#completeAnalysisRow).
+ * Son montant est une moyenne estimee sur les mois passes, jamais une somme
+ * de transactions reelles de ce mois-la (qui n'a pas encore eu lieu) — un
+ * survol y interrogerait cellTransactions pour un mois quasi vide (au mieux
+ * quelques tranches de transaction annualisee qui ne totalisent pas la
+ * moyenne affichee), un detail trompeur plutot qu'absent.
+ */
+function scheduleMonthHover(event, title, loadRows, isForecast) {
+  if (isForecast) return
+  scheduleHover(event, title, loadRows)
 }
 
 function scheduleHide() {

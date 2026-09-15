@@ -15,26 +15,92 @@ import java.util.Optional;
 
 public interface DepotTransaction extends JpaRepository<Transaction, Long> {
 
-    List<Transaction> findByAccount_IdOrderByDateDescIdDesc(Long accountId);
+    /**
+     * Tiers, categorie et virement correspondant deja charges (fetch join) :
+     * MappeurTransaction#payeeLabel lit le nom du tiers (ou, pour un virement,
+     * le compte de la transaction correspondante) de CHAQUE transaction —
+     * sans ce fetch join, chaque tiers/virement distinct de la liste
+     * declencherait sa propre requete au premier acces (LAZY), potentiellement
+     * des centaines de requetes N+1 sur une liste de transactions.
+     */
+    @Query("select t from Transaction t"
+            + " left join fetch t.payee left join fetch t.category"
+            + " left join fetch t.transferTransaction tt left join fetch tt.account"
+            + " where t.account.id = :accountId order by t.date desc, t.id desc")
+    List<Transaction> findByAccount_IdOrderByDateDescIdDesc(@Param("accountId") Long accountId);
 
+    @Query("select t from Transaction t"
+            + " left join fetch t.payee left join fetch t.category"
+            + " left join fetch t.transferTransaction tt left join fetch tt.account"
+            + " order by t.date desc, t.id desc")
     List<Transaction> findAllByOrderByDateDescIdDesc();
 
-    List<Transaction> findByDateBetween(LocalDate from, LocalDate to);
+    /**
+     * Tiers, categorie et virement correspondant deja charges (fetch join) :
+     * meme raison que findAllByOrderByDateDescIdDesc ci-dessus (utilisee via
+     * ServiceTransaction#findByPeriod, qui mappe chaque resultat vers un DTO).
+     */
+    @Query("select t from Transaction t"
+            + " left join fetch t.payee left join fetch t.category"
+            + " left join fetch t.transferTransaction tt left join fetch tt.account"
+            + " where t.date between :from and :to")
+    List<Transaction> findByDateBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
     List<Transaction> findByAccountIdAndDateBetween(Long accountId, LocalDate from, LocalDate to);
 
-    /** Recherche de transactions par montant (operateur > < =), utilisee par la recherche de l'onglet Transactions. */
-    List<Transaction> findByAmountGreaterThanOrderByDateDescIdDesc(BigDecimal amount);
+    /**
+     * Recherche de transactions par montant (operateur > < =), utilisee par
+     * la recherche de l'onglet Transactions. Tiers, categorie et virement
+     * correspondant deja charges (fetch join), meme raison que
+     * findAllByOrderByDateDescIdDesc ci-dessus.
+     */
+    @Query("select t from Transaction t"
+            + " left join fetch t.payee left join fetch t.category"
+            + " left join fetch t.transferTransaction tt left join fetch tt.account"
+            + " where t.amount > :amount order by t.date desc, t.id desc")
+    List<Transaction> findByAmountGreaterThanOrderByDateDescIdDesc(@Param("amount") BigDecimal amount);
 
-    List<Transaction> findByAmountLessThanOrderByDateDescIdDesc(BigDecimal amount);
+    @Query("select t from Transaction t"
+            + " left join fetch t.payee left join fetch t.category"
+            + " left join fetch t.transferTransaction tt left join fetch tt.account"
+            + " where t.amount < :amount order by t.date desc, t.id desc")
+    List<Transaction> findByAmountLessThanOrderByDateDescIdDesc(@Param("amount") BigDecimal amount);
 
-    List<Transaction> findByAmountOrderByDateDescIdDesc(BigDecimal amount);
+    @Query("select t from Transaction t"
+            + " left join fetch t.payee left join fetch t.category"
+            + " left join fetch t.transferTransaction tt left join fetch tt.account"
+            + " where t.amount = :amount order by t.date desc, t.id desc")
+    List<Transaction> findByAmountOrderByDateDescIdDesc(@Param("amount") BigDecimal amount);
 
-    List<Transaction> findByAccount_IdAndAmountGreaterThanOrderByDateDescIdDesc(Long accountId, BigDecimal amount);
+    @Query("select t from Transaction t"
+            + " left join fetch t.payee left join fetch t.category"
+            + " left join fetch t.transferTransaction tt left join fetch tt.account"
+            + " where t.account.id = :accountId and t.amount > :amount order by t.date desc, t.id desc")
+    List<Transaction> findByAccount_IdAndAmountGreaterThanOrderByDateDescIdDesc(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
 
-    List<Transaction> findByAccount_IdAndAmountLessThanOrderByDateDescIdDesc(Long accountId, BigDecimal amount);
+    @Query("select t from Transaction t"
+            + " left join fetch t.payee left join fetch t.category"
+            + " left join fetch t.transferTransaction tt left join fetch tt.account"
+            + " where t.account.id = :accountId and t.amount < :amount order by t.date desc, t.id desc")
+    List<Transaction> findByAccount_IdAndAmountLessThanOrderByDateDescIdDesc(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
 
-    List<Transaction> findByAccount_IdAndAmountOrderByDateDescIdDesc(Long accountId, BigDecimal amount);
+    @Query("select t from Transaction t"
+            + " left join fetch t.payee left join fetch t.category"
+            + " left join fetch t.transferTransaction tt left join fetch tt.account"
+            + " where t.account.id = :accountId and t.amount = :amount order by t.date desc, t.id desc")
+    List<Transaction> findByAccount_IdAndAmountOrderByDateDescIdDesc(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
+
+    /**
+     * Transactions demandees, avec leur eventuelle jumelle de virement deja
+     * chargee (fetch join) : utilisee partout ou le code verifie ensuite
+     * getTransferTransaction() sur chaque transaction (suppression/modification
+     * en masse, voir ServiceTransaction#unlinkTransferPairs et
+     * #applyBulkPaymentMode) — sans ce fetch join, chaque transaction
+     * declencherait sa propre requete au premier acces (LAZY), un N+1 sur une
+     * selection multiple.
+     */
+    @Query("select t from Transaction t left join fetch t.transferTransaction where t.id in :ids")
+    List<Transaction> findAllByIdWithTransferTransaction(@Param("ids") List<Long> ids);
 
     List<Transaction> findByPeriodicExpenseTrueOrderByDateDescIdDesc();
 

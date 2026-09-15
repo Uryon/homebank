@@ -8,6 +8,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,16 +33,15 @@ public class CategoryTypeConsistencyFixer implements ApplicationRunner {
     }
 
     @Override
+    @Transactional
     public void run(ApplicationArguments args) {
-        List<Categorie> roots = categoryRepository.findByParentIsNull();
         List<Categorie> toFix = new ArrayList<>();
 
-        for (Categorie root : roots) {
-            for (Categorie child : categoryRepository.findByParent(root)) {
-                if (child.getType() != root.getType()) {
-                    child.setType(root.getType());
-                    toFix.add(child);
-                }
+        for (Categorie child : categoryRepository.findAll()) {
+            Categorie parent = child.getParent();
+            if (parent != null && child.getType() != parent.getType()) {
+                child.setType(parent.getType());
+                toFix.add(child);
             }
         }
 

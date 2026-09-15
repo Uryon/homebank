@@ -55,6 +55,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ImportAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
+import { alertApiError } from '../services/errors'
 
 const accounts = computed(() => dataStore.state.accounts)
 const accountId = ref(null)
@@ -78,14 +79,19 @@ async function doImport() {
     // cache partagé (sidebar, page Comptes, page Transactions...).
     await dataStore.refreshTransactions()
   } catch (e) {
-    alert("Erreur lors de l'import : " + (e.response?.data?.error || e.message))
+    alertApiError("Erreur lors de l'import", e)
   } finally {
     loading.value = false
   }
 }
 
 onMounted(async () => {
-  await dataStore.ensureLoaded()
+  try {
+    await dataStore.ensureLoaded()
+  } catch (e) {
+    alertApiError('Erreur lors du chargement des donnees', e)
+    return
+  }
   // Compte courant par defaut (le plus souvent le compte cible d'un import
   // de releve bancaire), sinon le premier compte de la liste — meme critere
   // de priorite que le tri des comptes dans la sidebar/Comptes.vue.

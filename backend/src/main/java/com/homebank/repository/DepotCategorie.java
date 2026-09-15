@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Optional;
 
 public interface DepotCategorie extends JpaRepository<Categorie, Long> {
-    List<Categorie> findByParentIsNull();
     List<Categorie> findByParent(Categorie parent);
     Optional<Categorie> findByNameIgnoreCaseAndParent(String name, Categorie parent);
     Optional<Categorie> findByNameIgnoreCaseAndParentIsNull(String name);

@@ -229,6 +229,7 @@ import { dataStore } from '../services/dataStore'
 import { normalizeSearch, parseSearchTerms } from '../services/search'
 import { flattenCategories } from '../services/categories'
 import { formatAmount } from '../services/format'
+import { alertApiError } from '../services/errors'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import AmountInput from '../components/AmountInput.vue'
 import MergeModal from '../components/MergeModal.vue'
@@ -468,10 +469,18 @@ async function confirmEdit() {
   }
   const id = editingId.value
   const payload = { ...editForm.value }
+  // editingId/editForm ne sont effaces qu'apres le succes de l'appel :
+  // sinon, un echec (validation, reseau) fermait silencieusement l'edition
+  // sans rien enregistrer ni l'expliquer a l'utilisateur, qui devait tout
+  // retaper sans savoir pourquoi.
+  try {
+    await PayeesAPI.update(id, payload)
+  } catch (e) {
+    alertApiError('Erreur lors de la modification', e)
+    return
+  }
   editingId.value = null
   editForm.value = null
-
-  await PayeesAPI.update(id, payload)
   await refreshAfterMutation()
 }
 
@@ -532,7 +541,7 @@ async function confirmMerge() {
     // cache des transactions, pas seulement celui des tiers.
     await Promise.all([dataStore.refreshPayees(), dataStore.refreshTransactions()])
   } catch (e) {
-    alert('Erreur lors de la fusion : ' + (e.response?.data?.error || e.message))
+    alertApiError('Erreur lors de la fusion', e)
   } finally {
     merging.value = false
   }
@@ -542,7 +551,12 @@ onMounted(async () => {
   // Si le prechargement lance au demarrage de l'app est deja termine (cas
   // courant), instantane. Sinon (arrivee directe sur /payees), on attend
   // juste cette premiere fois — meme pattern que Transactions.vue.
-  await dataStore.ensureLoaded()
+  try {
+    await dataStore.ensureLoaded()
+  } catch (e) {
+    alertApiError('Erreur lors du chargement des donnees', e)
+    return
+  }
   // Revalidation silencieuse en arriere-plan a chaque visite de la page, au
   // cas ou tiers/categories/transactions ont change depuis le prechargement.
   dataStore.refreshAll()

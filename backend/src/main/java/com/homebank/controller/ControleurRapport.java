@@ -27,14 +27,6 @@ public class ControleurRapport {
         return reportService.expensesByCategory(from, to, accountId);
     }
 
-    @GetMapping("/summary")
-    public Map<String, Object> summary(
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
-            @RequestParam(required = false) Long accountId) {
-        return reportService.summary(from, to, accountId);
-    }
-
     /**
      * Analyse détaillée revenus/dépenses par catégorie sur les 12 mois terminés
      * précédant referenceMonth (dernier mois inclus). referenceMonth omis =

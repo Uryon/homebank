@@ -127,6 +127,16 @@ public class ServiceTransaction {
 
     public TransactionDTO update(Long id, TransactionDTO payload) {
         Transaction existing = findEntityById(id);
+
+        // Comme pour splitTransaction : editer une seule des deux transactions
+        // d'un virement (compte, montant, date...) sans repercuter le meme
+        // changement sur l'autre casserait silencieusement l'appariement
+        // (voir createTransfer). Pas de synchronisation cote serveur pour
+        // l'instant : on refuse plutot que de laisser desynchroniser.
+        if (existing.getPaymentMode() == ModePaiement.TRANSFER || existing.getTransferTransaction() != null) {
+            throw new IllegalArgumentException("Un virement ne peut pas etre modifie directement : supprimez-le et recreez-le si besoin.");
+        }
+
         Tiers previousPayee = existing.getPayee();
 
         applyPayload(existing, payload);
@@ -230,7 +240,7 @@ public class ServiceTransaction {
                 ? categoryService.findById(payload.getCategoryId())
                 : null;
 
-        List<Transaction> transactions = transactionRepository.findAllById(ids);
+        List<Transaction> transactions = transactionRepository.findAllByIdWithTransferTransaction(ids);
         List<Tiers> orphanCandidates = new ArrayList<>();
         for (Transaction t : transactions) {
             applyBulkFields(t, payload, category, orphanCandidates);
@@ -255,7 +265,7 @@ public class ServiceTransaction {
         }
 
         if (payload.isPaymentModeProvided()) {
-            t.setPaymentMode(payload.getPaymentMode());
+            applyBulkPaymentMode(t, payload.getPaymentMode());
         }
 
         if (payload.isPeriodicExpenseProvided()) {
@@ -269,6 +279,23 @@ public class ServiceTransaction {
         if (payload.isValidatedProvided()) {
             t.setValidated(payload.isValidated());
         }
+    }
+
+    /**
+     * Ignore le changement de mode de paiement en masse vers ou depuis
+     * TRANSFER : un virement n'existe que par sa paire (voir createTransfer),
+     * que l'edition en masse ne sait pas creer/rompre proprement — l'appliquer
+     * ici casserait silencieusement l'appariement (transaction marquee/
+     * demarquee TRANSFER sans que sa jumelle suive), voir aussi le meme garde-fou
+     * dans update().
+     */
+    private void applyBulkPaymentMode(Transaction t, ModePaiement requested) {
+        boolean isTransferSide = t.getPaymentMode() == ModePaiement.TRANSFER || t.getTransferTransaction() != null;
+        if (isTransferSide || requested == ModePaiement.TRANSFER) {
+            log.info("Changement de mode de paiement ignore pour la transaction {} : un virement se cree/modifie uniquement via l'action \"Virement\"", t.getId());
+            return;
+        }
+        t.setPaymentMode(requested);
     }
 
     /** Resout/cree le nouveau tiers depuis le texte fourni et l'affecte a la transaction ; releve l'ancien tiers s'il change (voir cleanupOrphanPayees). */
@@ -294,13 +321,25 @@ public class ServiceTransaction {
         }
     }
 
+    /**
+     * Supprime la transaction, et si elle fait partie d'un virement (voir
+     * createTransfer), supprime aussi la transaction jumelle avec elle : les
+     * deux se referencent mutuellement (transferTransaction dans les deux
+     * sens), donc les laisser desappariees romprait l'invariant "un virement
+     * = deux transactions liees" — et de toute facon, supprimer l'une sans
+     * l'autre serait rejete par la contrainte de cle etrangere en base.
+     */
     @Transactional
     public void delete(Long id) {
         Transaction existing = findEntityById(id);
         Tiers previousPayee = existing.getPayee();
 
-        recordDeletion(existing);
-        transactionRepository.deleteById(id);
+        Map<Long, Transaction> byId = new LinkedHashMap<>();
+        byId.put(existing.getId(), existing);
+        List<Transaction> transactions = unlinkTransferPairs(byId);
+
+        transactions.forEach(this::recordDeletion);
+        transactionRepository.deleteAll(transactions);
 
         try {
             payeeService.cleanupIfPayeeChanged(previousPayee, null);
@@ -338,13 +377,53 @@ public class ServiceTransaction {
         return pendingIds.isEmpty() ? 0 : deleteTransactions(pendingIds, false);
     }
 
-    /** Suppression en masse factorisee entre deleteBulk et deleteAllPending (voir leur javadoc pour la difference de comportement sur recordTombstone). */
+    /**
+     * Complete `byId` avec la jumelle de virement de chaque transaction deja
+     * presente (voir createTransfer), puis casse la reference mutuelle
+     * transferTransaction des deux cotes : sinon la cle etrangere de chaque
+     * cote d'un virement empeche de supprimer l'autre. Factorise entre
+     * delete(Long) et deleteTransactions, seule differences etant le nombre
+     * de transactions de depart.
+     */
+    private List<Transaction> unlinkTransferPairs(Map<Long, Transaction> byId) {
+        for (Transaction t : List.copyOf(byId.values())) {
+            Transaction pair = t.getTransferTransaction();
+            if (pair != null) {
+                byId.putIfAbsent(pair.getId(), pair);
+            }
+        }
+        List<Transaction> transactions = new ArrayList<>(byId.values());
+
+        List<Transaction> transferSides = transactions.stream()
+                .filter(t -> t.getTransferTransaction() != null)
+                .toList();
+        if (!transferSides.isEmpty()) {
+            transferSides.forEach(t -> t.setTransferTransaction(null));
+            transactionRepository.saveAll(transferSides);
+        }
+
+        return transactions;
+    }
+
+    /**
+     * Suppression en masse factorisee entre deleteBulk et deleteAllPending
+     * (voir leur javadoc pour la difference de comportement sur recordTombstone).
+     * Comme delete(Long) : la transaction jumelle d'un virement selectionne
+     * est toujours emportee avec lui, meme si elle n'a pas ete selectionnee
+     * elle-meme, pour ne jamais laisser un virement partiellement supprime
+     * (les deux se referencent mutuellement, voir createTransfer).
+     */
     private int deleteTransactions(List<Long> ids, boolean recordTombstone) {
         if (ids == null || ids.isEmpty()) {
             throw new IllegalArgumentException("Aucune transaction selectionnee");
         }
 
-        List<Transaction> transactions = transactionRepository.findAllById(ids);
+        Map<Long, Transaction> byId = new LinkedHashMap<>();
+        for (Transaction t : transactionRepository.findAllByIdWithTransferTransaction(ids)) {
+            byId.put(t.getId(), t);
+        }
+        List<Transaction> transactions = unlinkTransferPairs(byId);
+
         List<Tiers> orphanCandidates = new ArrayList<>();
         for (Transaction t : transactions) {
             if (recordTombstone) recordDeletion(t);

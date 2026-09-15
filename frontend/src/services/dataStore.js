@@ -78,7 +78,15 @@ function prefetch() {
       loadCategories(),
       loadPayees(),
       loadTransactions()
-    ])
+    ]).catch(e => {
+      // Sans ce reset, un premier prefetch en echec (backend pas encore
+      // demarre, reseau coupe...) laisserait prefetchPromise memoise sur une
+      // promesse rejetee pour toujours : ensureLoaded() la renverrait telle
+      // quelle a chaque nouvel appel (changement de page...) sans jamais
+      // retenter le chargement, jusqu'au rechargement complet de la SPA.
+      prefetchPromise = null
+      throw e
+    })
   }
   return prefetchPromise
 }

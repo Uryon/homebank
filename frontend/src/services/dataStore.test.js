@@ -79,6 +79,18 @@ describe('dataStore.prefetch', () => {
 
     expect(AccountsAPI.list).toHaveBeenCalledTimes(1)
   })
+
+  it('apres un echec, un nouvel appel retente le chargement au lieu de renvoyer la promesse rejetee memoisee', async () => {
+    const { AccountsAPI } = await freshMocks()
+    const { dataStore } = await import('./dataStore')
+    AccountsAPI.list.mockRejectedValueOnce(new Error('reseau coupe'))
+
+    await expect(dataStore.prefetch()).rejects.toThrow('reseau coupe')
+    await dataStore.prefetch()
+
+    expect(AccountsAPI.list).toHaveBeenCalledTimes(2)
+    expect(dataStore.state.loaded.accounts).toBe(true)
+  })
 })
 
 describe('dataStore.refreshAll', () => {

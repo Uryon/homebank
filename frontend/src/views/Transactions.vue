@@ -473,6 +473,7 @@ import MonthYearFilter from '../components/MonthYearFilter.vue'
 import TransactionsSubNav from './TransactionsSubNav.vue'
 import { formatAmount, formatDate } from '../services/format'
 import { findPayeeByName } from '../services/payee'
+import { alertApiError } from '../services/errors'
 
 const route = useRoute()
 
@@ -567,6 +568,57 @@ function transactionPayloadFrom(t) {
     exceptional: t.exceptional,
     validated: t.validated
   }
+}
+
+/**
+ * Construit, pour un lot de transactions sur le point d'etre supprimees, les
+ * actions de restauration a executer en cas d'annulation. Une transaction
+ * normale se recree via un simple create() du payload capture avant
+ * suppression. Une transaction de virement, elle, ne peut pas se recreer
+ * ainsi : le backend supprime TOUJOURS les deux cotes ensemble (voir
+ * ServiceTransaction#delete/unlinkTransferPairs), y compris quand une seule
+ * des deux a ete explicitement selectionnee/supprimee, et un simple create()
+ * ignorerait de toute facon transferTransactionId (non repris par
+ * ServiceTransaction#applyPayload) — il faut donc recreer la paire via
+ * TransactionsAPI.transfer(), en retrouvant la jumelle dans le store global
+ * (pas necessairement presente dans `transactionsToDelete` elle-meme). Une
+ * paire deja traitee (les deux cotes etaient dans le lot) n'est traitee
+ * qu'une fois.
+ */
+function buildRestoreActions(transactionsToDelete) {
+  const byId = new Map(dataStore.state.transactions.map(t => [t.id, t]))
+  const handledIds = new Set()
+  const actions = []
+
+  for (const t of transactionsToDelete) {
+    if (handledIds.has(t.id)) continue
+    handledIds.add(t.id)
+
+    const isTransferLeg = t.paymentMode === 'TRANSFER' || t.transferTransactionId
+    const pair = isTransferLeg ? byId.get(t.transferTransactionId) : null
+
+    if (isTransferLeg && pair) {
+      handledIds.add(pair.id)
+      const from = t.amount < 0 ? t : pair
+      const to = t.amount < 0 ? pair : t
+      actions.push(() => TransactionsAPI.transfer({
+        fromAccountId: from.accountId,
+        toAccountId: to.accountId,
+        amount: Math.abs(t.amount),
+        date: t.date,
+        memo: t.memo
+      }))
+    } else {
+      const payload = transactionPayloadFrom(t)
+      actions.push(() => TransactionsAPI.create(payload))
+    }
+  }
+
+  return actions
+}
+
+async function restoreAll(actions) {
+  await Promise.all(actions.map(action => action()))
 }
 
 const showModal = ref(false)
@@ -1125,6 +1177,13 @@ async function save() {
 /* --- Édition inline : clic sur une ligne --- */
 
 function startEdit(t) {
+  // Meme garde-fou que openSplit : un virement ne peut pas etre modifie
+  // directement (voir ServiceTransaction#update), qui rejette la requete
+  // apres coup si on laisse l'edition s'ouvrir.
+  if (t.paymentMode === 'TRANSFER' || t.transferTransactionId) {
+    alert('Un virement ne peut pas être modifié directement : supprimez-le et recréez-le si besoin.')
+    return
+  }
   editingId.value = t.id
 }
 
@@ -1136,9 +1195,19 @@ async function confirmEdit(payload) {
   if (!editingId.value) return
   const id = editingId.value
   const before = transactions.value.find(t => t.id === id)
+  // editingId n'est efface qu'apres le succes de l'appel : sinon, un echec
+  // (validation, reseau) fermait silencieusement l'edition sans que rien ne
+  // soit enregistre ni explique a l'utilisateur, qui devait tout retaper
+  // sans comprendre pourquoi. En laissant l'edition ouverte, TransactionRow
+  // (qui garde editForm en etat local tant que isEditing reste vrai) ne
+  // perd pas la saisie en cours.
+  try {
+    await TransactionsAPI.update(id, payload)
+  } catch (e) {
+    alertApiError('Erreur lors de la modification', e)
+    return
+  }
   editingId.value = null
-
-  await TransactionsAPI.update(id, payload)
   await load()
   if (before) {
     const previousPayload = transactionPayloadFrom(before)
@@ -1151,11 +1220,11 @@ async function confirmEdit(payload) {
 
 async function remove(transaction) {
   if (!confirm('Supprimer cette transaction ?')) return
-  const payload = transactionPayloadFrom(transaction)
+  const restoreActions = buildRestoreActions([transaction])
   await TransactionsAPI.remove(transaction.id)
   await load()
   setLastAction('Transaction supprimée', async () => {
-    await TransactionsAPI.create(payload)
+    await restoreAll(restoreActions)
     await load()
   })
 }
@@ -1304,12 +1373,13 @@ async function deletePending() {
   // Supprime TOUTES les transactions en attente cote backend (voir
   // ServiceTransaction#deleteAllPending, pas filtre par compte) : meme
   // remarque que validateAll ci-dessus pour le snapshot d'annulation.
-  const pendingPayloads = dataStore.state.transactions.filter(t => !t.validated).map(transactionPayloadFrom)
+  const pendingTransactions = dataStore.state.transactions.filter(t => !t.validated)
+  const restoreActions = buildRestoreActions(pendingTransactions)
   try {
     await TransactionsAPI.removePending()
     await load()
-    setLastAction(`Suppression de ${pendingPayloads.length} transaction(s)`, async () => {
-      await Promise.all(pendingPayloads.map(p => TransactionsAPI.create(p)))
+    setLastAction(`Suppression de ${pendingTransactions.length} transaction(s)`, async () => {
+      await restoreAll(restoreActions)
       await load()
     })
   } finally {
@@ -1325,13 +1395,14 @@ async function deleteSelected() {
   if (!confirm(`Supprimer définitivement les ${selectedIds.value.size} transaction(s) sélectionnée(s) ?`)) return
   deletingSelection.value = true
   const ids = Array.from(selectedIds.value)
-  const payloads = transactions.value.filter(t => selectedIds.value.has(t.id)).map(transactionPayloadFrom)
+  const selectedTransactions = transactions.value.filter(t => selectedIds.value.has(t.id))
+  const restoreActions = buildRestoreActions(selectedTransactions)
   try {
     await TransactionsAPI.removeBulk(ids)
     clearSelection()
     await load()
-    setLastAction(`Suppression de ${payloads.length} transaction(s)`, async () => {
-      await Promise.all(payloads.map(p => TransactionsAPI.create(p)))
+    setLastAction(`Suppression de ${selectedTransactions.length} transaction(s)`, async () => {
+      await restoreAll(restoreActions)
       await load()
     })
   } finally {
@@ -1344,7 +1415,12 @@ onMounted(async () => {
   // courant), ceci est instantane et n'attend rien. Sinon (premier
   // chargement de l'app directement sur /transactions), on attend juste
   // cette premiere fois.
-  await dataStore.ensureLoaded()
+  try {
+    await dataStore.ensureLoaded()
+  } catch (e) {
+    alertApiError('Erreur lors du chargement des donnees', e)
+    return
+  }
   // Revalidation silencieuse en arriere-plan a chaque visite de la page,
   // au cas ou des comptes/categories/tiers/transactions ont change depuis
   // le prechargement (cree ailleurs, autre onglet...).

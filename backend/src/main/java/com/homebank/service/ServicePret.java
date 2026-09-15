@@ -37,12 +37,14 @@ public class ServicePret {
 
     public Pret create(PretDTO payload) {
         Pret loan = new Pret();
+        validate(payload, null);
         applyPayload(loan, payload);
         return loanRepository.save(loan);
     }
 
     public Pret update(Long id, PretDTO payload) {
         Pret existing = findById(id);
+        validate(payload, existing);
         applyPayload(existing, payload);
         return loanRepository.save(existing);
     }
@@ -56,6 +58,57 @@ public class ServicePret {
         loan.setMonthlyPayment(payload.getMonthlyPayment());
         loan.setMonthlyInsurance(payload.getMonthlyInsurance());
         loan.setNotes(payload.getNotes());
+    }
+
+    /**
+     * Validation cote service (le DTO n'a pas d'annotations Bean Validation) :
+     * sans elle, un principal/mensualite negatif ou nul, ou une mensualite ne
+     * couvrant meme pas les interets du premier mois, passait silencieusement
+     * (au mieux un 500 generique via la contrainte JPA @NotNull de Pret pour
+     * un champ manquant, au pire un echeancier absurde ou jamais solde pour
+     * une mensualite trop faible).
+     * <p>
+     * `existing` (null en creation) permet de ne pas re-verifier la couverture
+     * des interets du premier mois quand capital/taux/mensualite ne changent
+     * pas : sans ca, un pret deja en base avant l'ajout de cette regle (ou
+     * cree avec des valeurs limites) deviendrait impossible a modifier meme
+     * pour un champ sans rapport (nom, notes...).
+     */
+    private void validate(PretDTO payload, Pret existing) {
+        if (payload.getName() == null || payload.getName().isBlank()) {
+            throw new IllegalArgumentException("Le nom du pret est obligatoire");
+        }
+        if (payload.getPrincipal() == null || payload.getPrincipal().signum() <= 0) {
+            throw new IllegalArgumentException("Le capital emprunte doit etre positif");
+        }
+        if (payload.getAnnualRate() == null || payload.getAnnualRate().signum() < 0) {
+            throw new IllegalArgumentException("Le taux annuel ne peut pas etre negatif");
+        }
+        if (payload.getTermMonths() == null || payload.getTermMonths() <= 0) {
+            throw new IllegalArgumentException("La duree du pret doit etre d'au moins un mois");
+        }
+        if (payload.getStartDate() == null) {
+            throw new IllegalArgumentException("La date de premiere mensualite est obligatoire");
+        }
+        if (payload.getMonthlyPayment() == null || payload.getMonthlyPayment().signum() <= 0) {
+            throw new IllegalArgumentException("La mensualite doit etre positive");
+        }
+
+        if (existing != null
+                && existing.getPrincipal().compareTo(payload.getPrincipal()) == 0
+                && existing.getAnnualRate().compareTo(payload.getAnnualRate()) == 0
+                && existing.getMonthlyPayment().compareTo(payload.getMonthlyPayment()) == 0) {
+            return;
+        }
+
+        BigDecimal monthlyRate = payload.getAnnualRate()
+                .divide(BigDecimal.valueOf(1200), RATE_DIVISION_SCALE, RoundingMode.HALF_UP);
+        BigDecimal firstMonthInterest = payload.getPrincipal().multiply(monthlyRate).setScale(SCALE, RoundingMode.HALF_UP);
+        if (payload.getMonthlyPayment().compareTo(firstMonthInterest) <= 0) {
+            throw new IllegalArgumentException(
+                    "La mensualite (" + payload.getMonthlyPayment() + ") ne couvre meme pas les interets du "
+                            + "premier mois (" + firstMonthInterest + ") : le capital ne serait jamais rembourse");
+        }
     }
 
     public void delete(Long id) {

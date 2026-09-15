@@ -4,6 +4,7 @@ import com.homebank.dto.DemandeDivisionDTO;
 import com.homebank.dto.DemandeVirementDTO;
 import com.homebank.dto.GroupeDoublonDTO;
 import com.homebank.dto.SuggestionPeriodiqueDTO;
+import com.homebank.dto.TransactionBulkUpdateDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.mapper.MappeurTransaction;
 import com.homebank.model.Categorie;
@@ -28,6 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.*;
 
 /**
@@ -307,6 +309,61 @@ class ServiceTransactionTest {
         assertThat(credit.isValidated()).isTrue();
         assertThat(debit.getTransferTransactionId()).isEqualTo(credit.getId());
         assertThat(credit.getTransferTransactionId()).isEqualTo(debit.getId());
+    }
+
+    // --- update/delete/bulkUpdate sur un virement : les deux transactions liees ne doivent jamais se desynchroniser ---
+
+    @Test
+    void update_leveUneExceptionSurUneTransactionFaisantPartieDunVirement() {
+        Transaction debit = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-50.00");
+        debit.setId(1L);
+        debit.setPaymentMode(ModePaiement.TRANSFER);
+        when(transactionRepository.findById(1L)).thenReturn(Optional.of(debit));
+
+        assertThatThrownBy(() -> service.update(1L, TransactionDTO.builder().build())).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void delete_supprimeAussiLaTransactionJumelleDunVirementEtCasseLaReferenceMutuelleAvant() {
+        Transaction debit = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-50.00");
+        debit.setId(1L);
+        debit.setPaymentMode(ModePaiement.TRANSFER);
+        Transaction credit = transaction(compte(2L), null, LocalDate.of(2026, 1, 10), "50.00");
+        credit.setId(2L);
+        credit.setPaymentMode(ModePaiement.TRANSFER);
+        debit.setTransferTransaction(credit);
+        credit.setTransferTransaction(debit);
+        when(transactionRepository.findById(1L)).thenReturn(Optional.of(debit));
+        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.delete(1L);
+
+        assertThat(debit.getTransferTransaction()).isNull();
+        assertThat(credit.getTransferTransaction()).isNull();
+        verify(transactionRepository).deleteAll(List.of(debit, credit));
+        verify(deletedTransactionRepository, times(2)).save(any());
+    }
+
+    @Test
+    void bulkUpdate_ignoreLeChangementDeModeDePaiementVersOuDepuisTransfer() {
+        Transaction normal = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-20.00");
+        normal.setId(1L);
+        normal.setPaymentMode(ModePaiement.NONE);
+        Transaction transferLeg = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-50.00");
+        transferLeg.setId(2L);
+        transferLeg.setPaymentMode(ModePaiement.TRANSFER);
+        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L, 2L))).thenReturn(List.of(normal, transferLeg));
+        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+
+        TransactionBulkUpdateDTO payload = new TransactionBulkUpdateDTO();
+        payload.setIds(List.of(1L, 2L));
+        payload.setPaymentModeProvided(true);
+        payload.setPaymentMode(ModePaiement.TRANSFER); // ne doit pas s'appliquer a "normal"
+
+        service.bulkUpdate(payload);
+
+        assertThat(normal.getPaymentMode()).isEqualTo(ModePaiement.NONE);
+        assertThat(transferLeg.getPaymentMode()).isEqualTo(ModePaiement.TRANSFER);
     }
 
     // --- findDuplicateGroups ---

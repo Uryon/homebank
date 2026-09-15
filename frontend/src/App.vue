@@ -73,7 +73,12 @@ import AppLogo from './components/AppLogo.vue'
 // l'app, en arriere-plan, pour que la page Transactions (et les autres)
 // s'affichent instantanement des que l'utilisateur y navigue.
 onMounted(() => {
-  dataStore.prefetch()
+  // Erreur ignorée ici (pas d'UI à mettre à jour dans la sidebar pour ça) :
+  // chaque page affichée ensuite retente le chargement et affiche sa propre
+  // erreur via dataStore.ensureLoaded() (voir Transactions.vue, Payees.vue,
+  // ImportView.vue) — sans ce .catch, un échec au démarrage remonterait ici
+  // en rejet de promesse non gérée.
+  dataStore.prefetch().catch(() => {})
 })
 
 const balances = computed(() => dataStore.state.balances)

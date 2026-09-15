@@ -90,7 +90,7 @@ class ServiceImportTest {
         categorie.setId(9L);
         Tiers carrefour = tiers(2L, "Carrefour", null);
         when(payeeService.resolveOrCreate(eq("Carrefour"), any(), anyList())).thenReturn(carrefour);
-        when(categoryService.findOrCreateByName("Alimentation")).thenReturn(categorie);
+        when(categoryService.findOrCreateByName(eq("Alimentation"), any())).thenReturn(categorie);
 
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
 
@@ -226,7 +226,7 @@ class ServiceImportTest {
                 """;
         Categorie categorie = new Categorie();
         categorie.setId(9L);
-        when(categoryService.findOrCreateByName("Alimentation")).thenReturn(categorie);
+        when(categoryService.findOrCreateByName(eq("Alimentation"), any())).thenReturn(categorie);
 
         ServiceImport.ImportResult result = service.importQif(qifFile(qif), 1L);
 

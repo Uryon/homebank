@@ -80,6 +80,80 @@ class ServicePretTest {
         assertThat(result.getMonthlyInsurance()).isEqualByComparingTo("25.00");
     }
 
+    // --- validation cote service ---
+
+    private static PretDTO.PretDTOBuilder validPayload() {
+        return PretDTO.builder()
+                .name("Pret immobilier")
+                .principal(new BigDecimal("200000.00"))
+                .annualRate(new BigDecimal("3.250"))
+                .termMonths(240)
+                .startDate(LocalDate.of(2024, 1, 1))
+                .monthlyPayment(new BigDecimal("1150.00"));
+    }
+
+    @Test
+    void create_leveIllegalArgumentException_siPrincipalNulOuNegatifOuNul() {
+        PretDTO payload = validPayload().principal(new BigDecimal("-100.00")).build();
+
+        assertThatThrownBy(() -> service.create(payload)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void create_leveIllegalArgumentException_siMensualiteNulleOuNegative() {
+        PretDTO payload = validPayload().monthlyPayment(BigDecimal.ZERO).build();
+
+        assertThatThrownBy(() -> service.create(payload)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void create_leveIllegalArgumentException_siLaDureeEstNulleOuNegative() {
+        PretDTO payload = validPayload().termMonths(0).build();
+
+        assertThatThrownBy(() -> service.create(payload)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void create_leveIllegalArgumentException_siLaMensualiteNeCouvrePasLesInteretsDuPremierMois() {
+        // 200000.00 a 3.25%/an -> interets du 1er mois ~= 541.67 : une mensualite
+        // de 500.00 ne rembourserait jamais le capital (amortissement negatif).
+        PretDTO payload = validPayload().monthlyPayment(new BigDecimal("500.00")).build();
+
+        assertThatThrownBy(() -> service.create(payload)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void update_nRelevePasLaCouvertureDesInteretsSiCapitalTauxEtMensualiteNeChangentPas() {
+        // Pret deja en base avec une mensualite qui ne couvrirait plus les interets
+        // du 1er mois au regard de la regle ajoutee apres coup : une modification d'un
+        // champ sans rapport (nom) ne doit pas etre bloquee par cette regle retroactive.
+        Pret existing = pret("200000.00", "3.250", 240, LocalDate.of(2024, 1, 1), "500.00");
+        existing.setName("Ancien nom");
+        when(loanRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(loanRepository.save(any(Pret.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        PretDTO payload = validPayload()
+                .name("Nouveau nom")
+                .monthlyPayment(new BigDecimal("500.00"))
+                .build();
+
+        Pret result = service.update(1L, payload);
+
+        assertThat(result.getName()).isEqualTo("Nouveau nom");
+    }
+
+    @Test
+    void update_leveIllegalArgumentException_siLaMensualiteEstAbaisseeSousLesInteretsDuPremierMois() {
+        // Ici la mensualite change reellement (1150.00 -> 500.00) : la regle doit
+        // continuer a s'appliquer, contrairement au cas "grandfathered" ci-dessus.
+        Pret existing = pret("200000.00", "3.250", 240, LocalDate.of(2024, 1, 1), "1150.00");
+        when(loanRepository.findById(1L)).thenReturn(Optional.of(existing));
+
+        PretDTO payload = validPayload().monthlyPayment(new BigDecimal("500.00")).build();
+
+        assertThatThrownBy(() -> service.update(1L, payload)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     // --- computeSchedule : calcul mois par mois ---
 
     @Test

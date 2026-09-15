@@ -82,9 +82,9 @@ public class ServiceImport {
         return payeeService.resolveOrCreate(payeeText, amount, knownPayees);
     }
 
-    private Categorie resolveCategory(Tiers payee, String categoryNameFromFile) {
+    private Categorie resolveCategory(Tiers payee, String categoryNameFromFile, BigDecimal amount) {
         if (categoryNameFromFile != null && !categoryNameFromFile.isBlank()) {
-            return categoryService.findOrCreateByName(categoryNameFromFile);
+            return categoryService.findOrCreateByName(categoryNameFromFile, amount);
         }
         return payee != null ? payee.getCategory() : null;
     }
@@ -249,7 +249,7 @@ public class ServiceImport {
             t.setMemo(sanitizeMemo(memo));
             t.setTags(tags);
             t.setPayee(payee);
-            t.setCategory(resolveCategory(payee, categoryName));
+            t.setCategory(resolveCategory(payee, categoryName, amount));
             t.setValidated(false); // toute transaction importee demarre "en attente"
             transactionRepository.save(t);
             ctx.existingKeys().add(CleDoublon.of(date, amount, canonicalPayee));
@@ -416,7 +416,7 @@ public class ServiceImport {
                 t.setAmount(state.amount);
                 t.setMemo(sanitizeMemo(state.memo));
                 t.setPayee(payee);
-                t.setCategory(resolveCategory(payee, state.categoryName));
+                t.setCategory(resolveCategory(payee, state.categoryName, state.amount));
                 t.setValidated(false);
 
                 transactionRepository.save(t);

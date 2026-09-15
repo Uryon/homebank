@@ -93,9 +93,13 @@ public class TestDataSeeder implements CommandLineRunner {
             LocalDate monthStart = today.withDayOfMonth(1).minusMonths(monthsAgo);
             boolean isCurrentMonth = monthsAgo == 0;
 
-            // Salaire, le dernier jour "raisonnable" du mois (le 28)
+            // Salaire, le dernier jour "raisonnable" du mois (le 28). STANDING_ORDER
+            // (virement permanent recu), et non TRANSFER : ce dernier marque un
+            // virement INTERNE entre deux comptes de l'appli (voir ServiceTransaction#createTransfer)
+            // et est exclu des rapports de revenus/depenses (voir ServiceRapport) —
+            // l'utiliser ici ferait disparaitre le salaire du tableau de bord de demo.
             transaction(new TransactionCore(courant, monthStart.withDayOfMonth(28), new BigDecimal("2400.00")),
-                    "Employeur", "Virement salaire", salaire, ModePaiement.TRANSFER, true, false);
+                    "Employeur", "Virement salaire", salaire, ModePaiement.STANDING_ORDER, true, false);
 
             // Loyer, prelevement du 3
             transaction(new TransactionCore(courant, monthStart.plusDays(2), new BigDecimal("-850.00")),

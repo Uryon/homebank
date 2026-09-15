@@ -342,9 +342,9 @@
     <MergeModal
       v-if="showMergeModal"
       :title="`Fusionner ${selectedIds.length} catégories`"
-      description="Choisissez la catégorie à conserver. Toutes les transactions et sous-catégories des autres catégories sélectionnées lui seront réaffectées, puis les catégories fusionnées seront supprimées. Cette action est irréversible."
+      description="Choisissez la catégorie à conserver. Toutes les transactions et sous-catégories des autres catégories sélectionnées lui seront réaffectées, puis les catégories fusionnées seront supprimées. Cette action est irréversible. (Une sous-catégorie de l'une des catégories sélectionnées ne peut pas être choisie comme cible.)"
       target-label="Catégorie à conserver"
-      :items="selectedCategoryObjects"
+      :items="mergeableTargets"
       :option-label="categoryFullLabel"
       v-model="mergeTargetId"
       :confirming="merging"
@@ -374,6 +374,7 @@
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { CategoriesAPI } from '../services/api'
 import { normalizeSearch, parseSearchTerms } from '../services/search'
+import { alertApiError } from '../services/errors'
 import MergeModal from '../components/MergeModal.vue'
 
 const categories = ref([])
@@ -593,7 +594,7 @@ async function remove(category) {
     await CategoriesAPI.remove(category.id)
     await load()
   } catch (e) {
-    alert('Erreur lors de la suppression : ' + (e.response?.data?.error || e.message))
+    alertApiError('Erreur lors de la suppression', e)
   }
 }
 
@@ -649,10 +650,18 @@ async function confirmEdit() {
     icon: editForm.value.icon || null
   }
   const id = editingId.value
+  // editingId/editForm ne sont effaces qu'apres le succes de l'appel :
+  // sinon, un echec (validation, reseau) fermait silencieusement l'edition
+  // sans rien enregistrer ni l'expliquer a l'utilisateur, qui devait tout
+  // retaper sans savoir pourquoi.
+  try {
+    await CategoriesAPI.update(id, payload)
+  } catch (e) {
+    alertApiError('Erreur lors de la modification', e)
+    return
+  }
   editingId.value = null
   editForm.value = null
-
-  await CategoriesAPI.update(id, payload)
   await load()
 }
 
@@ -662,8 +671,29 @@ const selectedCategoryObjects = computed(() =>
   categories.value.filter(c => selectedIds.value.includes(c.id))
 )
 
+/**
+ * Une categorie selectionnee ne peut pas etre choisie comme cible de fusion
+ * si l'une de ses categories ancetres est elle-meme selectionnee : elle
+ * deviendrait alors source ET descendante de la cible, ce que le backend
+ * rejette desormais (cycle parent/enfant, voir ServiceCategorie#merge).
+ */
+function isDescendantOfSelected(category, selectedIdSet) {
+  const byId = new Map(categories.value.map(c => [c.id, c]))
+  let current = byId.get(category.parentId)
+  while (current) {
+    if (selectedIdSet.has(current.id)) return true
+    current = byId.get(current.parentId)
+  }
+  return false
+}
+
+const mergeableTargets = computed(() => {
+  const ids = new Set(selectedIds.value)
+  return selectedCategoryObjects.value.filter(c => !isDescendantOfSelected(c, ids))
+})
+
 function openMergeModal() {
-  mergeTargetId.value = selectedIds.value[0]
+  mergeTargetId.value = mergeableTargets.value[0]?.id ?? null
   showMergeModal.value = true
 }
 
@@ -677,7 +707,7 @@ async function confirmMerge() {
     selectedIds.value = []
     await load()
   } catch (e) {
-    alert('Erreur lors de la fusion : ' + (e.response?.data?.error || e.message))
+    alertApiError('Erreur lors de la fusion', e)
   } finally {
     merging.value = false
   }
@@ -713,7 +743,7 @@ async function confirmReparent() {
     selectedIds.value = []
     await load()
   } catch (e) {
-    alert('Erreur lors du changement de catégorie parente : ' + (e.response?.data?.error || e.message))
+    alertApiError('Erreur lors du changement de catégorie parente', e)
   } finally {
     reparenting.value = false
   }
@@ -763,7 +793,7 @@ async function onRootDrop(event, root) {
     await CategoriesAPI.update(id, { name: category.name, type: category.type, parentId: root.id, icon: category.icon })
     await load()
   } catch (e) {
-    alert('Erreur lors du déplacement : ' + (e.response?.data?.error || e.message))
+    alertApiError('Erreur lors du déplacement', e)
   }
 }
 

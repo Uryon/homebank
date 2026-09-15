@@ -8,6 +8,7 @@ import com.homebank.repository.DepotTransaction;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
@@ -53,6 +54,7 @@ public class ServiceCategorie {
         return categoryRepository.save(category);
     }
 
+    @Transactional
     public Categorie update(Long id, CategorieDTO payload) {
         Categorie existing = findById(id);
         existing.setName(payload.getName());
@@ -63,22 +65,46 @@ public class ServiceCategorie {
                 throw new IllegalArgumentException("Une categorie ne peut pas etre son propre parent");
             }
             Categorie parent = findById(payload.getParentId());
+            if (isSelfOrDescendant(parent, existing)) {
+                throw new IllegalArgumentException("Une categorie ne peut pas etre deplacee sous l'une de ses propres sous-categories");
+            }
             existing.setParent(parent);
             // Sous-categorie : le type suit toujours celui du parent, non modifiable independamment.
             existing.setType(parent.getType());
         } else {
             existing.setParent(null);
             existing.setType(payload.getType());
-            // Categorie racine : si son type change, on le repercute sur toutes ses
-            // sous-categories pour qu'elles restent dans le meme groupe (revenu/depense).
-            List<Categorie> children = categoryRepository.findByParent(existing);
-            for (Categorie child : children) {
-                child.setType(existing.getType());
-            }
-            categoryRepository.saveAll(children);
         }
+        // Repercute le type sur toute la descendance (enfants, petits-enfants...)
+        // pour qu'elle reste dans le meme groupe (revenu/depense), que le type
+        // ait change directement ou suite a un reparentage.
+        cascadeTypeToDescendants(existing);
 
         return categoryRepository.save(existing);
+    }
+
+    /** Indique si `candidate` est `ancestor` lui-meme ou l'une de ses descendantes (remonte la chaine des parents). */
+    private boolean isSelfOrDescendant(Categorie candidate, Categorie ancestor) {
+        Categorie current = candidate;
+        while (current != null) {
+            if (current.getId().equals(ancestor.getId())) {
+                return true;
+            }
+            current = current.getParent();
+        }
+        return false;
+    }
+
+    /** Propage recursivement le type d'une categorie a toute sa descendance (enfants, petits-enfants...). */
+    private void cascadeTypeToDescendants(Categorie category) {
+        List<Categorie> children = categoryRepository.findByParent(category);
+        for (Categorie child : children) {
+            child.setType(category.getType());
+        }
+        categoryRepository.saveAll(children);
+        for (Categorie child : children) {
+            cascadeTypeToDescendants(child);
+        }
     }
 
     /**
@@ -131,6 +157,9 @@ public class ServiceCategorie {
         for (Long sourceId : sourceIds) {
             if (sourceId == null || sourceId.equals(targetId)) continue;
             Categorie source = findById(sourceId);
+            if (isSelfOrDescendant(target, source)) {
+                throw new IllegalArgumentException("Une categorie ne peut pas etre fusionnee dans l'une de ses propres sous-categories");
+            }
 
             transactionRepository.reassignCategory(source, target);
             payeeRepository.reassignCategory(source, target);
@@ -141,6 +170,10 @@ public class ServiceCategorie {
                 child.setType(target.getType());
             }
             categoryRepository.saveAll(children);
+            // Repercute aussi sur les petits-enfants (sous-categories des enfants reparentes).
+            for (Categorie child : children) {
+                cascadeTypeToDescendants(child);
+            }
 
             categoryRepository.delete(source);
         }
@@ -148,14 +181,27 @@ public class ServiceCategorie {
         return target;
     }
 
-    /** Recherche (ou creation) d'une categorie par son nom, utilisee lors de l'import */
+    /** Recherche (ou creation) d'une categorie par son nom, utilisee lors de l'import. Type par defaut (EXPENSE) faute de montant pour le deviner. */
     public Categorie findOrCreateByName(String name) {
+        return findOrCreateByName(name, null);
+    }
+
+    /**
+     * Recherche (ou creation) d'une categorie par son nom, utilisee lors de
+     * l'import. Si une nouvelle categorie racine doit etre creee, son type
+     * (revenu/depense) est devine a partir du signe du montant de la
+     * transaction qui la declenche : sans cet indice (montant absent ou nul),
+     * on retombe sur le defaut EXPENSE plutot que de deviner au hasard. Une
+     * categorie deja existante n'est jamais modifiee : ce n'est qu'une
+     * estimation initiale, ajustable ensuite manuellement (page Categories).
+     */
+    public Categorie findOrCreateByName(String name, BigDecimal amount) {
         if (name == null || name.isBlank()) return null;
         String trimmed = name.trim();
         // Support du format HomeBank "Parent:Enfant"
         if (trimmed.contains(":")) {
             String[] parts = trimmed.split(":", 2);
-            Categorie parent = findOrCreateByName(parts[0]);
+            Categorie parent = findOrCreateByName(parts[0], amount);
             Optional<Categorie> existingChild = categoryRepository.findByNameIgnoreCaseAndParent(parts[1], parent);
             if (existingChild.isPresent()) return existingChild.get();
             Categorie child = new Categorie();
@@ -168,6 +214,9 @@ public class ServiceCategorie {
         if (existing.isPresent()) return existing.get();
         Categorie cat = new Categorie();
         cat.setName(trimmed);
+        if (amount != null && amount.signum() > 0) {
+            cat.setType(Categorie.TypeCategorie.INCOME);
+        }
         return categoryRepository.save(cat);
     }
 }

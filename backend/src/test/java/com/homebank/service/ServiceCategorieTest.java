@@ -12,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -112,13 +113,32 @@ class ServiceCategorieTest {
         Categorie newParent = categorie(2L, "Loisirs", TypeCategorie.BOTH, null);
         when(categoryRepository.findById(1L)).thenReturn(Optional.of(existing));
         when(categoryRepository.findById(2L)).thenReturn(Optional.of(newParent));
+        when(categoryRepository.findByParent(existing)).thenReturn(List.of());
         CategorieDTO payload = CategorieDTO.builder().name("Restaurant").parentId(2L).type(TypeCategorie.INCOME).build();
 
         Categorie result = service.update(1L, payload);
 
         assertThat(result.getParent()).isEqualTo(newParent);
         assertThat(result.getType()).isEqualTo(TypeCategorie.BOTH);
-        verify(categoryRepository, never()).findByParent(any());
+    }
+
+    @Test
+    void update_versUnNouveauParent_repercuteLeNouveauTypeSurSesPropresSousCategories() {
+        // "Restaurant" a elle-meme une sous-categorie ("Fast-food") : la reparenter
+        // sous "Loisirs" doit aussi retyper cette sous-categorie (petit-enfant du
+        // nouveau parent), pas seulement "Restaurant" elle-meme.
+        Categorie existing = categorie(1L, "Restaurant", TypeCategorie.EXPENSE, null);
+        Categorie grandchild = categorie(3L, "Fast-food", TypeCategorie.EXPENSE, existing);
+        Categorie newParent = categorie(2L, "Loisirs", TypeCategorie.BOTH, null);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(categoryRepository.findById(2L)).thenReturn(Optional.of(newParent));
+        when(categoryRepository.findByParent(existing)).thenReturn(List.of(grandchild));
+        when(categoryRepository.findByParent(grandchild)).thenReturn(List.of());
+        CategorieDTO payload = CategorieDTO.builder().name("Restaurant").parentId(2L).type(TypeCategorie.INCOME).build();
+
+        service.update(1L, payload);
+
+        assertThat(grandchild.getType()).isEqualTo(TypeCategorie.BOTH);
     }
 
     // --- delete ---
@@ -153,6 +173,41 @@ class ServiceCategorieTest {
         assertThat(child.getParent()).isEqualTo(target);
         assertThat(child.getType()).isEqualTo(target.getType());
         verify(categoryRepository).delete(source);
+    }
+
+    @Test
+    void merge_repercuteAussiLeTypeSurLesPetitsEnfantsDesEnfantsReparentes() {
+        // "Supermarche" (enfant de la source) a elle-meme une sous-categorie
+        // ("Bio") : la fusion doit aussi la retyper, pas seulement "Supermarche".
+        Categorie target = categorie(1L, "Alimentation", TypeCategorie.INCOME, null);
+        Categorie source = categorie(2L, "Courses", TypeCategorie.EXPENSE, null);
+        Categorie child = categorie(3L, "Supermarche", TypeCategorie.EXPENSE, source);
+        Categorie grandchild = categorie(4L, "Bio", TypeCategorie.EXPENSE, child);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(target));
+        when(categoryRepository.findById(2L)).thenReturn(Optional.of(source));
+        when(categoryRepository.findByParent(source)).thenReturn(List.of(child));
+        when(categoryRepository.findByParent(child)).thenReturn(List.of(grandchild));
+        when(categoryRepository.findByParent(grandchild)).thenReturn(List.of());
+
+        service.merge(List.of(2L), 1L);
+
+        assertThat(grandchild.getType()).isEqualTo(TypeCategorie.INCOME);
+    }
+
+    @Test
+    void merge_ciblePetiteFilleDeLaSource_rejeteeAvantDeCreerUnCycle() {
+        // Fusionner "Restaurant" (source) dans "Restaurant:Fast-food" (target, enfant de source)
+        // creerait un cycle parent/enfant (target deviendrait son propre parent) : doit etre rejete.
+        Categorie source = categorie(1L, "Restaurant", TypeCategorie.EXPENSE, null);
+        Categorie target = categorie(2L, "Fast-food", TypeCategorie.EXPENSE, source);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(source));
+        when(categoryRepository.findById(2L)).thenReturn(Optional.of(target));
+
+        assertThatThrownBy(() -> service.merge(List.of(1L), 2L))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(transactionRepository, payeeRepository);
+        verify(categoryRepository, never()).delete(any());
     }
 
     @Test
@@ -193,7 +248,37 @@ class ServiceCategorieTest {
         Categorie result = service.findOrCreateByName("Loisirs");
 
         assertThat(result.getName()).isEqualTo("Loisirs");
+        assertThat(result.getType()).isEqualTo(TypeCategorie.EXPENSE);
         verify(categoryRepository).save(result);
+    }
+
+    @Test
+    void findOrCreateByName_nomRacineInconnuAvecMontantPositif_creeUneCategorieDeTypeRevenu() {
+        when(categoryRepository.findByNameIgnoreCaseAndParentIsNull("Salaire")).thenReturn(Optional.empty());
+
+        Categorie result = service.findOrCreateByName("Salaire", new BigDecimal("1500.00"));
+
+        assertThat(result.getType()).isEqualTo(TypeCategorie.INCOME);
+    }
+
+    @Test
+    void findOrCreateByName_nomRacineInconnuAvecMontantNegatif_creeUneCategorieDeTypeDepense() {
+        when(categoryRepository.findByNameIgnoreCaseAndParentIsNull("Loisirs")).thenReturn(Optional.empty());
+
+        Categorie result = service.findOrCreateByName("Loisirs", new BigDecimal("-20.00"));
+
+        assertThat(result.getType()).isEqualTo(TypeCategorie.EXPENSE);
+    }
+
+    @Test
+    void findOrCreateByName_nomRacineExistantAvecMontantPositif_neModifiePasLeTypeDeLaCategorieExistante() {
+        Categorie existing = categorie(9L, "Loisirs", TypeCategorie.EXPENSE, null);
+        when(categoryRepository.findByNameIgnoreCaseAndParentIsNull("Loisirs")).thenReturn(Optional.of(existing));
+
+        Categorie result = service.findOrCreateByName("Loisirs", new BigDecimal("50.00"));
+
+        assertThat(result.getType()).isEqualTo(TypeCategorie.EXPENSE);
+        verify(categoryRepository, never()).save(any());
     }
 
     @Test

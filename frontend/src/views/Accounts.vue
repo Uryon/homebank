@@ -105,6 +105,7 @@ import { ref, computed, onMounted } from 'vue'
 import { AccountsAPI, TransactionsAPI } from '../services/api'
 import { formatAmount } from '../services/format'
 import { dataStore } from '../services/dataStore'
+import { alertApiError } from '../services/errors'
 import AmountInput from '../components/AmountInput.vue'
 import AccountModal from '../components/AccountModal.vue'
 
@@ -206,7 +207,7 @@ async function submitTransfer() {
     // transactions du cache partagé, pas seulement les soldes.
     await dataStore.refreshTransactions()
   } catch (e) {
-    alert('Erreur lors du transfert : ' + (e.response?.data?.error || e.message))
+    alertApiError('Erreur lors du transfert', e)
   } finally {
     transferring.value = false
   }
