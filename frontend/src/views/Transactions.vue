@@ -597,20 +597,31 @@ function buildRestoreActions(transactionsToDelete) {
     const isTransferLeg = t.paymentMode === 'TRANSFER' || t.transferTransactionId
     const pair = isTransferLeg ? byId.get(t.transferTransactionId) : null
 
+    if (isTransferLeg && !pair) {
+      // Jumelle introuvable dans le store (cas limite, ex : deja supprimee
+      // par ailleurs) : on ne peut pas restaurer l'appariement, seulement
+      // recreer ce cote en transaction normale. On le signale plutot que de
+      // laisser croire que l'annulation a tout restaure a l'identique.
+      console.warn(`Annulation : jumelle de virement introuvable pour la transaction ${t.id}, restauration en transaction simple sans appariement.`)
+    }
+
     if (isTransferLeg && pair) {
       handledIds.add(pair.id)
       const from = t.amount < 0 ? t : pair
       const to = t.amount < 0 ? pair : t
-      actions.push(() => TransactionsAPI.transfer({
-        fromAccountId: from.accountId,
-        toAccountId: to.accountId,
-        amount: Math.abs(t.amount),
-        date: t.date,
-        memo: t.memo
-      }))
+      actions.push({
+        ids: [t.id, pair.id],
+        run: () => TransactionsAPI.transfer({
+          fromAccountId: from.accountId,
+          toAccountId: to.accountId,
+          amount: Math.abs(t.amount),
+          date: t.date,
+          memo: t.memo
+        })
+      })
     } else {
       const payload = transactionPayloadFrom(t)
-      actions.push(() => TransactionsAPI.create(payload))
+      actions.push({ ids: [t.id], run: () => TransactionsAPI.create(payload) })
     }
   }
 
@@ -618,7 +629,7 @@ function buildRestoreActions(transactionsToDelete) {
 }
 
 async function restoreAll(actions) {
-  await Promise.all(actions.map(action => action()))
+  await Promise.all(actions.map(action => action.run()))
 }
 
 const showModal = ref(false)
@@ -789,9 +800,26 @@ async function saveBulkEdit() {
     payload.validated = bulkForm.value.validated
   }
 
+  // Champs effectivement touches par cette modification en masse : necessaire
+  // pour ne restaurer que ceux-la lors de l'annulation (voir plus bas), sans
+  // quoi passer par TransactionsAPI.update() (qui reenverrait TOUS les champs,
+  // y compris compte/date/montant) est systematiquement refuse par le backend
+  // des qu'une des transactions modifiees est un cote de virement (voir
+  // ServiceTransaction#update, qui interdit toute edition directe d'un
+  // virement) alors que bulkUpdate, lui, autorise deja categorie/tiers/
+  // marqueurs/statut sur un virement (voir ServiceTransaction#applyBulkFields).
+  const touchedFields = {
+    categoryId: bulkForm.value.categoryTouched,
+    payee: bulkForm.value.payeeTouched,
+    paymentMode: bulkForm.value.paymentMode !== null,
+    periodicExpense: bulkForm.value.periodicExpense !== null,
+    exceptional: bulkForm.value.exceptional !== null,
+    validated: bulkForm.value.validated !== null
+  }
+
   const previousSnapshots = transactions.value
     .filter(t => selectedIds.value.has(t.id))
-    .map(t => ({ id: t.id, payload: transactionPayloadFrom(t) }))
+    .map(t => ({ id: t.id, before: transactionPayloadFrom(t) }))
 
   bulkSaving.value = true
   try {
@@ -800,7 +828,34 @@ async function saveBulkEdit() {
     clearSelection()
     await load()
     setLastAction(`Modification de ${previousSnapshots.length} transaction(s)`, async () => {
-      await Promise.all(previousSnapshots.map(s => TransactionsAPI.update(s.id, s.payload)))
+      await Promise.all(previousSnapshots.map(({ id, before }) => {
+        const restorePayload = { ids: [id] }
+        if (touchedFields.categoryId) {
+          restorePayload.categoryIdProvided = true
+          restorePayload.categoryId = before.categoryId
+        }
+        if (touchedFields.payee) {
+          restorePayload.payeeProvided = true
+          restorePayload.payee = before.payee
+        }
+        if (touchedFields.paymentMode) {
+          restorePayload.paymentModeProvided = true
+          restorePayload.paymentMode = before.paymentMode
+        }
+        if (touchedFields.periodicExpense) {
+          restorePayload.periodicExpenseProvided = true
+          restorePayload.periodicExpense = before.periodicExpense
+        }
+        if (touchedFields.exceptional) {
+          restorePayload.exceptionalProvided = true
+          restorePayload.exceptional = before.exceptional
+        }
+        if (touchedFields.validated) {
+          restorePayload.validatedProvided = true
+          restorePayload.validated = before.validated
+        }
+        return TransactionsAPI.bulkUpdate(restorePayload)
+      }))
       await load()
     })
   } finally {
@@ -1374,11 +1429,18 @@ async function deletePending() {
   // ServiceTransaction#deleteAllPending, pas filtre par compte) : meme
   // remarque que validateAll ci-dessus pour le snapshot d'annulation.
   const pendingTransactions = dataStore.state.transactions.filter(t => !t.validated)
-  const restoreActions = buildRestoreActions(pendingTransactions)
+  const candidateActions = buildRestoreActions(pendingTransactions)
   try {
     await TransactionsAPI.removePending()
     await load()
-    setLastAction(`Suppression de ${pendingTransactions.length} transaction(s)`, async () => {
+    // Un cote de virement en attente dont la jumelle est deja validee est
+    // ignore par le backend (voir ServiceTransaction#deleteAllPending) : il
+    // est donc toujours present apres le rechargement, et ne doit pas etre
+    // "restaure" (il n'a jamais ete supprime, ca creerait un doublon).
+    const stillPresentIds = new Set(dataStore.state.transactions.map(t => t.id))
+    const restoreActions = candidateActions.filter(a => !a.ids.some(id => stillPresentIds.has(id)))
+    const actuallyDeletedCount = pendingTransactions.filter(t => !stillPresentIds.has(t.id)).length
+    setLastAction(`Suppression de ${actuallyDeletedCount} transaction(s)`, async () => {
       await restoreAll(restoreActions)
       await load()
     })

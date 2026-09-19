@@ -368,12 +368,30 @@ public class ServiceTransaction {
      * generalement a repartir d'une base propre avant un reimport du meme
      * releve, qui doit alors pouvoir la recreer normalement plutot que de la
      * rejeter a tort comme doublon.
+     * <p>
+     * Un cote de virement en attente dont la jumelle est deja validee est
+     * exclu de ce nettoyage : deleteTransactions/unlinkTransferPairs emporte
+     * toujours les deux cotes ensemble (voir leur javadoc), ce qui supprimerait
+     * ici une transaction validee que l'utilisateur n'a pourtant jamais
+     * demande a supprimer (seul "en attente" a ete demande) — a supprimer
+     * manuellement si c'est bien l'intention.
      */
     @Transactional
     public int deleteAllPending() {
-        List<Long> pendingIds = transactionRepository.findByValidatedFalse().stream()
-                .map(Transaction::getId)
-                .toList();
+        List<Transaction> pending = transactionRepository.findByValidatedFalseWithTransferTransaction();
+        List<Long> pendingIds = new ArrayList<>();
+        int skipped = 0;
+        for (Transaction t : pending) {
+            Transaction pair = t.getTransferTransaction();
+            if (pair != null && pair.isValidated()) {
+                skipped++;
+                continue;
+            }
+            pendingIds.add(t.getId());
+        }
+        if (skipped > 0) {
+            log.warn("{} transaction(s) de virement en attente ignorees par le nettoyage global : leur jumelle est deja validee (suppression manuelle si besoin)", skipped);
+        }
         return pendingIds.isEmpty() ? 0 : deleteTransactions(pendingIds, false);
     }
 

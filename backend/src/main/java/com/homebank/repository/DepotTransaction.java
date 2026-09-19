@@ -104,8 +104,16 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
 
     List<Transaction> findByPeriodicExpenseTrueOrderByDateDescIdDesc();
 
-    /** Transactions en attente de validation (rapprochement bancaire), pour la suppression en masse. */
-    List<Transaction> findByValidatedFalse();
+    /**
+     * Transactions en attente de validation (rapprochement bancaire), pour la
+     * suppression en masse, avec leur eventuelle jumelle de virement deja
+     * chargee (fetch join) : ServiceTransaction#deleteAllPending verifie le
+     * statut valide de cette jumelle pour chacune (voir sa javadoc), sans quoi
+     * chaque transaction en attente declencherait sa propre requete au
+     * premier acces (LAZY).
+     */
+    @Query("select t from Transaction t left join fetch t.transferTransaction where t.validated = false")
+    List<Transaction> findByValidatedFalseWithTransferTransaction();
 
     /**
      * Transactions dont la categorie est marquee "annuelle" (lissees sur 12

@@ -677,8 +677,7 @@ const selectedCategoryObjects = computed(() =>
  * deviendrait alors source ET descendante de la cible, ce que le backend
  * rejette desormais (cycle parent/enfant, voir ServiceCategorie#merge).
  */
-function isDescendantOfSelected(category, selectedIdSet) {
-  const byId = new Map(categories.value.map(c => [c.id, c]))
+function isDescendantOfSelected(category, selectedIdSet, byId) {
   let current = byId.get(category.parentId)
   while (current) {
     if (selectedIdSet.has(current.id)) return true
@@ -689,7 +688,8 @@ function isDescendantOfSelected(category, selectedIdSet) {
 
 const mergeableTargets = computed(() => {
   const ids = new Set(selectedIds.value)
-  return selectedCategoryObjects.value.filter(c => !isDescendantOfSelected(c, ids))
+  const byId = new Map(categories.value.map(c => [c.id, c]))
+  return selectedCategoryObjects.value.filter(c => !isDescendantOfSelected(c, ids, byId))
 })
 
 function openMergeModal() {
