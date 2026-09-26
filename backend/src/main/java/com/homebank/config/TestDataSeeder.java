@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 
 /**
@@ -40,6 +41,7 @@ public class TestDataSeeder implements CommandLineRunner {
     private final DepotTiers payeeRepository;
     private final DepotTransaction transactionRepository;
     private final DepotPret loanRepository;
+    private final DepotDernierImport lastImportRepository;
     private final ServiceTiers payeeService;
 
     public TestDataSeeder(DepotCompte accountRepository,
@@ -47,12 +49,14 @@ public class TestDataSeeder implements CommandLineRunner {
                            DepotTiers payeeRepository,
                            DepotTransaction transactionRepository,
                            DepotPret loanRepository,
+                           DepotDernierImport lastImportRepository,
                            ServiceTiers payeeService) {
         this.accountRepository = accountRepository;
         this.categoryRepository = categoryRepository;
         this.payeeRepository = payeeRepository;
         this.transactionRepository = transactionRepository;
         this.loanRepository = loanRepository;
+        this.lastImportRepository = lastImportRepository;
         this.payeeService = payeeService;
     }
 
@@ -73,11 +77,18 @@ public class TestDataSeeder implements CommandLineRunner {
         Categorie logement = rootCategory("Logement", Categorie.TypeCategorie.EXPENSE);
         Categorie loyer = childCategory("Loyer", logement);
         Categorie energie = childCategory("Énergie", logement);
+        // Categorie "annuelle" (voir Categorie#annualized) : la taxe fonciere,
+        // payee en une fois, est lissee sur 12 mois dans les rapports.
+        Categorie taxeFonciere = annualChildCategory("Taxe foncière", logement);
 
         Categorie loisirs = rootCategory("Loisirs", Categorie.TypeCategorie.EXPENSE);
         Categorie abonnements = childCategory("Abonnements", loisirs);
+        // Categorie masquee (voir Categorie#hidden) : exclue des autocompletes
+        // mais conservee pour l'historique, ex-poste d'un abonnement resilie.
+        Categorie ancienAbonnement = hiddenChildCategory("Ancien abonnement résilié", loisirs);
 
         Categorie transport = rootCategory("Transport", Categorie.TypeCategorie.EXPENSE);
+        Categorie sante = rootCategory("Santé", Categorie.TypeCategorie.EXPENSE);
 
         Categorie salaire = rootCategory("Salaire", Categorie.TypeCategorie.INCOME);
 
@@ -86,6 +97,7 @@ public class TestDataSeeder implements CommandLineRunner {
         payee("Employeur", "Employeur;Virement salaire", null, salaire);
         payee("Bailleur", "Bailleur;Loyer", null, loyer);
         payee(NETFLIX, NETFLIX, new BigDecimal("15.00"), abonnements);
+        payee("Pharmacie", "Pharmacie", null, sante);
 
         // --- Transactions : 4 derniers mois, revenus + depenses variees ---
         LocalDate today = LocalDate.now(ZoneId.systemDefault());
@@ -173,6 +185,39 @@ public class TestDataSeeder implements CommandLineRunner {
         loan.setNotes("Donnée de démonstration (profil test)");
         loanRepository.save(loan);
 
+        // --- Vieil historique sur une categorie masquee (abonnement resilie il y a longtemps) ---
+        transaction(new TransactionCore(carte, today.minusMonths(8).withDayOfMonth(6), new BigDecimal("-29.99")),
+                "Salle de sport", "Abonnement (résilié depuis)", ancienAbonnement, ModePaiement.DIRECT_DEBIT, true, false);
+
+        // --- Taxe fonciere : payee en une fois, categorie annualisee (lissee sur 12 mois dans les rapports) ---
+        transaction(new TransactionCore(courant, today.minusMonths(3).withDayOfMonth(10), new BigDecimal("-980.00")),
+                "Trésor public", "Taxe foncière", taxeFonciere, ModePaiement.DIRECT_DEBIT, true, false);
+
+        // --- Depense exceptionnelle (voir Transaction#exceptional), exclue des moyennes/tendances ---
+        Transaction exceptional = transaction(
+                new TransactionCore(courant, today.minusMonths(1).withDayOfMonth(20), new BigDecimal("-3200.00")),
+                "Garage Dupont", "Achat voiture d'occasion", transport, ModePaiement.CHEQUE, true, false);
+        exceptional.setExceptional(true);
+        transactionRepository.save(exceptional);
+
+        // --- Transactions avec tags libres (voir Transaction#tags) ---
+        Transaction roadTrip = transaction(new TransactionCore(courant, today.minusDays(6), new BigDecimal("-64.00")),
+                "Station essence", "Plein avant départ", transport, ModePaiement.CARD, true, false);
+        roadTrip.setTags("roadtrip vacances");
+        transactionRepository.save(roadTrip);
+
+        // --- Doublon volontaire (import CSV importe deux fois par erreur), pour demo de l'onglet "Doublons" ---
+        transaction(new TransactionCore(courant, today.minusDays(12), new BigDecimal("-18.40")),
+                "Pharmacie", "Ordonnance", sante, ModePaiement.CARD, false, false);
+        transaction(new TransactionCore(courant, today.minusDays(12), new BigDecimal("-18.40")),
+                "Pharmacie", "Ordonnance", sante, ModePaiement.CARD, false, false);
+
+        // --- Date du "dernier import" (voir ServiceDernierImport), affichee dans l'export PDF du tableau de bord ---
+        DernierImport lastImport = new DernierImport();
+        lastImport.setId(1L);
+        lastImport.setDateHeure(LocalDateTime.now(ZoneId.systemDefault()).minusHours(3));
+        lastImportRepository.save(lastImport);
+
         log.info("Données de démonstration chargées : {} comptes, {} catégories, {} tiers, {} transactions, {} prêt(s).",
                 accountRepository.count(), categoryRepository.count(), payeeRepository.count(),
                 transactionRepository.count(), loanRepository.count());
@@ -199,6 +244,18 @@ public class TestDataSeeder implements CommandLineRunner {
         c.setName(name);
         c.setType(parent.getType());
         c.setParent(parent);
+        return categoryRepository.save(c);
+    }
+
+    private Categorie annualChildCategory(String name, Categorie parent) {
+        Categorie c = childCategory(name, parent);
+        c.setAnnualized(true);
+        return categoryRepository.save(c);
+    }
+
+    private Categorie hiddenChildCategory(String name, Categorie parent) {
+        Categorie c = childCategory(name, parent);
+        c.setHidden(true);
         return categoryRepository.save(c);
     }
 
