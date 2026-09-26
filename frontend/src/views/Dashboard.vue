@@ -573,7 +573,7 @@ const monthlyTrend = ref(0)
 
 const exporting = ref(false)
 
-/** Export manuel du tableau de bord en PDF (voir aussi Transactions.vue#validateAll, qui déclenche le même export après validation en masse). */
+/** Export manuel du tableau de bord en PDF (le même endpoint est appelé automatiquement à la fermeture de l'appli par HomeBank.vbs). */
 async function exportDashboard() {
   exporting.value = true
   try {

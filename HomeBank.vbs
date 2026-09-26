@@ -89,9 +89,15 @@ Loop
 
 
 ' =========================================================
-' FIN — arrêt du backend et du frontend (postgres reste actif,
-' c'est un service Windows partagé, pas un process de l'appli)
+' EXPORT PDF AUTOMATIQUE A LA FERMETURE
+'
+' Doit avoir lieu avant l'arret du backend/frontend : le backend lance le
+' script Playwright, qui capture le tableau de bord servi par Vite. Bloquant
+' (attend la fin de l'export, 30s max cote ServiceExport) ; un echec est
+' ecrit dans logs\export-fermeture.log mais n'empeche pas l'arret.
 ' =========================================================
+
+ExportPdfALaFermeture
 
 StopProcessTree backendPid
 StopProcessTree frontendPid
@@ -138,6 +144,31 @@ Function StartHiddenProcess(cdDir, command, logFile)
     End If
 
 End Function
+
+
+' =========================================================
+' DECLENCHER L'EXPORT PDF DU TABLEAU DE BORD
+'
+' Appelle le meme endpoint que le bouton "Exporter en PDF" (voir
+' ControleurExport) plutot que de relancer le script Node directement :
+' la date du dernier import et les chemins configures restent geres par
+' ServiceExport.
+' =========================================================
+
+Sub ExportPdfALaFermeture()
+
+    Dim command
+
+    command = "powershell.exe -NoProfile -Command " & _
+              Chr(34) & _
+              "try { Invoke-RestMethod -Method Post -TimeoutSec 45 " & _
+              "-Uri 'http://127.0.0.1:8080/api/export/dashboard-pdf' | Out-Null } " & _
+              "catch { $_.Exception.Message | Out-File -FilePath '" & logsDir & "\export-fermeture.log' } " & _
+              Chr(34)
+
+    shell.Run command, 0, True
+
+End Sub
 
 
 ' =========================================================
