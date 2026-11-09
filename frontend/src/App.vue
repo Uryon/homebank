@@ -5,32 +5,41 @@
         <AppLogo />
         <span class="brand-name"><strong>Home</strong>Bank</span>
       </div>
-      <nav>
-        <RouterLink to="/" class="nav-item" :class="{ active: $route.name === 'dashboard' }">
-          <span class="nav-icon">📊</span> Tableau de bord
-        </RouterLink>
-        <RouterLink to="/accounts" class="nav-item" :class="{ active: $route.name === 'accounts' }">
-          <span class="nav-icon">🏦</span> Comptes
-        </RouterLink>
-        <RouterLink to="/transactions" class="nav-item" :class="{ active: $route.name === 'transactions' }">
-          <span class="nav-icon">💳</span> Transactions
-        </RouterLink>
-        <RouterLink to="/categories" class="nav-item" :class="{ active: $route.name === 'categories' }">
-          <span class="nav-icon">🏷️</span> Catégories
-        </RouterLink>
-        <RouterLink to="/payees" class="nav-item" :class="{ active: $route.name === 'payees' }">
-          <span class="nav-icon">🏪</span> Tiers
-        </RouterLink>
-        <RouterLink to="/loans" class="nav-item" :class="{ active: $route.name === 'loans' }">
-          <span class="nav-icon">📜</span> Prêts
-        </RouterLink>
-        <RouterLink to="/import" class="nav-item" :class="{ active: $route.name === 'import' }">
-          <span class="nav-icon">📥</span> Import CSV/QIF
-        </RouterLink>
+      <nav aria-label="Navigation principale">
+        <div class="nav-group">
+          <RouterLink to="/" class="nav-item" :class="{ active: $route.name === 'dashboard' }">
+            <Icon name="dashboard" /> Tableau de bord
+          </RouterLink>
+          <RouterLink to="/transactions" class="nav-item" :class="{ active: $route.path.startsWith('/transactions') }">
+            <Icon name="transactions" /> Transactions
+          </RouterLink>
+          <RouterLink to="/accounts" class="nav-item" :class="{ active: $route.name === 'accounts' }">
+            <Icon name="accounts" /> Comptes
+          </RouterLink>
+        </div>
+        <div class="nav-group">
+          <RouterLink to="/categories" class="nav-item" :class="{ active: $route.name === 'categories' }">
+            <Icon name="categories" /> Catégories
+          </RouterLink>
+          <RouterLink to="/payees" class="nav-item" :class="{ active: $route.name === 'payees' }">
+            <Icon name="payees" /> Tiers
+          </RouterLink>
+          <RouterLink to="/loans" class="nav-item" :class="{ active: $route.name === 'loans' }">
+            <Icon name="loans" /> Prêts
+          </RouterLink>
+        </div>
+        <div class="nav-group">
+          <RouterLink to="/import" class="nav-item" :class="{ active: $route.name === 'import' }">
+            <Icon name="import" /> Importer
+          </RouterLink>
+        </div>
       </nav>
 
       <div v-if="sortedAccounts.length" class="sidebar-accounts">
-        <div class="sidebar-accounts-header">Comptes</div>
+        <div class="sidebar-networth">
+          <div class="sidebar-networth-label">Patrimoine net</div>
+          <div class="sidebar-networth-value"><Money :value="netWorth" /></div>
+        </div>
         <button
           v-for="a in sortedAccounts"
           :key="a.id"
@@ -38,6 +47,7 @@
           class="sidebar-account"
           @click="openAccount(a)"
         >
+          <span class="sidebar-account-dot" :class="a.type.toLowerCase()" aria-hidden="true"></span>
           <span class="sidebar-account-name">{{ a.name }}</span>
           <span
             class="sidebar-account-balance amount"
@@ -68,6 +78,8 @@ import { dataStore } from './services/dataStore'
 import { formatAmount } from './services/format'
 import AccountModal from './components/AccountModal.vue'
 import AppLogo from './components/AppLogo.vue'
+import Icon from './components/Icon.vue'
+import Money from './components/Money.vue'
 
 // Precharge comptes, categories, tiers et transactions des le demarrage de
 // l'app, en arriere-plan, pour que la page Transactions (et les autres)
@@ -86,6 +98,11 @@ const balances = computed(() => dataStore.state.balances)
 /** Comptes courants toujours en tête de liste, comme sur la page Comptes. */
 const sortedAccounts = computed(() =>
   [...dataStore.state.accounts].sort((a, b) => (a.type === 'CHECKING' ? 0 : 1) - (b.type === 'CHECKING' ? 0 : 1))
+)
+
+/** Somme de tous les soldes (cartes de crédit en négatif : patrimoine NET). */
+const netWorth = computed(() =>
+  dataStore.state.accounts.reduce((sum, a) => sum + (balances.value[a.id] ?? 0), 0)
 )
 
 const editingAccount = ref(null)

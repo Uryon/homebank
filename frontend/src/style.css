@@ -1,55 +1,73 @@
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
-
 /*
-  Palette inspirée YNAB : sidebar sombre (identité conservée) + zone de
-  contenu claire et aérée. Les noms de variables historiques (--ink-*) sont
-  conservés pour ne pas casser les composants existants qui les référencent,
-  mais leurs VALEURS ont été basculées vers un thème clair : --ink-950 est
-  désormais le fond de page (très clair), --ink-900 la couleur des cartes
-  (blanc), etc. Considérez-les comme des "niveaux de surface", pas comme des
-  teintes sombres au sens littéral.
+  Système de design — itération 1 « Fondations ».
+
+  Principes :
+  - Les noms historiques (--ink-*, --mint, --coral...) sont conservés pour ne
+    pas casser les composants existants ; seules leurs VALEURS changent.
+    --ink-950 = fond de page, --ink-900 = surface (cartes), etc. : des
+    « niveaux de surface », pas des teintes sombres.
+  - Le vert et le rouge sont RÉSERVÉS au sens financier (revenu / dépense).
+    L'action principale utilise --brand (encre bleu nuit), jamais le vert.
+  - Contrastes vérifiés AA (≥ 4.5:1) pour les textes et montants.
+  - Polices : Inter (axe optique : les titres reçoivent automatiquement le
+    dessin « display »), chiffres tabulaires pour aligner les montants.
 */
 :root {
-    /* Niveaux de surface (clair) */
-    --ink-950: #F5F6FA;   /* fond de page */
+    color-scheme: light;
+
+    /* Niveaux de surface */
+    --ink-950: #F6F7F9;   /* fond de page */
     --ink-900: #FFFFFF;   /* cartes, modales, tableaux */
-    --ink-800: #F1F3F8;   /* survol, fond des champs de formulaire */
-    --ink-700: #E8EBF2;   /* fond des badges/pastilles */
-    --ink-600: #CBD2DE;   /* bordures plus marquées */
-    --line: #E2E6EE;      /* bordures standard */
+    --ink-800: #F1F3F6;   /* survol, fonds discrets */
+    --ink-700: #E7EAEF;   /* pastilles */
+    --ink-600: #CDD3DC;   /* bordures marquées, scrollbar */
+    --line: #E4E7EC;      /* bordures standard */
+    --line-strong: #D3D8E0;
 
-    --text-primary: #1B2430;
-    --text-muted: #67707C;
-    --text-faint: #98A2AE;
+    --text-primary: #131722;
+    --text-muted: #566070;
+    --text-faint: #6B7585;
 
-    --mint: #1F9D6C;       /* revenus / positif */
-    --mint-dim: #E1F5EA;
-    --coral: #D64545;      /* depenses / negatif */
-    --coral-dim: #FBEAEA;
-    --amber: #C98A1B;      /* alertes / budget */
-    --amber-dim: #FBF0DE;
-    --azure: #3B6FE0;      /* actions / liens / focus */
-    --azure-dim: #E8EEFC;
+    /* Sens financier uniquement */
+    --mint: #0F7B57;       /* revenus / positif */
+    --mint-dim: #E3F4EC;
+    --coral: #C2372F;      /* dépenses / négatif */
+    --coral-dim: #FBECEA;
+    --amber: #A86A0A;      /* alertes / en attente */
+    --amber-dim: #FBF1DC;
+    --azure: #2F5FD0;      /* liens / focus / sélection */
+    --azure-dim: #E6EDFB;
 
-    --shadow-sm: 0 1px 2px rgba(23, 32, 46, 0.06);
-    --shadow-md: 0 4px 16px rgba(23, 32, 46, 0.08);
-    --shadow-lg: 0 12px 32px rgba(23, 32, 46, 0.14);
+    /* Action principale */
+    --brand: #1B2540;
+    --brand-hover: #2A3860;
+    --brand-text: #FFFFFF;
 
-    /* Sidebar : reste sombre, c'est l'identité visuelle de l'app */
-    --sidebar-bg: #101827;
+    --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
+    --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05), 0 0 0 1px rgba(16, 24, 40, 0.02);
+    --shadow-md: 0 4px 14px rgba(16, 24, 40, 0.08);
+    --shadow-lg: 0 16px 40px rgba(16, 24, 40, 0.18);
+
+    /* Sidebar : reste sombre (identité), plus neutre et plus profonde */
+    --sidebar-bg: #0E1424;
     --sidebar-border: rgba(255, 255, 255, 0.07);
-    --sidebar-text: #93A0B4;
+    --sidebar-text: #9AA6BA;
     --sidebar-text-active: #FFFFFF;
-    --sidebar-hover-bg: rgba(255, 255, 255, 0.06);
-    --sidebar-active-bg: rgba(52, 211, 153, 0.14);
-    --sidebar-accent: #34D399;
+    --sidebar-hover-bg: rgba(255, 255, 255, 0.05);
+    --sidebar-active-bg: rgba(255, 255, 255, 0.09);
+    --sidebar-accent: #E2A76B;       /* cuivre : reprend la couleur du logo */
+    --sidebar-positive: #5FD3A3;
+    --sidebar-negative: #FF8F86;
 
     --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
 
-    --font-ui: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
-    --font-mono: 'IBM Plex Mono', 'SFMono-Regular', monospace;
+    --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    /* Les montants n'utilisent plus de police monospace : Inter + chiffres
+       tabulaires s'alignent aussi bien et se lisent mieux. La variable est
+       conservée car quelques composants la référencent encore. */
+    --font-mono: var(--font-ui);
 }
 
 * { box-sizing: border-box; }
@@ -60,17 +78,17 @@ html, body {
     background: var(--ink-950);
     color: var(--text-primary);
     font-family: var(--font-ui);
+    font-optical-sizing: auto;
+    font-size: 14px;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
 }
 
-#app {
-    min-height: 100vh;
-}
+#app { min-height: 100vh; }
 
-/* Contenu present pour les lecteurs d'ecran (accessibilite) mais invisible
-   a l'ecran : ex. entetes <th> de tableaux dont le titre visuel est deja
-   porte par la carte englobante, mais qui doivent quand meme exposer une
-   structure de tableau valide. */
+/* Contenu pour lecteurs d'écran uniquement (voir tableaux dont le titre
+   visuel est porté par la carte englobante). */
 .sr-only {
     position: absolute;
     width: 1px;
@@ -85,14 +103,8 @@ html, body {
 
 a { color: inherit; text-decoration: none; }
 
-button {
-    font-family: var(--font-ui);
-    cursor: pointer;
-}
-
-input, select, textarea {
-    font-family: var(--font-ui);
-}
+button { font-family: var(--font-ui); cursor: pointer; }
+input, select, textarea { font-family: var(--font-ui); }
 
 :focus-visible {
     outline: 2px solid var(--azure);
@@ -101,32 +113,34 @@ input, select, textarea {
 }
 
 input[type="checkbox"] {
-    accent-color: var(--azure);
+    accent-color: var(--brand);
     width: 16px;
     height: 16px;
     cursor: pointer;
 }
 
-.amount {
-    font-family: var(--font-mono);
+/* Montants : chiffres tabulaires pour que les virgules s'alignent en colonne */
+.amount, td.num, th.num, .stat-value, .money {
     font-variant-numeric: tabular-nums;
+}
+.amount {
     font-weight: 600;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.005em;
 }
 .amount.positive { color: var(--mint); }
 .amount.negative { color: var(--coral); }
 
 .app-shell {
     display: grid;
-    grid-template-columns: 240px 1fr;
+    grid-template-columns: 252px 1fr;
     min-height: 100vh;
 }
 
-/* --- Sidebar : identité sombre conservée --- */
+/* ---------------- Sidebar ---------------- */
 .sidebar {
     background: var(--sidebar-bg);
     border-right: 1px solid var(--sidebar-border);
-    padding: 28px 18px;
+    padding: 22px 14px 18px;
     display: flex;
     flex-direction: column;
     position: sticky;
@@ -138,118 +152,143 @@ input[type="checkbox"] {
 .brand {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 2px 10px 22px;
-    margin-bottom: 18px;
-    border-bottom: 1px solid var(--sidebar-border);
+    gap: 11px;
+    padding: 2px 10px 0;
+    margin-bottom: 26px;
 }
 .brand-name {
-    font-family: var(--font-ui);
     font-size: 17px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-weight: 500;
+    letter-spacing: -0.02em;
     color: var(--sidebar-text-active);
 }
-.brand-name strong {
-    font-weight: 800;
-}
+.brand-name strong { font-weight: 700; }
+
+.nav-group + .nav-group { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--sidebar-border); }
 
 .nav-item {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
+    gap: 11px;
+    padding: 8px 12px;
     border-radius: var(--radius-sm);
     color: var(--sidebar-text);
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 500;
     margin-bottom: 2px;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.12s, color 0.12s;
 }
 .nav-item:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-active); }
-.nav-item.active { background: var(--sidebar-active-bg); color: var(--sidebar-accent); }
-.nav-item .nav-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    font-size: 15px;
-    line-height: 1;
-    flex-shrink: 0;
+.nav-item.active { background: var(--sidebar-active-bg); color: var(--sidebar-text-active); font-weight: 600; }
+.nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: -14px;
+    top: 9px;
+    bottom: 9px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--sidebar-accent);
 }
+.nav-item.active .icon { color: var(--sidebar-accent); }
 
-/* --- Sidebar : liste des comptes (style YNAB), sous la navigation --- */
+/* Patrimoine + liste des comptes */
 .sidebar-accounts {
-    margin-top: 22px;
+    margin-top: auto;
     padding-top: 18px;
-    border-top: 1px solid var(--sidebar-border);
 }
-.sidebar-accounts-header {
-    padding: 0 12px 8px;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+.sidebar-networth {
+    padding: 14px 14px 13px;
+    margin-bottom: 8px;
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid var(--sidebar-border);
+}
+.sidebar-networth-label {
+    font-size: 12.5px;
+    font-weight: 500;
     color: var(--sidebar-text);
-    opacity: 0.7;
+    margin-bottom: 3px;
+}
+.sidebar-networth-value {
+    font-size: 25px;
+    line-height: 1.15;
+    font-weight: 650;
+    letter-spacing: -0.025em;
+    color: var(--sidebar-text-active);
+    font-variant-numeric: tabular-nums;
 }
 .sidebar-account {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
-    padding: 8px 12px;
+    padding: 7px 12px;
     border: none;
     background: transparent;
     border-radius: var(--radius-sm);
     color: var(--sidebar-text);
     font-family: var(--font-ui);
     text-align: left;
-    margin-bottom: 1px;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.12s, color 0.12s;
 }
 .sidebar-account:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-active); }
+.sidebar-account-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--sidebar-text);
+}
+.sidebar-account-dot.checking { background: #7AA2FF; }
+.sidebar-account-dot.savings { background: #5FD3A3; }
+.sidebar-account-dot.cash { background: #F2C066; }
+.sidebar-account-dot.credit_card { background: #FF8F86; }
+.sidebar-account-dot.investment { background: #B9A6FF; }
 .sidebar-account-name {
+    flex: 1;
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
 }
-.sidebar-account-balance {
-    font-size: 12px;
+/* Double classe : doit l'emporter sur .amount.positive / .negative (couleurs
+   prévues pour fond clair, illisibles sur la sidebar sombre). */
+.sidebar-account-balance.amount {
+    font-size: 12.5px;
     flex-shrink: 0;
+    font-weight: 500;
+    color: var(--sidebar-positive);
 }
+.sidebar-account-balance.amount.negative { color: var(--sidebar-negative); }
 
-/* --- Contenu principal : clair et aéré --- */
+/* ---------------- Contenu ---------------- */
 .main-content {
-    padding: 32px 40px 60px;
+    padding: 34px 44px 72px;
     max-width: 1600px;
 }
 
-/* Page Transactions : le tableau (beaucoup de colonnes) doit profiter de
-   tout l'écran plutôt que de laisser un large espace vide à droite au-delà
-   des 1600px habituels sur les grands écrans (voir App.vue, class posée
-   uniquement sur la route "transactions"). */
-.main-content.main-content-wide {
-    max-width: none;
-}
+/* Page Transactions : tableau très large, profite de tout l'écran
+   (classe posée par App.vue sur la route "transactions"). */
+.main-content.main-content-wide { max-width: none; }
 
 .page-header {
     display: flex;
     justify-content: space-between;
     align-items: flex-end;
-    margin-bottom: 28px;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 18px;
+    gap: 16px;
+    margin-bottom: 26px;
+    padding-bottom: 0;
 }
 .page-header h1 {
-    font-size: 26px;
-    font-weight: 800;
-    margin: 0 0 4px;
-    letter-spacing: -0.01em;
+    font-size: 28px;
+    line-height: 1.15;
+    font-weight: 650;
+    margin: 0 0 6px;
+    letter-spacing: -0.025em;
     color: var(--text-primary);
 }
 .page-header .subtitle {
@@ -261,7 +300,7 @@ input[type="checkbox"] {
     background: var(--ink-900);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
-    padding: 22px;
+    padding: 20px 22px;
     box-shadow: var(--shadow-sm);
 }
 
@@ -272,22 +311,23 @@ input[type="checkbox"] {
     margin-bottom: 28px;
 }
 
+/* Étiquettes de statistique : casse normale (les majuscules espacées
+   fatiguent la lecture et ne portent aucune information). */
 .stat-label {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-faint);
-    margin-bottom: 10px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-bottom: 8px;
 }
 .stat-value {
-    font-family: var(--font-mono);
-    font-size: 26px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
+    font-size: 28px;
+    line-height: 1.15;
+    font-weight: 650;
+    letter-spacing: -0.025em;
     color: var(--text-primary);
 }
 
+/* ---------------- Tableaux ---------------- */
 table {
     width: 100%;
     border-collapse: collapse;
@@ -296,32 +336,26 @@ table {
 }
 thead th {
     text-align: left;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-faint);
-    font-weight: 700;
-    padding: 12px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    font-weight: 600;
+    padding: 11px 12px;
     border-bottom: 1px solid var(--line);
-    background: var(--ink-800);
+    background: #FAFBFC;
 }
 tbody td {
     padding: 12px;
     border-bottom: 1px solid var(--line);
     color: var(--text-primary);
 }
-tbody tr {
-    transition: background 0.1s;
-}
-tbody tr:hover { background: var(--ink-800); }
+tbody tr { transition: background 0.1s; }
+tbody tr:hover { background: #F8F9FB; }
 tbody tr:last-child td { border-bottom: none; }
 td.num, th.num { text-align: right; }
 
-/* Table "nue" (hors .table-scroll) : bordure + arrondi + ombre cohérents */
-/* .monthly-analysis-table exclue : son "overflow: hidden" casserait le
-   position: sticky de son thead (même piège que .transactions-table et
-   .payees-table) car il deviendrait l'ancêtre de référence du sticky à la
-   place de .monthly-analysis-wrap, qui est le vrai conteneur qui scrolle. */
+/* Table « nue » (hors .table-scroll) : bordure + arrondi cohérents.
+   Exclusions : leur "overflow: hidden" casserait le position: sticky de leur
+   thead (le conteneur qui scrolle est un autre élément). */
 table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
@@ -329,53 +363,65 @@ table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
     box-shadow: var(--shadow-sm);
 }
 
+/* ---------------- Boutons ---------------- */
 .btn {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 6px;
-    background: var(--mint);
-    color: #FFFFFF;
-    border: none;
-    padding: 10px 16px;
-    border-radius: var(--radius-sm);
-    font-weight: 700;
+    background: var(--brand);
+    color: var(--brand-text);
+    border: 1px solid var(--brand);
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    font-weight: 600;
     font-size: 14px;
-    transition: opacity 0.15s, box-shadow 0.15s, transform 0.05s;
-    box-shadow: var(--shadow-sm);
+    line-height: 1.4;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), var(--shadow-xs);
+    transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.05s;
 }
-.btn:hover { opacity: 0.92; box-shadow: var(--shadow-md); }
+.btn:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
 .btn:active { transform: translateY(1px); }
-.btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 .btn.secondary {
     background: var(--ink-900);
     color: var(--text-primary);
-    border: 1px solid var(--line);
-    box-shadow: none;
+    border: 1px solid var(--line-strong);
+    box-shadow: var(--shadow-xs);
 }
-.btn.secondary:hover { background: var(--ink-800); box-shadow: none; }
+.btn.secondary:hover { background: var(--ink-800); border-color: var(--ink-600); }
 .btn.danger {
     background: var(--ink-900);
     color: var(--coral);
-    border: 1px solid var(--coral-dim);
-    box-shadow: none;
+    border: 1px solid var(--line-strong);
+    box-shadow: var(--shadow-xs);
 }
-.btn.danger:hover { background: var(--coral-dim); box-shadow: none; }
+.btn.danger:hover { background: var(--coral-dim); border-color: #F0C9C5; }
 
+/* ---------------- Pastilles ---------------- */
 .badge {
-    display: inline-block;
-    padding: 3px 9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px 3px 8px;
     border-radius: 999px;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    font-size: 12px;
+    font-weight: 600;
+}
+.badge::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
 }
 .badge.checking { background: var(--azure-dim); color: var(--azure); }
 .badge.savings { background: var(--mint-dim); color: var(--mint); }
 .badge.cash { background: var(--amber-dim); color: var(--amber); }
 .badge.credit_card { background: var(--coral-dim); color: var(--coral); }
-.badge.investment { background: var(--ink-700); color: var(--text-primary); }
+.badge.investment { background: #EEEAFB; color: #5B3FC4; }
 
+/* ---------------- Formulaires ---------------- */
 .form-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -383,65 +429,61 @@ table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
 }
 .form-field { display: flex; flex-direction: column; gap: 6px; }
 .form-field label, .form-field .form-field-label {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-muted);
-    font-weight: 600;
+    font-weight: 500;
 }
-.form-field input, .form-field select, .form-field textarea {
-    background: var(--ink-800);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    padding: 9px 11px;
-    color: var(--text-primary);
-    font-size: 14px;
-    transition: border-color 0.15s, box-shadow 0.15s;
-}
-.form-field input:focus, .form-field select:focus, .form-field textarea:focus {
-    outline: none;
-    border-color: var(--azure);
-    box-shadow: 0 0 0 3px var(--azure-dim);
-}
-
-/* Champs "nus" en édition inline dans les tableaux (pas dans .form-field) */
+.form-field input, .form-field select, .form-field textarea,
 table input:not([type="checkbox"]), table select {
-    background: var(--ink-800);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    padding: 7px 9px;
+    background: var(--ink-900);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    padding: 8px 11px;
     color: var(--text-primary);
     font-size: 14px;
+    box-shadow: var(--shadow-xs);
+    transition: border-color 0.12s, box-shadow 0.12s;
 }
+table input:not([type="checkbox"]), table select { padding: 6px 9px; }
+.form-field input:focus, .form-field select:focus, .form-field textarea:focus,
 table input:not([type="checkbox"]):focus, table select:focus {
     outline: none;
     border-color: var(--azure);
     box-shadow: 0 0 0 3px var(--azure-dim);
 }
 
+/* ---------------- Modales ---------------- */
 .modal-overlay {
     position: fixed; inset: 0;
-    background: rgba(16, 24, 39, 0.45);
+    background: rgba(14, 20, 36, 0.5);
+    backdrop-filter: blur(2px);
     display: flex; align-items: center; justify-content: center;
     z-index: 50;
 }
 .modal {
     background: var(--ink-900);
     border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
+    border-radius: 18px;
     padding: 26px;
     width: 520px;
     max-width: 92vw;
     max-height: 88vh;
     overflow-y: auto;
     box-shadow: var(--shadow-lg);
+    animation: modal-in 0.16s ease-out;
 }
-.modal h2 { margin-top: 0; font-size: 18px; color: var(--text-primary); }
+.modal h2 { margin-top: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.015em; color: var(--text-primary); }
+@keyframes modal-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.985); }
+    to { opacity: 1; transform: none; }
+}
 
 .empty-state {
     text-align: center;
-    padding: 60px 20px;
+    padding: 56px 20px;
     color: var(--text-muted);
     background: var(--ink-900);
-    border: 1px dashed var(--line);
+    border: 1px dashed var(--line-strong);
     border-radius: var(--radius-lg);
 }
 
@@ -457,14 +499,18 @@ code {
     background: var(--ink-800);
     padding: 2px 6px;
     border-radius: 4px;
-    font-family: var(--font-mono);
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
     font-size: 12.5px;
     color: var(--text-muted);
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: var(--ink-950); }
-::-webkit-scrollbar-thumb { background: var(--ink-600); border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--ink-600); border-radius: 6px; border: 2px solid var(--ink-950); }
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
 
 /* --- Export PDF du tableau de bord (voir export/export-dashboard.mjs) :
    Playwright imprime en media "print". On masque la sidebar (inutile sur un
