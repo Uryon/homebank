@@ -37,21 +37,23 @@
 
       <div class="toolbar-actions">
         <button
-          class="btn"
-          :class="{ secondary: !pendingOnly }"
+          class="chip"
+          :class="{ active: pendingOnly }"
+          :aria-pressed="pendingOnly"
           @click="pendingOnly = !pendingOnly"
           :title="pendingOnly ? 'Revenir à toutes les transactions' : 'N\'afficher que les transactions à traiter'"
         >
-          À traiter ({{ pendingCount }})
+          À traiter <span class="chip-count">{{ pendingCount }}</span>
         </button>
 
         <button
-          class="btn"
-          :class="{ secondary: !uncategorizedOnly }"
+          class="chip"
+          :class="{ active: uncategorizedOnly }"
+          :aria-pressed="uncategorizedOnly"
           @click="uncategorizedOnly = !uncategorizedOnly"
           :title="uncategorizedOnly ? 'Revenir à toutes les transactions' : 'N\'afficher que les transactions sans catégorie'"
         >
-          Non catégorisées ({{ uncategorizedCount }})
+          Sans catégorie <span class="chip-count">{{ uncategorizedCount }}</span>
         </button>
 
         <button
@@ -60,7 +62,7 @@
           :disabled="pendingCount === 0 || validating"
           @click="validateAll"
         >
-          {{ validating ? 'Validation…' : `Tout valider (${pendingCount} en attente)` }}
+          {{ validating ? 'Validation…' : `Tout valider (${pendingCount})` }}
         </button>
 
         <button
@@ -69,13 +71,13 @@
           :disabled="pendingCount === 0 || deletingPending"
           @click="deletePending"
         >
-          {{ deletingPending ? 'Suppression…' : `Supprimer les non validées (${pendingCount})` }}
+          {{ deletingPending ? 'Suppression…' : `Supprimer les non validées` }}
         </button>
       </div>
 
       <div class="form-field" style="margin-left: auto;">
-        <label for="tx-search" title="Tiers, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Entre guillemets (&quot;CAF&quot;), le critère doit correspondre exactement au lieu de simplement le contenir. Ou &gt; / &lt; / = un montant seul.">Recherche (tiers, catégorie, montant, ou &gt; / &lt; / = un montant)</label>
-        <input id="tx-search" v-model="searchQuery" placeholder='Ex : Bouygues;29,99 ou "CAF" ou > 100' style="min-width: 260px;" />
+        <label for="tx-search" title="Tiers, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Entre guillemets (&quot;CAF&quot;), le critère doit correspondre exactement au lieu de simplement le contenir. Ou &gt; / &lt; / = un montant seul.">Rechercher</label>
+        <input id="tx-search" v-model="searchQuery" placeholder='Tiers, catégorie, montant… ex : > 100' style="min-width: 280px;" />
         <div v-if="amountQuery" class="text-hint">
           {{ amountSearchLoading ? 'Recherche…' : `${filteredTransactions.length} transaction(s) trouvée(s)` }}
         </div>
@@ -121,7 +123,7 @@
                 @change="toggleSelectAllPaged"
               />
             </th>
-            <th title="Statut de validation (rapprochement bancaire)">Statut</th>
+            <th title="Statut de validation (rapprochement bancaire)"><span class="sr-only">Statut</span></th>
             <th>Date</th>
             <th>Compte</th>
             <th>Tiers</th>
@@ -129,8 +131,8 @@
             <th>Mémo</th>
             <th class="num">Dépense</th>
             <th class="num">Revenu</th>
-            <th class="num" title="Dépense périodique récurrente">Périodique</th>
-            <th class="num" title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)">Except.</th>
+            <th class="num" title="Dépense périodique récurrente">Récurrent</th>
+            <th class="num" title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)">Exception</th>
             <th></th>
           </tr>
         </thead>
@@ -1542,22 +1544,24 @@ onMounted(async () => {
 .table-scroll {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
+  background: var(--ink-900);
+  box-shadow: var(--shadow-sm);
 }
 .transactions-table {
-  min-width: 1200px;
+  min-width: 1180px;
   width: 100%;
   table-layout: fixed;
 }
 .col-select { width: 36px; }
-.col-date { width: 120px; }
-.col-status { width: 50px; }
-.col-account { width: 100px; }
-.col-payee { width: 280px; }
-.col-category { width: auto; }
-.col-memo { width: 140px; }
-.col-amount { width: 110px; }
-.col-monthly { width: 70px; }
-.col-actions { width: 68px; }
+.col-date { width: 118px; }
+.col-status { width: 44px; }
+.col-account { width: 136px; }
+.col-payee { width: 180px; }
+.col-category { width: 210px; }
+.col-memo { width: auto; }
+.col-amount { width: 104px; }
+.col-monthly { width: 92px; }
+.col-actions { width: 76px; }
 
 .transactions-table th {
   white-space: nowrap;
@@ -1584,7 +1588,7 @@ onMounted(async () => {
 .transactions-table th:last-child {
   position: sticky;
   right: 0;
-  background: var(--ink-800);
+  background: #FAFBFC;
   z-index: 7;
   box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
 }
@@ -1647,11 +1651,9 @@ onMounted(async () => {
   border-radius: var(--radius-lg);
 }
 .bulk-section-title {
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-faint);
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-muted);
   margin-bottom: 10px;
 }
 

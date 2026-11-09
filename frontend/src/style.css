@@ -273,7 +273,7 @@ input[type="checkbox"] {
 
 /* Page Transactions : tableau très large, profite de tout l'écran
    (classe posée par App.vue sur la route "transactions"). */
-.main-content.main-content-wide { max-width: none; }
+.main-content.main-content-wide { max-width: none; padding-left: 28px; padding-right: 28px; }
 
 .page-header {
     display: flex;
@@ -397,6 +397,35 @@ table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
     box-shadow: var(--shadow-xs);
 }
 .btn.danger:hover { background: var(--coral-dim); border-color: #F0C9C5; }
+
+/* ---------------- Filtres « chip » (bascule on/off) ---------------- */
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line-strong);
+    background: var(--ink-900);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.chip:hover { background: var(--ink-800); }
+.chip.active { background: var(--brand); border-color: var(--brand); color: var(--brand-text); }
+.chip-count {
+    min-width: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--ink-700);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+.chip.active .chip-count { background: rgba(255, 255, 255, 0.2); color: #fff; }
 
 /* ---------------- Pastilles ---------------- */
 .badge {

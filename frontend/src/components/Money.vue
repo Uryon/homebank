@@ -28,7 +28,7 @@ const cents = computed(() => split.value.cents)
 
 <style scoped>
 .money-cents {
-  opacity: 0.55;
+  opacity: 0.68;
   font-weight: 500;
 }
 </style>

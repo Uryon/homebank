@@ -55,8 +55,8 @@
       </td>
       <td @click.stop>
         <span class="row-actions">
-          <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
-          <button class="btn secondary" style="padding: 6px 10px;" @click="$emit('cancel-edit')">✕</button>
+          <button class="btn" style="padding: 6px 9px;" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
+          <button class="btn secondary" style="padding: 6px 9px;" title="Annuler (Échap)" aria-label="Annuler" @click="$emit('cancel-edit')"><Icon name="x" /></button>
         </span>
       </td>
     </template>
@@ -74,7 +74,7 @@
           :title="transaction.validated ? 'Validée' : (isFuture(transaction.date) ? 'Prévue — n\'a pas encore eu lieu, pas de rapprochement à faire' : 'En attente de validation — cliquer pour valider')"
           @click="$emit('toggle-validated', transaction)"
         >
-          {{ transaction.validated ? '✓' : '' }}
+          <Icon v-if="transaction.validated" name="check" />
         </span>
       </td>
       <td class="col-date">
@@ -83,10 +83,17 @@
       </td>
       <td>{{ accountName(transaction.accountId) }}</td>
       <td class="col-payee" :title="transaction.payee">{{ transaction.payee }}</td>
-      <td>{{ categoryLabel(transaction.categoryId) }}</td>
+      <td class="col-cat">
+        <span v-if="categoryInfo" class="cat-chip" :style="{ '--h': categoryInfo.hue }" :title="categoryInfo.path">
+          <span class="cat-mark" aria-hidden="true">{{ categoryInfo.icon }}</span>
+          <span v-if="categoryInfo.parent" class="cat-parent">{{ categoryInfo.parent }} ›</span>
+          <span class="cat-name">{{ categoryInfo.name }}</span>
+        </span>
+        <span v-else class="cat-none">Sans catégorie</span>
+      </td>
       <td class="text-muted">{{ displayMemo(transaction.memo) }}</td>
-      <td class="num amount negative">{{ transaction.amount < 0 ? formatAmount(transaction.amount) : '' }}</td>
-      <td class="num amount positive">{{ transaction.amount > 0 ? formatAmount(transaction.amount) : '' }}</td>
+      <td class="num amount negative"><Money v-if="transaction.amount < 0" :value="transaction.amount" /></td>
+      <td class="num amount positive"><Money v-if="transaction.amount > 0" :value="transaction.amount" /></td>
       <td class="num" @click.stop>
         <label :for="'tx-periodic-' + transaction.id" class="sr-only">Dépense périodique récurrente</label>
         <input
@@ -111,8 +118,8 @@
       </td>
       <td @click.stop>
         <span class="row-actions">
-          <button class="split-btn" title="Diviser cette transaction en deux" @click="$emit('split', transaction)">✂</button>
-          <button class="delete-btn" title="Supprimer cette transaction" @click="$emit('remove', transaction)">✕</button>
+          <button class="icon-btn" title="Diviser cette transaction en deux" aria-label="Diviser cette transaction" @click="$emit('split', transaction)"><Icon name="split" /></button>
+          <button class="icon-btn danger" title="Supprimer cette transaction" aria-label="Supprimer cette transaction" @click="$emit('remove', transaction)"><Icon name="trash" /></button>
         </span>
       </td>
     </template>
@@ -141,6 +148,8 @@ import { ref, computed, watch, nextTick } from 'vue'
 import PayeeAutocomplete from './PayeeAutocomplete.vue'
 import CategoryAutocomplete from './CategoryAutocomplete.vue'
 import AmountInput from './AmountInput.vue'
+import Icon from './Icon.vue'
+import Money from './Money.vue'
 import { formatAmount, formatDate, displayMemo } from '../services/format'
 import { findPayeeByName } from '../services/payee'
 
@@ -263,6 +272,27 @@ function categoryLabel(categoryId) {
   return withIcon(category)
 }
 
+/**
+ * Données d'affichage de la pastille de catégorie. La teinte (0-360) est
+ * dérivée de la catégorie RACINE : une catégorie et ses sous-catégories
+ * partagent la même couleur, et elle reste stable d'une session à l'autre
+ * sans rien stocker en base.
+ */
+const categoryInfo = computed(() => {
+  const id = props.transaction.categoryId
+  const category = id ? props.categoriesById.get(id) : null
+  if (!category) return null
+  const parent = category.parentId ? props.categoriesById.get(category.parentId) : null
+  const root = parent || category
+  return {
+    name: category.name,
+    parent: parent ? parent.name : '',
+    icon: root.icon || category.icon || '',
+    hue: (root.id * 47) % 360,
+    path: parent ? `${parent.name} › ${category.name}` : category.name
+  }
+})
+
 function isFuture(iso) {
   return !!iso && iso > props.todayIso
 }
@@ -300,7 +330,7 @@ tr.row-editing {
   box-shadow: inset 3px 0 0 var(--azure);
 }
 tr.row-pending {
-  box-shadow: inset 3px 0 0 var(--amber);
+  box-shadow: inset 2px 0 0 var(--amber);
 }
 tr.row-selected td {
   background: var(--azure-dim);
@@ -317,6 +347,8 @@ tr.row-editing select {
 }
 
 td {
+  padding-top: 10px;
+  padding-bottom: 10px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -351,10 +383,8 @@ tr.row-future:hover td {
   border-radius: 999px;
   background: var(--ink-700);
   color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .04em;
+  font-size: 11px;
+  font-weight: 600;
   vertical-align: middle;
 }
 
@@ -375,8 +405,10 @@ tr.row-future:hover td {
   color: var(--mint);
 }
 .status-dot.pending {
-  background: var(--amber-dim);
+  background: transparent;
   border: 2px solid var(--amber);
+  width: 18px;
+  height: 18px;
 }
 /*
  * Transaction future en attente : ne reprend pas l'anneau ambre de .pending
@@ -436,65 +468,56 @@ tr.row-future td:last-child {
 }
 
 /*
- * Bouton de suppression : simple croix dans un cercle plutôt qu'un bouton
- * texte "Suppr." — moins imposant visuellement dans une colonne consultée
- * en permanence, tout en restant clairement reconnaissable et cliquable.
- * Teinte corail douce (même paire dim/pleine que .badge.credit_card) au
- * repos pour rester identifiable au premier coup d'œil sans être agressif
- * sur toute la hauteur du tableau ; le survol passe en corail plein avec
- * une légère élévation, comme les .btn de l'application.
+ * Actions de ligne : boutons-icônes discrets, visibles seulement au survol
+ * (ou au focus clavier, ou si la ligne est sélectionnée) pour alléger un
+ * tableau consulté en permanence. Sur écran tactile (pas de survol), ils
+ * restent toujours visibles.
  */
-.delete-btn {
+.icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 50%;
-  background: var(--coral-dim);
-  color: var(--coral);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.1s;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  transition: background 0.12s, color 0.12s;
 }
-.delete-btn:hover {
-  background: var(--coral);
-  color: #FFFFFF;
-  box-shadow: var(--shadow-sm);
-  transform: scale(1.08);
-}
-.delete-btn:active {
-  transform: scale(0.92);
+.icon-btn .icon { width: 16px; height: 16px; }
+.icon-btn:hover { background: var(--ink-700); color: var(--text-primary); }
+.icon-btn.danger:hover { background: var(--coral-dim); color: var(--coral); }
+@media (hover: hover) {
+  tr:not(.row-editing) .row-actions { opacity: 0; transition: opacity 0.12s; }
+  tr:hover .row-actions,
+  tr:focus-within .row-actions,
+  tr.row-selected .row-actions { opacity: 1; }
 }
 
-/* Bouton "diviser" : meme gabarit que .delete-btn (croix), teinte azur
-   (action neutre) plutot que corail (reserve aux actions destructives). */
-.split-btn {
+/* Pastille de catégorie : teinte dérivée de la catégorie racine (--h) */
+.cat-chip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  border: none;
-  border-radius: 50%;
-  background: var(--azure-dim);
-  color: var(--azure);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s, box-shadow 0.15s, transform 0.1s;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 10px 2px 6px;
+  border-radius: 999px;
+  background: hsl(var(--h) 70% 94%);
+  color: hsl(var(--h) 55% 28%);
+  font-size: 13px;
+  font-weight: 500;
+  vertical-align: middle;
 }
-.split-btn:hover {
-  background: var(--azure);
-  color: #FFFFFF;
-  box-shadow: var(--shadow-sm);
-  transform: scale(1.08);
-}
-.split-btn:active {
-  transform: scale(0.92);
-}
+.cat-mark { font-size: 13px; line-height: 1; }
+.cat-mark:empty { display: none; }
+.cat-chip:has(.cat-mark:empty) { padding-left: 10px; }
+.cat-parent { opacity: 0.65; white-space: nowrap; }
+.cat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cat-none { color: var(--text-faint); font-size: 13px; }
+tr.row-future .cat-chip { opacity: 0.6; }
+
+td.col-date { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.col-payee { font-weight: 500; }
+.status-dot .icon { width: 12px; height: 12px; stroke-width: 2.8; }
 </style>
