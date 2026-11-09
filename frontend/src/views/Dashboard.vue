@@ -67,6 +67,25 @@
       </div>
     </div>
 
+    <!-- Liste des comptes : reservee a l'export PDF (masquee a l'ecran, ou la
+         sidebar l'affiche deja — la sidebar est justement retiree du PDF, voir
+         style.css). Compacte : 3 colonnes, une ligne par compte. -->
+    <div v-if="sortedAccounts.length" class="card accounts-print-card">
+      <div class="accounts-print-header">
+        <span class="stat-label">Comptes</span>
+        <span class="accounts-print-count">{{ sortedAccounts.length }} {{ sortedAccounts.length > 1 ? 'comptes' : 'compte' }}</span>
+      </div>
+      <ul class="accounts-print-list">
+        <li v-for="a in sortedAccounts" :key="a.id" class="accounts-print-item">
+          <span class="accounts-print-dot" :class="a.type.toLowerCase()"></span>
+          <span class="accounts-print-name">{{ a.name }}</span>
+          <span class="accounts-print-balance amount" :class="(balances[a.id] ?? 0) >= 0 ? 'positive' : 'negative'">
+            {{ formatAmount(balances[a.id] ?? 0) }}
+          </span>
+        </li>
+      </ul>
+    </div>
+
     <div class="card forecast-card" style="margin-bottom: 20px;">
       <div class="chart-header">
         <div class="stat-label" style="margin-bottom: 0;">
@@ -774,6 +793,13 @@ const PALETTE = ['#1F9D6C', '#D64545', '#3B6FE0', '#C98A1B', '#8B6FE0', '#2CA8C9
 
 const totalBalance = computed(() =>
     Object.values(balances.value).reduce((sum, v) => sum + Number(v), 0)
+)
+
+// Meme tri que la sidebar (App.vue) : comptes courants en tete, le reste dans
+// l'ordre recu de l'API. Tous les comptes (archives compris), comme la sidebar
+// et le "Solde total" : la liste somme ainsi exactement au total affiche.
+const sortedAccounts = computed(() =>
+    [...accounts.value].sort((a, b) => (a.type === 'CHECKING' ? 0 : 1) - (b.type === 'CHECKING' ? 0 : 1))
 )
 
 // Instance creee une seule fois, comme amountFormatter dans services/format.js :
@@ -2010,6 +2036,81 @@ onMounted(loadDashboard)
   .periodic-table-wrap {
     max-height: none;
     overflow: visible;
+  }
+}
+
+/* Liste des comptes de la premiere page du PDF : n'existe qu'a l'impression
+   (la sidebar la montre deja a l'ecran). Volontairement compacte — padding
+   reduit, 3 colonnes (colonnes CSS : l'ordre de lecture descend dans chaque
+   colonne, les courants d'abord), une ligne fine par compte — pour ne pas
+   repousser les graphiques suivants sur la page 2. Chaque compte reste
+   insecable (break-inside) pour ne jamais etre coupe entre deux colonnes. */
+.accounts-print-card {
+  display: none;
+}
+@media print {
+  .accounts-print-card {
+    display: block;
+    padding: 10px 16px 6px;
+    margin-bottom: 14px;
+  }
+  .accounts-print-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .accounts-print-header .stat-label {
+    margin-bottom: 0;
+  }
+  .accounts-print-count {
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+  .accounts-print-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    column-count: 3;
+    column-gap: 22px;
+    column-rule: 1px solid var(--line);
+  }
+  .accounts-print-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--line);
+    break-inside: avoid;
+    page-break-inside: avoid;
+    font-size: 11.5px;
+    line-height: 1.25;
+  }
+  .accounts-print-dot {
+    flex: 0 0 7px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-faint);
+  }
+  .accounts-print-dot.checking { background: var(--azure); }
+  .accounts-print-dot.savings { background: var(--mint); }
+  .accounts-print-dot.cash { background: var(--amber); }
+  .accounts-print-dot.credit_card { background: var(--coral); }
+  .accounts-print-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--text-primary);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .accounts-print-balance {
+    flex: 0 0 auto;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
   }
 }
 

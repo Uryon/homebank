@@ -30,25 +30,34 @@ StartHiddenProcess "", "net start postgresql-x64-18", logsDir & "\postgres.log"
 
 
 ' =========================================================
-' BACKEND SPRING BOOT
+' LIBERER LE PORT 5173 (ANCIEN VITE RESTE ACTIF)
+'
+' Si un ancien serveur Vite tourne encore (arret precedent rate,
+' lancement depuis un terminal...), Vite demarre sur 5174 alors
+' qu'Edge ouvre 5173 : on affichait alors un vieux serveur. On
+' libere donc le port avant de lancer le nouveau.
 ' =========================================================
 
-' Repertoire de travail = backend/, comme mvn/IntelliJ (voir les chemins
-' par defaut de export.dossier-sortie/export.chemin-script dans
-' application.properties, relatifs a backend/) : sans ce cdDir, le process
-' heritait du dossier du script (racine du projet), et "../export/..."
-' pointait alors un niveau trop haut -- l'export PDF echouait uniquement
-' quand l'appli etait lancee via ce raccourci.
+FreePort 5173
+
+
+' =========================================================
+' BACKEND SPRING BOOT
+'
+' Repertoire de travail = backend/, comme mvn/IntelliJ (chemins
+' relatifs de export.dossier-sortie / export.chemin-script).
+' =========================================================
+
 backendPid = StartHiddenProcess( _
     rootDir & "\backend", "java -jar """ & jarPath & """", logsDir & "\backend.log" _
 )
+
 
 ' =========================================================
 ' FRONTEND VUE / VITE
 '
 ' Demarre en parallele du backend (Vite n'a pas besoin du
-' backend pour ouvrir son port) au lieu d'attendre que Spring
-' Boot soit pret avant de le lancer.
+' backend pour ouvrir son port).
 ' =========================================================
 
 frontendPid = StartHiddenProcess( _
@@ -70,12 +79,7 @@ shell.Run _
     False
 
 ' Laisser le temps a Edge d'apparaitre avant de commencer a surveiller sa
-' fermeture : juste apres shell.Run, le process n'est pas forcement encore
-' visible via WMI (demarrage a froid d'Edge en concurrence avec postgres/
-' java/node qui viennent de demarrer). Sans cette attente, la toute premiere
-' verification peut ne rien trouver et EdgeHomeBankExists conclut a tort que
-' Home Bank est deja fermee -- ce qui tue le backend/frontend une poignee de
-' secondes apres le lancement (symptome : "network error" presque immediat).
+' fermeture (demarrage a froid possible, jusqu'a ~15 s).
 WaitForEdgeToAppear edgeProfile
 
 
@@ -84,7 +88,7 @@ WaitForEdgeToAppear edgeProfile
 ' =========================================================
 
 Do While EdgeHomeBankExists(edgeProfile)
-    WScript.Sleep 1000
+    WScript.Sleep 2000
 Loop
 
 
@@ -92,9 +96,9 @@ Loop
 ' EXPORT PDF AUTOMATIQUE A LA FERMETURE
 '
 ' Doit avoir lieu avant l'arret du backend/frontend : le backend lance le
-' script Playwright, qui capture le tableau de bord servi par Vite. Bloquant
-' (attend la fin de l'export, 30s max cote ServiceExport) ; un echec est
-' ecrit dans logs\export-fermeture.log mais n'empeche pas l'arret.
+' script Playwright, qui capture le tableau de bord servi par Vite. Bloquant ;
+' un echec est ecrit dans logs\export-fermeture.log mais n'empeche pas
+' l'arret.
 ' =========================================================
 
 ExportPdfALaFermeture
@@ -109,12 +113,9 @@ Set shell = Nothing
 ' =========================================================
 ' LANCER UN PROCESSUS CACHE, LOGS REDIRIGES VERS UN FICHIER
 '
-' WScript.Shell.Exec ouvre toujours une console visible pour un programme
-' console (cmd.exe) : impossible de la masquer. On passe donc par WMI
-' (Win32_Process.Create) avec ShowWindow = 0 (SW_HIDE) : aucune fenetre, le
+' WMI (Win32_Process.Create) avec ShowWindow = 0 : aucune fenetre, le
 ' repertoire de travail est un parametre natif, et le PID est renvoye
-' directement. La sortie et les erreurs du programme sont redirigees par
-' cmd.exe lui-meme (">" ... "2>&1") vers logFile.
+' directement. La sortie est redirigee par cmd.exe vers logFile.
 ' =========================================================
 
 Function StartHiddenProcess(cdDir, command, logFile)
@@ -150,9 +151,7 @@ End Function
 ' DECLENCHER L'EXPORT PDF DU TABLEAU DE BORD
 '
 ' Appelle le meme endpoint que le bouton "Exporter en PDF" (voir
-' ControleurExport) plutot que de relancer le script Node directement :
-' la date du dernier import et les chemins configures restent geres par
-' ServiceExport.
+' ControleurExport).
 ' =========================================================
 
 Sub ExportPdfALaFermeture()
@@ -185,18 +184,34 @@ End Sub
 
 
 ' =========================================================
+' LIBERER UN PORT TCP
+'
+' Arrete le(s) processus qui ecoutent sur le port donne. Aucun
+' guillemet double a l'interieur du script PowerShell (pas de
+' probleme d'echappement).
+' =========================================================
+
+Sub FreePort(port)
+
+    shell.Run _
+        "powershell.exe -NoProfile -Command " & _
+        Chr(34) & _
+        "Get-NetTCPConnection -LocalPort " & port & " -State Listen -ErrorAction SilentlyContinue | " & _
+        "ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" & _
+        Chr(34), _
+        0, _
+        True
+
+    WScript.Sleep 500
+
+End Sub
+
+
+' =========================================================
 ' ATTENDRE QU'UN PORT SOIT DISPONIBLE
 '
-' Un seul process PowerShell qui boucle en interne sur une
-' simple connexion TCP, plutot qu'un nouveau powershell.exe
-' (+ Test-NetConnection, lourd : ping, chargement de module...)
-' relance toutes les 500ms. Beaucoup plus rapide a l'usage.
-'
-' Se connecte explicitement en IPv4 (127.0.0.1) : Vite est
-' configure pour n'ecouter que sur cette adresse (vite.config.js),
-' et Edge est lance sur http://127.0.0.1:5173 -- on verifie donc
-' la meme adresse que celle utilisee au final, sans dependre de
-' la resolution de "localhost" qui peut varier (IPv4 vs IPv6).
+' Se connecte explicitement en IPv4 (127.0.0.1) : Vite n'ecoute que sur
+' cette adresse (vite.config.js), et Edge est lance sur 127.0.0.1.
 ' =========================================================
 
 Sub WaitForPort(port)
@@ -219,11 +234,8 @@ End Sub
 ' =========================================================
 ' ATTENDRE L'APPARITION D'EDGE APRES SON LANCEMENT
 '
-' Budget bien plus large que celui d'EdgeHomeBankExists (qui, lui, sert a
-' detecter une fermeture en cours de session et doit rester reactif) : ici
-' on tolere un demarrage a froid d'Edge (jusqu'a ~15s), car le manquer une
-' fois ne fait que retarder la surveillance, alors que le manquer a tort
-' tue prematurement le backend/frontend encore en train de servir la page.
+' Tolere un demarrage a froid d'Edge (jusqu'a ~15 s). Rater Edge ici
+' a tort tuerait prematurement le backend/frontend.
 ' =========================================================
 
 Sub WaitForEdgeToAppear(profile)
@@ -242,32 +254,48 @@ End Sub
 ' =========================================================
 ' VERIFIER SI HOME BANK EST ENCORE OUVERTE
 '
-' Reessaie plusieurs fois avant de conclure a la fermeture :
-' une requete WMI peut echouer ponctuellement (service WMI
-' sollicite) et donner un faux negatif. Si on le croit sur
-' parole immediatement, le script tue le backend/frontend
-' alors qu'Edge est toujours ouvert -- l'appli reste alors
-' plantee/blanche a l'ecran.
+' Requete WMI directement en VBScript (plus de PowerShell imbrique, dont
+' les guillemets doubles cassaient le filtre et faisaient toujours
+' renvoyer "Edge introuvable" -> backend/frontend tues ~1 min apres le
+' lancement alors qu'Edge restait ouvert).
+'
+' Reessaie 3 fois avant de conclure a la fermeture : une requete WMI peut
+' echouer ponctuellement et donner un faux negatif.
 ' =========================================================
 
 Function EdgeHomeBankExists(profile)
 
-    Dim command
+    Dim wmi
+    Dim procs
+    Dim p
+    Dim i
 
-    command = "powershell.exe -NoProfile -Command " & _
-              Chr(34) & _
-              "$found=$false; for ($i=0; $i -lt 3; $i++) { " & _
-              "try { $p=Get-CimInstance Win32_Process -Filter ""Name='msedge.exe'"" -ErrorAction Stop | " & _
-              "Where-Object {$_.CommandLine -like '*" & profile & "*'}; if ($p) { $found=$true; break } } " & _
-              "catch {}; Start-Sleep -Milliseconds 300 }; " & _
-              "if ($found) {exit 0} else {exit 1}" & _
-              Chr(34)
+    EdgeHomeBankExists = False
 
-    ' shell.Run avec le style de fenetre 0 (cache), comme WaitForPort plus
-    ' haut -- shell.Exec (utilise auparavant ici) ne permet pas de masquer
-    ' la fenetre et faisait flasher une console PowerShell a chaque appel ;
-    ' avec WaitForEdgeToAppear qui interroge cette fonction en rafale au
-    ' demarrage, ca se traduisait par des dizaines de fenetres visibles.
-    EdgeHomeBankExists = (shell.Run(command, 0, True) = 0)
+    For i = 1 To 3
+
+        On Error Resume Next
+        Set wmi = GetObject("winmgmts:\\.\root\cimv2")
+        Set procs = wmi.ExecQuery("SELECT CommandLine FROM Win32_Process WHERE Name = 'msedge.exe'")
+
+        If Err.Number = 0 Then
+            For Each p In procs
+                If Not IsNull(p.CommandLine) Then
+                    If InStr(1, p.CommandLine, profile, vbTextCompare) > 0 Then
+                        EdgeHomeBankExists = True
+                        Exit For
+                    End If
+                End If
+            Next
+        End If
+
+        Err.Clear
+        On Error GoTo 0
+
+        If EdgeHomeBankExists Then Exit Function
+
+        WScript.Sleep 300
+
+    Next
 
 End Function
