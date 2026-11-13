@@ -1,6 +1,6 @@
 <template>
   <div class="modal-overlay" @click.self="$emit('close')">
-    <div class="modal">
+    <div v-dialog="() => $emit('close')" class="modal" role="dialog" aria-modal="true">
       <h2>{{ isEdit ? 'Modifier le compte' : 'Nouveau compte' }}</h2>
       <div class="form-grid">
         <div class="form-field" style="grid-column: span 2;">
@@ -29,6 +29,16 @@
           <label for="account-modal-notes">Notes</label>
           <textarea id="account-modal-notes" v-model="form.notes" rows="2"></textarea>
         </div>
+        <div v-if="isEdit" class="form-field" style="grid-column: span 2;">
+          <label class="archive-toggle">
+            <input v-model="form.archived" type="checkbox" />
+            Compte archivé
+          </label>
+          <p class="archive-hint">
+            Masqué de la barre latérale et des listes de saisie ; plus aucune transaction ne peut y être ajoutée.
+            L'historique, le solde et le patrimoine net restent inchangés.
+          </p>
+        </div>
       </div>
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px;">
         <button v-if="isEdit" class="btn danger" @click="remove">Supprimer</button>
@@ -42,6 +52,7 @@
 </template>
 
 <script setup>
+import { notify, askConfirm } from '../services/feedback'
 /**
  * Modale de création/édition/suppression d'un compte, partagée entre la
  * page Comptes et le raccourci d'édition de la sidebar (voir App.vue) pour
@@ -49,6 +60,7 @@
  */
 import { ref, computed, watch } from 'vue'
 import { AccountsAPI } from '../services/api'
+import { alertApiError } from '../services/errors'
 import AmountInput from './AmountInput.vue'
 
 const props = defineProps({
@@ -59,7 +71,7 @@ const emit = defineEmits(['close', 'saved', 'deleted'])
 const isEdit = computed(() => !!props.account)
 
 function emptyForm() {
-  return { name: '', type: 'CHECKING', currency: 'EUR', initialBalance: 0, notes: '' }
+  return { name: '', type: 'CHECKING', currency: 'EUR', initialBalance: 0, notes: '', archived: false }
 }
 
 const form = ref(props.account ? { ...props.account } : emptyForm())
@@ -70,18 +82,46 @@ watch(() => props.account, (account) => {
 
 async function save() {
   if (!form.value.name.trim()) {
-    alert('Le nom du compte est obligatoire.')
+    notify('Le nom du compte est obligatoire.', 'warning')
     return
   }
-  const saved = isEdit.value
-    ? await AccountsAPI.update(props.account.id, form.value)
-    : await AccountsAPI.create(form.value)
-  emit('saved', saved)
+  try {
+    const saved = isEdit.value
+      ? await AccountsAPI.update(props.account.id, form.value)
+      : await AccountsAPI.create(form.value)
+    notify(isEdit.value ? 'Compte modifié.' : 'Compte créé.', 'success')
+    emit('saved', saved)
+  } catch (e) {
+    alertApiError("Erreur lors de l'enregistrement du compte", e)
+  }
 }
 
 async function remove() {
-  if (!confirm(`Supprimer le compte "${props.account.name}" et toutes ses transactions ?`)) return
-  await AccountsAPI.remove(props.account.id)
-  emit('deleted', props.account.id)
+  // Le backend refuse (409) la suppression d'un compte qui contient des
+  // transactions (voir ServiceCompte#delete) : le message ne doit plus
+  // laisser croire que l'historique serait supprime avec lui.
+  if (!(await askConfirm(`Supprimer le compte "${props.account.name}" ? Seul un compte sans transaction peut être supprimé.`))) return
+  try {
+    await AccountsAPI.remove(props.account.id)
+    notify('Compte supprimé.', 'success')
+    emit('deleted', props.account.id)
+  } catch (e) {
+    alertApiError('Suppression du compte impossible', e)
+  }
 }
 </script>
+
+<style scoped>
+.archive-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.archive-hint {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+</style>

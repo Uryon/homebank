@@ -1,5 +1,6 @@
 <template>
   <tr
+    ref="rowRef"
     :data-transaction-id="transaction.id"
     :class="{
       'row-editing': isEditing,
@@ -7,9 +8,11 @@
       'row-future': !isEditing && isFuture(transaction.date),
       'row-selected': !isEditing && selected
     }"
+    :tabindex="isEditing ? undefined : 0"
+    :aria-label="isEditing ? undefined : rowLabel"
     @click="!isEditing && $emit('start-edit')"
     @keydown.esc="$emit('cancel-edit')"
-    @keydown.enter.prevent="isEditing && confirmEdit()"
+    @keydown.enter="onEnter"
   >
     <!-- Mode édition -->
     <template v-if="isEditing && editForm">
@@ -24,7 +27,7 @@
       </td>
       <td @click.stop>
         <select v-model.number="editForm.accountId" aria-label="Compte">
-          <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+          <option v-for="a in editableAccounts" :key="a.id" :value="a.id">{{ accountOptionLabel(a) }}</option>
         </select>
       </td>
       <td @click.stop>
@@ -68,23 +71,27 @@
         <input :id="'tx-select-' + transaction.id" type="checkbox" :checked="selected" title="Sélectionner cette transaction" :aria-label="'Sélectionner la transaction ' + (transaction.payee || 'sans tiers') + ' du ' + formatDate(transaction.date)" @change="$emit('toggle-select', transaction)" />
       </td>
       <td class="num" @click.stop>
-        <span
+        <button
+          type="button"
           class="status-dot"
           :class="transaction.validated ? 'validated' : (isFuture(transaction.date) ? 'future' : 'pending')"
           :title="transaction.validated ? 'Validée' : (isFuture(transaction.date) ? 'Prévue — n\'a pas encore eu lieu, pas de rapprochement à faire' : 'En attente de validation — cliquer pour valider')"
+          :aria-label="transaction.validated ? 'Validée — annuler la validation' : 'Valider cette transaction'"
+          :aria-pressed="transaction.validated"
           @click="$emit('toggle-validated', transaction)"
         >
           <Icon v-if="transaction.validated" name="check" />
-        </span>
+        </button>
       </td>
       <td class="col-date">
         {{ formatDate(transaction.date) }}
         <span v-if="isFuture(transaction.date)" class="future-badge" title="Transaction prévue à une date future : elle n'a pas encore réellement eu lieu et n'est pas comptée dans les statistiques.">Prévu</span>
       </td>
       <td>{{ accountName(transaction.accountId) }}</td>
-      <td class="col-payee" :title="transaction.payee">{{ transaction.payee }}</td>
+      <!-- Texte complet au survol s'il est tronqué : infobulle globale (OverflowTooltip.vue) -->
+      <td class="col-payee">{{ transaction.payee }}</td>
       <td class="col-cat">
-        <span v-if="categoryInfo" class="cat-chip" :style="{ '--h': categoryInfo.hue }" :title="categoryInfo.path">
+        <span v-if="categoryInfo" class="cat-chip" :style="{ '--h': categoryInfo.hue }" :data-tooltip="categoryInfo.path">
           <span class="cat-mark" aria-hidden="true">{{ categoryInfo.icon }}</span>
           <span v-if="categoryInfo.parent" class="cat-parent">{{ categoryInfo.parent }} ›</span>
           <span class="cat-name">{{ categoryInfo.name }}</span>
@@ -127,6 +134,7 @@
 </template>
 
 <script setup>
+import { notify } from '../services/feedback'
 /**
  * Une ligne de la table Transactions, en composant a part entiere : c'est
  * ce qui permet a l'edition inline de rester fluide meme sur un tres grand
@@ -135,8 +143,8 @@
  * Avant ce composant, l'etat d'edition (editForm) vivait dans Transactions.vue :
  * chaque frappe au clavier modifiait une donnee reactive lue par LE TEMPLATE
  * PARENT (qui boucle sur toutes les transactions), donc Vue devait
- * reexecuter le rendu de la table ENTIERE (et rappeler categoryLabel/
- * accountName pour chaque ligne) a chaque caractere tape, meme si une seule
+ * reexecuter le rendu de la table ENTIERE (et recalculer libelles de
+ * categorie/compte pour chaque ligne) a chaque caractere tape, meme si une seule
  * ligne changeait visuellement.
  *
  * Ici, `editForm` est un etat 100% local a l'instance de ce composant : une
@@ -152,6 +160,7 @@ import Icon from './Icon.vue'
 import Money from './Money.vue'
 import { formatAmount, formatDate, displayMemo } from '../services/format'
 import { findPayeeByName } from '../services/payee'
+import { accountOptionLabel } from '../services/accounts'
 
 const props = defineProps({
   transaction: { type: Object, required: true },
@@ -172,6 +181,17 @@ const props = defineProps({
   selected: { type: Boolean, default: false }
 })
 
+/**
+ * Comptes proposés en édition : les comptes actifs, plus le compte actuel de
+ * la transaction même s'il est archivé (modifier une transaction déjà
+ * présente reste permis, seul un déplacement VERS un compte archivé est
+ * refusé — voir ServiceTransaction#applyPayload). Calculé seulement pour la
+ * ligne en cours d'édition (le <select> n'existe que dans ce mode).
+ */
+const editableAccounts = computed(() =>
+  props.accounts.filter(a => !a.archived || a.id === props.transaction.accountId)
+)
+
 const emit = defineEmits([
   'start-edit',
   'cancel-edit',
@@ -186,6 +206,7 @@ const emit = defineEmits([
 
 const editForm = ref(null)
 const firstEditField = ref(null)
+const rowRef = ref(null)
 
 function buildEditForm(t) {
   return {
@@ -211,13 +232,22 @@ function buildEditForm(t) {
 // dernier ne doit jamais a lui seul ecraser une categorie deja renseignee.
 let payeeAtEditStart = null
 
-watch(() => props.isEditing, (editing) => {
+watch(() => props.isEditing, (editing, wasEditing) => {
   if (editing) {
     editForm.value = buildEditForm(props.transaction)
     payeeAtEditStart = editForm.value.payee
     nextTick(() => firstEditField.value?.focus?.())
   } else {
     editForm.value = null
+    // Uniquement à la sortie d'une édition (pas au premier affichage) : le
+    // focus était dans un champ de la ligne, qui vient de disparaître ; on le
+    // rend à la ligne pour qu'un utilisateur clavier reprenne là où il était.
+    if (!wasEditing) return
+    const focusWasInRow = rowRef.value?.contains(document.activeElement)
+    nextTick(() => {
+      const lost = !document.activeElement || document.activeElement === document.body
+      if (focusWasInRow || lost) rowRef.value?.focus({ preventScroll: true })
+    })
   }
 }, { immediate: true })
 
@@ -257,21 +287,6 @@ function accountName(id) {
   return props.accountsById.get(id)?.name || '—'
 }
 
-function withIcon(category) {
-  return category.icon ? `${category.icon} ${category.name}` : category.name
-}
-
-function categoryLabel(categoryId) {
-  if (!categoryId) return '—'
-  const category = props.categoriesById.get(categoryId)
-  if (!category) return '—'
-  if (category.parentId) {
-    const parent = props.categoriesById.get(category.parentId)
-    if (parent) return `${withIcon(parent)} : ${withIcon(category)}`
-  }
-  return withIcon(category)
-}
-
 /**
  * Données d'affichage de la pastille de catégorie. La teinte (0-360) est
  * dérivée de la catégorie RACINE : une catégorie et ses sous-catégories
@@ -297,10 +312,32 @@ function isFuture(iso) {
   return !!iso && iso > props.todayIso
 }
 
+/** Libellé de la ligne pour les lecteurs d'écran quand elle reçoit le focus clavier. */
+const rowLabel = computed(() => {
+  const t = props.transaction
+  const parts = [formatDate(t.date), t.payee || 'sans tiers', formatAmount(t.amount), categoryInfo.value?.path || 'sans catégorie']
+  return `${parts.join(', ')} — Entrée pour modifier`
+})
+
+/**
+ * Entrée : enregistre en mode édition ; sinon ouvre l'édition, mais
+ * seulement si c'est la ligne elle-même qui a le focus (pas une case à
+ * cocher ou un bouton de la ligne, qui gardent leur propre comportement).
+ */
+function onEnter(event) {
+  if (props.isEditing) {
+    event.preventDefault()
+    confirmEdit()
+  } else if (event.target === event.currentTarget) {
+    event.preventDefault()
+    emit('start-edit')
+  }
+}
+
 function confirmEdit() {
   if (!editForm.value) return
   if (!editForm.value.accountId) {
-    alert('Veuillez sélectionner un compte.')
+    notify('Veuillez sélectionner un compte.', 'warning')
     return
   }
   emit('confirm-edit', {
@@ -324,6 +361,11 @@ function confirmEdit() {
 tr {
   cursor: pointer;
 }
+/* Ligne atteinte au clavier (Tab) : cadre visible, à l'intérieur pour ne pas être rogné par le tableau. */
+tr:focus-visible {
+  outline: 2px solid var(--azure);
+  outline-offset: -2px;
+}
 tr.row-editing {
   cursor: default;
   background: var(--ink-800);
@@ -345,13 +387,38 @@ tr.row-editing input,
 tr.row-editing select {
   width: 100%;
 }
+/* En édition, chaque pixel compte (colonnes à largeur fixe) : marges
+   réduites pour que la date, le compte et le mémo restent lisibles. */
+tr.row-editing td {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+tr.row-editing input:not([type="checkbox"]),
+tr.row-editing select {
+  padding-left: 7px;
+  padding-right: 6px;
+  font-size: 13px;
+}
+tr.row-editing input[type="date"]::-webkit-calendar-picker-indicator {
+  margin-left: 0;
+  padding: 0;
+}
 
 td {
   padding-top: 10px;
   padding-bottom: 10px;
+  /* Marges latérales resserrées : la place va au texte (tiers, catégorie). */
+  padding-left: 8px;
+  padding-right: 8px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Montants : jamais tronqués ni remplacés par « … », le montant exact doit
+   toujours être lisible (la colonne est dimensionnée en conséquence). */
+td.amount {
+  overflow: visible;
+  text-overflow: clip;
 }
 td:nth-child(5) {
   white-space: normal;
@@ -368,10 +435,10 @@ tr.row-future td {
   color: var(--text-faint);
 }
 tr.row-future td.amount.negative {
-  color: #C98E8E;
+  color: color-mix(in srgb, var(--coral) 55%, var(--ink-800));
 }
 tr.row-future td.amount.positive {
-  color: #8FC0A6;
+  color: color-mix(in srgb, var(--mint) 55%, var(--ink-800));
 }
 tr.row-future:hover td {
   background: var(--ink-700);
@@ -394,7 +461,11 @@ tr.row-future:hover td {
   justify-content: center;
   width: 20px;
   height: 20px;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
@@ -451,7 +522,7 @@ td:last-child {
   position: sticky;
   right: 0;
   background: var(--ink-900);
-  box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
+  box-shadow: var(--sticky-edge-shadow);
 }
 tr:hover td:last-child {
   background: var(--ink-800);
@@ -461,6 +532,13 @@ tr.row-editing td:last-child {
 }
 tr.row-future td:last-child {
   background: var(--ink-800);
+}
+/* Cellule d'actions fixe d'une ligne sélectionnée (survolée ou non) : même
+   teinte que la ligne, mais OPAQUE (mélange avec la surface) pour ne pas
+   laisser voir les colonnes qui défilent dessous. */
+tr.row-selected td:last-child,
+tr.row-selected:hover td:last-child {
+  background: color-mix(in srgb, var(--azure) 14%, var(--ink-900));
 }
 
 .text-muted {
@@ -503,17 +581,27 @@ tr.row-future td:last-child {
   max-width: 100%;
   padding: 2px 10px 2px 6px;
   border-radius: 999px;
-  background: hsl(var(--h) 70% 94%);
-  color: hsl(var(--h) 55% 28%);
+  background: hsl(var(--h) var(--chip-bg-saturation) var(--chip-bg-lightness));
+  color: hsl(var(--h) var(--chip-text-saturation) var(--chip-text-lightness));
   font-size: 13px;
   font-weight: 500;
   vertical-align: middle;
 }
-.cat-mark { font-size: 13px; line-height: 1; }
+.cat-mark { font-size: 13px; line-height: 1; flex-shrink: 0; }
 .cat-mark:empty { display: none; }
 .cat-chip:has(.cat-mark:empty) { padding-left: 10px; }
-.cat-parent { opacity: 0.65; white-space: nowrap; }
-.cat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Faute de place, c'est le parent qui se tronque en premier (forte valeur de
+   flex-shrink) : la sous-catégorie, plus précise, reste lisible. Le chemin
+   complet est dans l'infobulle (title). */
+.cat-parent {
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 2.5em;
+  flex: 0 1000 auto;
+}
+.cat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 .cat-none { color: var(--text-faint); font-size: 13px; }
 tr.row-future .cat-chip { opacity: 0.6; }
 

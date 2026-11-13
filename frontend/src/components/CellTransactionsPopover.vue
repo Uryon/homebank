@@ -1,5 +1,7 @@
 <template>
-  <div v-if="visible" class="cell-popover" :style="{ left: x + 'px', top: y + 'px' }" @mouseenter="$emit('stay')" @mouseleave="$emit('leave')">
+  <!-- aria-live : le détail est annoncé par les lecteurs d'écran quand il apparaît
+       pour la cellule qui a le focus clavier (voir directives/gridNav.js). -->
+  <div v-if="visible" class="cell-popover" :style="{ left: x + 'px', top: y + 'px' }" aria-live="polite" @mouseenter="$emit('stay')" @mouseleave="$emit('leave')">
     <div class="cell-popover-title">{{ title }}</div>
 
     <div v-if="loading" class="cell-popover-loading">Chargement…</div>
@@ -56,14 +58,14 @@ defineEmits(['stay', 'leave'])
   background: var(--ink-900);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  box-shadow: 0 12px 28px rgba(23, 32, 46, 0.22);
+  box-shadow: var(--shadow-popover), var(--shadow-xs);
   padding: 12px 14px;
 }
 
 .cell-popover-title {
   font-size: 12px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: .04em;
   color: var(--text-faint);
   margin-bottom: 8px;

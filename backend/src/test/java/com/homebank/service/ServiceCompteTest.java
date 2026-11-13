@@ -52,6 +52,19 @@ class ServiceCompteTest {
     }
 
     @Test
+    void ensureNotArchived_refuseUnCompteArchiveEtAccepteUnCompteActif() {
+        Compte actif = compte(1L, "0");
+        Compte archive = compte(2L, "0");
+        archive.setName("Ancien livret");
+        archive.setArchived(true);
+
+        ServiceCompte.ensureNotArchived(actif);
+        assertThatThrownBy(() -> ServiceCompte.ensureNotArchived(archive))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Ancien livret");
+    }
+
+    @Test
     void findById_leveNoSuchElementExceptionSiLeCompteEstIntrouvable() {
         when(accountRepository.findById(99L)).thenReturn(Optional.empty());
 
@@ -78,6 +91,37 @@ class ServiceCompteTest {
         assertThat(result.getCurrency()).isEqualTo("EUR");
         assertThat(result.getNotes()).isEqualTo("Epargne");
         assertThat(result.isArchived()).isFalse();
+    }
+
+    @Test
+    void create_refuseUnNomVideSansRienEnregistrer() {
+        CompteDTO payload = CompteDTO.builder().name("   ").currency("EUR").build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nom");
+        verify(accountRepository, never()).save(any(Compte.class));
+    }
+
+    @Test
+    void create_appliqueLesValeursParDefautEtNormaliseLaDevise() {
+        CompteDTO payload = CompteDTO.builder().name("  Livret  ").currency(" usd ").build();
+        when(accountRepository.save(any(Compte.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Compte result = service.create(payload);
+
+        assertThat(result.getName()).isEqualTo("Livret");
+        assertThat(result.getType()).isEqualTo(TypeCompte.CHECKING);
+        assertThat(result.getInitialBalance()).isEqualByComparingTo("0");
+        assertThat(result.getCurrency()).isEqualTo("USD");
+    }
+
+    @Test
+    void normalizeCurrency_refuseUnCodeInvalideEtDonneEurParDefaut() {
+        assertThat(ServiceCompte.normalizeCurrency(null)).isEqualTo("EUR");
+        assertThat(ServiceCompte.normalizeCurrency("")).isEqualTo("EUR");
+        assertThatThrownBy(() -> ServiceCompte.normalizeCurrency("EURO")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> ServiceCompte.normalizeCurrency("E1R")).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -108,7 +152,8 @@ class ServiceCompteTest {
     void allBalances_additionneLeSoldeInitialEtLaSommeDesTransactionsDejaSurvenues() {
         Compte account = compte(1L, "1000.00");
         when(accountRepository.findAll()).thenReturn(List.of(account));
-        when(transactionRepository.sumAmountByAccountIdAsOf(eq(1L), any())).thenReturn(new BigDecimal("-150.00"));
+        when(transactionRepository.sumAmountGroupedByAccountIdAsOf(any()))
+                .thenReturn(List.<Object[]>of(new Object[]{1L, new BigDecimal("-150.00")}));
 
         Map<Long, BigDecimal> balances = service.allBalances();
 
@@ -116,12 +161,13 @@ class ServiceCompteTest {
     }
 
     @Test
-    void allBalances_calculeChaqueCompteIndependammentSansRechargerParId() {
+    void allBalances_calculeTousLesComptesEnUneSeuleRequeteDeSomme() {
         Compte compte1 = compte(1L, "1000.00");
         Compte compte2 = compte(2L, "0.00");
         when(accountRepository.findAll()).thenReturn(List.of(compte1, compte2));
-        when(transactionRepository.sumAmountByAccountIdAsOf(eq(1L), any())).thenReturn(new BigDecimal("50.00"));
-        when(transactionRepository.sumAmountByAccountIdAsOf(eq(2L), any())).thenReturn(new BigDecimal("300.00"));
+        when(transactionRepository.sumAmountGroupedByAccountIdAsOf(any())).thenReturn(List.of(
+                new Object[]{1L, new BigDecimal("50.00")},
+                new Object[]{2L, new BigDecimal("300.00")}));
 
         Map<Long, BigDecimal> balances = service.allBalances();
 
@@ -129,5 +175,42 @@ class ServiceCompteTest {
         assertThat(balances.get(1L)).isEqualByComparingTo("1050.00");
         assertThat(balances.get(2L)).isEqualByComparingTo("300.00");
         verify(accountRepository, never()).findById(any());
+        verify(transactionRepository, never()).sumAmountByAccountIdAsOf(any(), any());
     }
+
+    @Test
+    void allBalances_compteSansTransactionGardeSonSoldeInitial() {
+        when(accountRepository.findAll()).thenReturn(List.of(compte(3L, "420.00")));
+        when(transactionRepository.sumAmountGroupedByAccountIdAsOf(any())).thenReturn(List.of());
+
+        Map<Long, BigDecimal> balances = service.allBalances();
+
+        assertThat(balances.get(3L)).isEqualByComparingTo("420.00");
+    }
+    @Test
+    void delete_refuseDeSupprimerUnCompteQuiContientDesTransactions() {
+        Compte account = compte(7L, "250.00");
+        account.setName("Compte courant");
+        when(accountRepository.findById(7L)).thenReturn(Optional.of(account));
+        when(transactionRepository.countByAccount_Id(7L)).thenReturn(12L);
+
+        assertThatThrownBy(() -> service.delete(7L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("12 transaction(s)")
+                .hasMessageContaining("Archivez-le");
+
+        verify(accountRepository, never()).delete(any(Compte.class));
+    }
+
+    @Test
+    void delete_supprimeUnCompteVide() {
+        Compte account = compte(8L, "0.00");
+        when(accountRepository.findById(8L)).thenReturn(Optional.of(account));
+        when(transactionRepository.countByAccount_Id(8L)).thenReturn(0L);
+
+        service.delete(8L);
+
+        verify(accountRepository).delete(account);
+    }
+
 }

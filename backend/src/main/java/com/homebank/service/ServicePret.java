@@ -7,6 +7,7 @@ import com.homebank.repository.DepotPret;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -19,6 +20,13 @@ public class ServicePret {
 
     private static final int SCALE = 2;
     private static final int RATE_DIVISION_SCALE = 10;
+
+    /**
+     * Au-dela de ce multiple de la mensualite, la derniere echeance (qui solde
+     * le capital restant, voir computeSchedule) trahit une mensualite saisie
+     * nettement trop basse pour la duree, plutot qu'un simple ecart d'arrondi.
+     */
+    private static final BigDecimal MAX_FINAL_PAYMENT_RATIO = BigDecimal.valueOf(2);
 
     private final DepotPret loanRepository;
 
@@ -93,11 +101,15 @@ public class ServicePret {
         if (payload.getMonthlyPayment() == null || payload.getMonthlyPayment().signum() <= 0) {
             throw new IllegalArgumentException("La mensualite doit etre positive");
         }
+        if (payload.getMonthlyInsurance() != null && payload.getMonthlyInsurance().signum() < 0) {
+            throw new IllegalArgumentException("L'assurance mensuelle ne peut pas etre negative");
+        }
 
         if (existing != null
                 && existing.getPrincipal().compareTo(payload.getPrincipal()) == 0
                 && existing.getAnnualRate().compareTo(payload.getAnnualRate()) == 0
-                && existing.getMonthlyPayment().compareTo(payload.getMonthlyPayment()) == 0) {
+                && existing.getMonthlyPayment().compareTo(payload.getMonthlyPayment()) == 0
+                && existing.getTermMonths().equals(payload.getTermMonths())) {
             return;
         }
 
@@ -109,10 +121,46 @@ public class ServicePret {
                     "La mensualite (" + payload.getMonthlyPayment() + ") ne couvre meme pas les interets du "
                             + "premier mois (" + firstMonthInterest + ") : le capital ne serait jamais rembourse");
         }
+
+        ensureFinalPaymentIsReasonable(payload, monthlyRate);
+    }
+
+    /**
+     * Une mensualite trop basse pour la duree laisse un gros capital restant,
+     * solde d'un coup a la derniere echeance (voir computeSchedule) : refusee
+     * au-dela de MAX_FINAL_PAYMENT_RATIO mensualites, avec la mensualite
+     * necessaire (annuite constante) pour corriger la saisie.
+     */
+    private void ensureFinalPaymentIsReasonable(PretDTO payload, BigDecimal monthlyRate) {
+        Pret simulated = new Pret();
+        simulated.setPrincipal(payload.getPrincipal());
+        simulated.setAnnualRate(payload.getAnnualRate());
+        simulated.setTermMonths(payload.getTermMonths());
+        simulated.setStartDate(payload.getStartDate());
+        simulated.setMonthlyPayment(payload.getMonthlyPayment());
+        List<LigneAmortissementDTO> schedule = computeSchedule(simulated);
+        BigDecimal finalPayment = schedule.get(schedule.size() - 1).getPayment();
+        if (finalPayment.compareTo(payload.getMonthlyPayment().multiply(MAX_FINAL_PAYMENT_RATIO)) > 0) {
+            throw new IllegalArgumentException("La mensualite (" + payload.getMonthlyPayment()
+                    + ") est trop faible pour rembourser le pret en " + payload.getTermMonths()
+                    + " mois : derniere echeance de " + finalPayment + ". Mensualite necessaire : "
+                    + annuityPayment(payload.getPrincipal(), monthlyRate, payload.getTermMonths()) + ".");
+        }
+    }
+
+    /** Mensualite constante (hors assurance) qui rembourse exactement `principal` en `termMonths` mois, arrondie au centime superieur. */
+    static BigDecimal annuityPayment(BigDecimal principal, BigDecimal monthlyRate, int termMonths) {
+        if (monthlyRate.signum() == 0) {
+            return principal.divide(BigDecimal.valueOf(termMonths), SCALE, RoundingMode.CEILING);
+        }
+        MathContext mc = MathContext.DECIMAL64;
+        BigDecimal growth = BigDecimal.ONE.add(monthlyRate).pow(termMonths, mc);
+        BigDecimal factor = BigDecimal.ONE.subtract(BigDecimal.ONE.divide(growth, mc));
+        return principal.multiply(monthlyRate).divide(factor, SCALE, RoundingMode.CEILING);
     }
 
     public void delete(Long id) {
-        loanRepository.deleteById(id);
+        loanRepository.delete(findById(id));
     }
 
     /**
@@ -138,9 +186,12 @@ public class ServicePret {
             BigDecimal payment = loan.getMonthlyPayment();
             BigDecimal principalPaid = payment.subtract(interest);
 
-            // Derniere echeance (ou mensualite qui depasserait le capital
-            // restant a cause des arrondis) : on solde exactement.
-            if (principalPaid.compareTo(remaining) >= 0) {
+            // Mensualite qui depasserait le capital restant, ou derniere
+            // echeance prevue (une mensualite saisie arrondie, ex : 499 au lieu
+            // de 499,43, laissait sinon un capital restant du a la fin du
+            // pret) : on solde exactement.
+            boolean lastScheduledMonth = i == loan.getTermMonths();
+            if (lastScheduledMonth || principalPaid.compareTo(remaining) >= 0) {
                 principalPaid = remaining;
                 payment = principalPaid.add(interest);
             }

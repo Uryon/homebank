@@ -1,5 +1,33 @@
 import { describe, it, expect } from 'vitest'
-import { formatAmount, formatDate, displayMemo } from './format'
+import { formatAmount, formatDate, displayMemo, formatRate, toLocalIsoDate } from './format'
+
+describe('toLocalIsoDate', () => {
+  it('formate une date locale en AAAA-MM-JJ avec zeros de tete', () => {
+    expect(toLocalIsoDate(new Date(2026, 0, 5))).toBe('2026-01-05')
+  })
+
+  it('garde le jour local a minuit, sans conversion UTC', () => {
+    // Minuit local du 1er : toISOString() donnerait la veille en UTC+1/+2.
+    expect(toLocalIsoDate(new Date(2026, 2, 1, 0, 0, 0))).toBe('2026-03-01')
+    expect(toLocalIsoDate(new Date(2026, 2, 31, 23, 59, 59))).toBe('2026-03-31')
+  })
+
+  it('utilise la date du jour par defaut', () => {
+    expect(toLocalIsoDate()).toBe(toLocalIsoDate(new Date()))
+  })
+})
+
+describe('formatRate', () => {
+  it('affiche un taux à la française avec au moins deux décimales', () => {
+    expect(formatRate(1.52).replace(/\s/g, ' ')).toBe('1,52 %')
+    expect(formatRate(3).replace(/\s/g, ' ')).toBe('3,00 %')
+    expect(formatRate(2.125).replace(/\s/g, ' ')).toBe('2,125 %')
+  })
+
+  it('affiche 0 pour un taux absent', () => {
+    expect(formatRate(null).replace(/\s/g, ' ')).toBe('0,00 %')
+  })
+})
 
 // Intl.NumberFormat separe le montant du symbole par une espace insecable
 // (U+00A0), pas une espace normale : on l'ignore pour ne pas dependre d'un

@@ -33,16 +33,7 @@ public class ControleurTransaction {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(required = false) String amountOperator,
             @RequestParam(required = false) BigDecimal amountValue) {
-        if (amountOperator != null && amountValue != null) {
-            return transactionService.findByAmountFilter(accountId, amountOperator, amountValue);
-        }
-        if (accountId != null) {
-            return transactionService.findByAccount(accountId);
-        }
-        if (from != null && to != null) {
-            return transactionService.findByPeriod(from, to);
-        }
-        return transactionService.findAll();
+        return transactionService.search(accountId, from, to, amountOperator, amountValue);
     }
 
     /**

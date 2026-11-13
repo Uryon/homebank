@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -30,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -278,6 +281,49 @@ class ServiceTransactionTest {
     }
 
     @Test
+    void createTransfer_refuseDesComptesDansDesDevisesDifferentes() {
+        Compte euro = compte(1L);
+        euro.setCurrency("EUR");
+        Compte dollar = compte(2L);
+        dollar.setCurrency("USD");
+        when(accountService.findById(1L)).thenReturn(euro);
+        when(accountService.findById(2L)).thenReturn(dollar);
+
+        DemandeVirementDTO payload = new DemandeVirementDTO();
+        payload.setFromAccountId(1L);
+        payload.setToAccountId(2L);
+        payload.setAmount(new BigDecimal("50.00"));
+
+        assertThatThrownBy(() -> service.createTransfer(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("devises différentes");
+        verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    @Test
+    void createTransfer_accepteDesCodesDeviseIdentiquesSansTenirCompteDeLaCasse() {
+        Compte source = compte(1L);
+        source.setCurrency("EUR");
+        Compte destination = compte(2L);
+        destination.setCurrency("eur");
+        when(accountService.findById(1L)).thenReturn(source);
+        when(accountService.findById(2L)).thenReturn(destination);
+        AtomicLong idSeq = new AtomicLong(1);
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> {
+            Transaction t = inv.getArgument(0);
+            if (t.getId() == null) t.setId(idSeq.getAndIncrement());
+            return t;
+        });
+
+        DemandeVirementDTO payload = new DemandeVirementDTO();
+        payload.setFromAccountId(1L);
+        payload.setToAccountId(2L);
+        payload.setAmount(new BigDecimal("50.00"));
+
+        assertThat(service.createTransfer(payload)).hasSize(2);
+    }
+
+    @Test
     void createTransfer_creeUnDebitEtUnCreditLiesEtValidesEtExclusDesRapports() {
         when(accountService.findById(1L)).thenReturn(compte(1L));
         when(accountService.findById(2L)).thenReturn(compte(2L));
@@ -309,6 +355,45 @@ class ServiceTransactionTest {
         assertThat(credit.isValidated()).isTrue();
         assertThat(debit.getTransferTransactionId()).isEqualTo(credit.getId());
         assertThat(credit.getTransferTransactionId()).isEqualTo(debit.getId());
+    }
+
+    @Test
+    void toggleValidated_basculeLesDeuxCotesDunVirementEnsemble() {
+        Transaction debit = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-50.00");
+        debit.setId(1L);
+        debit.setPaymentMode(ModePaiement.TRANSFER);
+        debit.setValidated(true);
+        Transaction credit = transaction(compte(2L), null, LocalDate.of(2026, 1, 10), "50.00");
+        credit.setId(2L);
+        credit.setPaymentMode(ModePaiement.TRANSFER);
+        credit.setValidated(true);
+        debit.setTransferTransaction(credit);
+        credit.setTransferTransaction(debit);
+        when(transactionRepository.findById(1L)).thenReturn(Optional.of(debit));
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        TransactionDTO result = service.toggleValidated(1L);
+
+        assertThat(result.isValidated()).isFalse();
+        assertThat(debit.isValidated()).isFalse();
+        assertThat(credit.isValidated()).isFalse();
+        verify(transactionRepository).save(credit);
+        verify(transactionRepository).save(debit);
+    }
+
+    @Test
+    void toggleValidated_conserveLeFonctionnementPourUneTransactionNormale() {
+        Transaction normal = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-50.00");
+        normal.setId(1L);
+        normal.setValidated(false);
+        when(transactionRepository.findById(1L)).thenReturn(Optional.of(normal));
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        TransactionDTO result = service.toggleValidated(1L);
+
+        assertThat(result.isValidated()).isTrue();
+        assertThat(normal.isValidated()).isTrue();
+        verify(transactionRepository, times(1)).save(normal);
     }
 
     // --- update/delete/bulkUpdate sur un virement : les deux transactions liees ne doivent jamais se desynchroniser ---
@@ -449,6 +534,40 @@ class ServiceTransactionTest {
     }
 
     @Test
+    void findDuplicateGroups_signaleUneLigneImporteeRessaisieALaMainMemeTiers() {
+        Compte account = compte(1L);
+        Tiers carrefour = payee(1L, "Carrefour");
+        Transaction importee = transaction(account, carrefour, LocalDate.of(2026, 1, 5), "-45.50");
+        importee.setId(1L);
+        importee.setExternalId("BQ-123");
+        Transaction manuelle = transaction(account, carrefour, LocalDate.of(2026, 1, 5), "-45.50");
+        manuelle.setId(2L);
+        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of(importee, manuelle));
+
+        List<GroupeDoublonDTO> groups = service.findDuplicateGroups();
+
+        assertThat(groups).hasSize(1);
+        assertThat(groups.get(0).isCertain()).isFalse();
+        assertThat(groups.get(0).getCount()).isEqualTo(2);
+    }
+
+    @Test
+    void findDuplicateGroups_neSignalePasDeuxAchatsDistinguesParLaBanque() {
+        // Deux cafes le meme jour, meme montant : identifiants bancaires differents.
+        Compte account = compte(1L);
+        Tiers cafe = payee(1L, "Cafe du coin");
+        Transaction premier = transaction(account, cafe, LocalDate.of(2026, 1, 5), "-2.50");
+        premier.setId(1L);
+        premier.setExternalId("BQ-1");
+        Transaction second = transaction(account, cafe, LocalDate.of(2026, 1, 5), "-2.50");
+        second.setId(2L);
+        second.setExternalId("BQ-2");
+        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of(premier, second));
+
+        assertThat(service.findDuplicateGroups()).isEmpty();
+    }
+
+    @Test
     void findDuplicateGroups_detectePaireRembourseeMemeTiersMontantOppose() {
         Compte account = compte(1L);
         Tiers ami = payee(1L, "Remboursement Ami");
@@ -513,6 +632,93 @@ class ServiceTransactionTest {
         assertThat(result.getCategoryId()).isNull();
     }
 
+    @Test
+    void create_refuseUneTransactionSansDateOuSansMontantAvantDeCreerLeTiers() {
+        TransactionDTO sansDate = TransactionDTO.builder()
+                .accountId(1L).amount(new BigDecimal("-10.00")).payee("Nouveau tiers").build();
+        TransactionDTO sansMontant = TransactionDTO.builder()
+                .accountId(1L).date(LocalDate.of(2026, 1, 5)).payee("Nouveau tiers").build();
+
+        assertThatThrownBy(() -> service.create(sansDate)).hasMessageContaining("date");
+        assertThatThrownBy(() -> service.create(sansMontant)).hasMessageContaining("montant");
+        verifyNoInteractions(payeeService);
+        verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    // --- Compte archive : plus de nouvelle transaction ---
+
+    private static Compte compteArchive(Long id) {
+        Compte c = compte(id);
+        c.setName("Ancien livret");
+        c.setArchived(true);
+        return c;
+    }
+
+    @Test
+    void create_refuseUneTransactionSurUnCompteArchive() {
+        when(accountService.findById(1L)).thenReturn(compteArchive(1L));
+
+        TransactionDTO payload = TransactionDTO.builder()
+                .accountId(1L)
+                .date(LocalDate.of(2026, 1, 5))
+                .amount(new BigDecimal("-10.00"))
+                .build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("archivé");
+        verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    @Test
+    void update_autoriseLaModificationDUneTransactionDejaSurUnCompteArchive() {
+        Compte archive = compteArchive(1L);
+        Transaction existing = transaction(archive, null, LocalDate.of(2026, 1, 5), "-10.00");
+        existing.setId(1L);
+        when(transactionRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(accountService.findById(1L)).thenReturn(archive);
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        TransactionDTO payload = TransactionDTO.builder()
+                .accountId(1L)
+                .date(LocalDate.of(2026, 1, 5))
+                .amount(new BigDecimal("-12.00"))
+                .build();
+
+        assertThat(service.update(1L, payload).getAmount()).isEqualByComparingTo("-12.00");
+    }
+
+    @Test
+    void update_refuseDeDeplacerUneTransactionVersUnCompteArchive() {
+        Transaction existing = transaction(compte(2L), null, LocalDate.of(2026, 1, 5), "-10.00");
+        existing.setId(1L);
+        when(transactionRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(accountService.findById(1L)).thenReturn(compteArchive(1L));
+
+        TransactionDTO payload = TransactionDTO.builder()
+                .accountId(1L)
+                .date(LocalDate.of(2026, 1, 5))
+                .amount(new BigDecimal("-10.00"))
+                .build();
+
+        assertThatThrownBy(() -> service.update(1L, payload)).isInstanceOf(IllegalStateException.class);
+        verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    @Test
+    void createTransfer_refuseUnCompteDestinationArchive() {
+        when(accountService.findById(1L)).thenReturn(compte(1L));
+        when(accountService.findById(2L)).thenReturn(compteArchive(2L));
+
+        DemandeVirementDTO payload = new DemandeVirementDTO();
+        payload.setFromAccountId(1L);
+        payload.setToAccountId(2L);
+        payload.setAmount(new BigDecimal("50.00"));
+
+        assertThatThrownBy(() -> service.createTransfer(payload)).isInstanceOf(IllegalStateException.class);
+        verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
     // --- sanitizeMemo ---
 
     @Test
@@ -522,5 +728,214 @@ class ServiceTransactionTest {
         assertThat(ServiceTransaction.sanitizeMemo("(NULL)")).isNull();
         assertThat(ServiceTransaction.sanitizeMemo("null")).isNull();
         assertThat(ServiceTransaction.sanitizeMemo("  Courses  ")).isEqualTo("Courses");
+    }
+
+    // --- search : choix du filtre de GET /api/transactions ---
+
+    private static final LocalDate DEBUT = LocalDate.of(2026, 1, 1);
+    private static final LocalDate FIN = LocalDate.of(2026, 1, 31);
+
+    @Test
+    void search_sansParametre_renvoieToutesLesTransactions() {
+        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of());
+
+        assertThat(service.search(null, null, null, null, null)).isEmpty();
+        verify(transactionRepository).findAllByOrderByDateDescIdDesc();
+    }
+
+    @Test
+    void search_compteEtPeriode_filtreSurLesDeux() {
+        Transaction t = transaction(compte(7L), payee(1L, "Loyer"), LocalDate.of(2026, 1, 10), "-800");
+        when(transactionRepository.findByAccountIdAndDateBetween(7L, DEBUT, FIN)).thenReturn(List.of(t));
+
+        assertThat(service.search(7L, DEBUT, FIN, null, null)).hasSize(1);
+        verify(transactionRepository, never()).findByAccount_IdOrderByDateDescIdDesc(any());
+    }
+
+    @Test
+    void search_periodeSeule_filtreSurLaPeriode() {
+        when(transactionRepository.findByDateBetween(DEBUT, FIN)).thenReturn(List.of());
+
+        service.search(null, DEBUT, FIN, null, null);
+
+        verify(transactionRepository).findByDateBetween(DEBUT, FIN);
+    }
+
+    @Test
+    void search_montant_utiliseLeFiltreParMontant() {
+        when(transactionRepository.findByAmountGreaterThanOrderByDateDescIdDesc(new BigDecimal("100"))).thenReturn(List.of());
+
+        service.search(null, null, null, ">", new BigDecimal("100"));
+
+        verify(transactionRepository).findByAmountGreaterThanOrderByDateDescIdDesc(new BigDecimal("100"));
+    }
+
+    @Test
+    void search_periodeIncomplete_estRefuseeAuLieuDeToutRenvoyer() {
+        assertThatThrownBy(() -> service.search(null, DEBUT, null, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("date de fin");
+        verifyNoInteractions(transactionRepository);
+    }
+
+    @Test
+    void search_periodeInversee_estRefusee() {
+        assertThatThrownBy(() -> service.search(null, FIN, DEBUT, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("postérieure");
+    }
+
+    @Test
+    void search_operateurSansMontant_estRefuse() {
+        assertThatThrownBy(() -> service.search(null, null, null, ">", null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("opérateur et un montant");
+    }
+
+    @Test
+    void search_montantEtPeriode_estRefuse() {
+        assertThatThrownBy(() -> service.search(null, DEBUT, FIN, "=", BigDecimal.TEN))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("combinée");
+        verifyNoInteractions(transactionRepository);
+    }
+
+    // --- nettoyage des tiers orphelins : jamais dans la transaction de la suppression ---
+
+    private Transaction transactionAvecTiers(Long id, Tiers payee) {
+        Transaction t = transaction(compte(1L), payee, LocalDate.of(2026, 3, 1), "-12.00");
+        t.setId(id);
+        when(transactionRepository.findById(id)).thenReturn(Optional.of(t));
+        return t;
+    }
+
+    @Test
+    void delete_sansTransactionActive_nettoieLAncienTiersImmediatement() {
+        transactionAvecTiers(10L, payee(5L, "SUMUP CAFE"));
+
+        service.delete(10L);
+
+        verify(payeeService).deleteIfOrphan(5L);
+    }
+
+    @Test
+    void delete_echecDuNettoyageDuTiers_nEmpechePasLaSuppression() {
+        Transaction t = transactionAvecTiers(10L, payee(5L, "SUMUP CAFE"));
+        doThrow(new IllegalStateException("contrainte")).when(payeeService).deleteIfOrphan(5L);
+
+        service.delete(10L);
+
+        verify(transactionRepository).deleteAll(List.of(t));
+    }
+
+    @Test
+    void delete_dansUneTransaction_reporteLeNettoyageApresLeCommit() {
+        transactionAvecTiers(10L, payee(5L, "SUMUP CAFE"));
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.delete(10L);
+            verify(payeeService, never()).deleteIfOrphan(any());
+
+            TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+
+            verify(payeeService).deleteIfOrphan(5L);
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    // --- bulkUpdate : changement de tiers en masse ---
+
+    private TransactionBulkUpdateDTO bulkPayee(String payee, Long... ids) {
+        TransactionBulkUpdateDTO payload = new TransactionBulkUpdateDTO();
+        payload.setIds(List.of(ids));
+        payload.setPayeeProvided(true);
+        payload.setPayee(payee);
+        return payload;
+    }
+
+    @Test
+    void bulkUpdate_tiers_remplaceLeTiersEtNettoieLesAnciensUneSeuleFoisChacun() {
+        Tiers sumup = payee(5L, "SUMUP CAFE");
+        Tiers cafe = payee(6L, "Cafe du coin");
+        Categorie courses = new Categorie();
+        Transaction t1 = transaction(compte(1L), sumup, LocalDate.of(2026, 2, 1), "-3.00");
+        t1.setId(1L);
+        t1.setCategory(courses);
+        Transaction t2 = transaction(compte(1L), sumup, LocalDate.of(2026, 2, 2), "-4.00");
+        t2.setId(2L);
+        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L, 2L))).thenReturn(List.of(t1, t2));
+        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+        when(payeeService.resolveOrCreate(eq("Cafe du coin"), any())).thenReturn(cafe);
+
+        service.bulkUpdate(bulkPayee("Cafe du coin", 1L, 2L));
+
+        assertThat(t1.getPayee()).isEqualTo(cafe);
+        assertThat(t2.getPayee()).isEqualTo(cafe);
+        // Champ non demande : laisse tel quel.
+        assertThat(t1.getCategory()).isSameAs(courses);
+        verify(payeeService, times(1)).deleteIfOrphan(5L);
+    }
+
+    @Test
+    void bulkUpdate_tiersVide_retireLeTiersSansEnCreer() {
+        Tiers sumup = payee(5L, "SUMUP CAFE");
+        Transaction t1 = transaction(compte(1L), sumup, LocalDate.of(2026, 2, 1), "-3.00");
+        t1.setId(1L);
+        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L))).thenReturn(List.of(t1));
+        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.bulkUpdate(bulkPayee("  ", 1L));
+
+        assertThat(t1.getPayee()).isNull();
+        verify(payeeService, never()).resolveOrCreate(any(), any());
+        verify(payeeService).deleteIfOrphan(5L);
+    }
+
+    @Test
+    void bulkUpdate_memeTiers_neDeclenchePasDeNettoyage() {
+        Tiers cafe = payee(6L, "Cafe du coin");
+        Transaction t1 = transaction(compte(1L), cafe, LocalDate.of(2026, 2, 1), "-3.00");
+        t1.setId(1L);
+        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L))).thenReturn(List.of(t1));
+        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+        when(payeeService.resolveOrCreate(eq("Cafe du coin"), any())).thenReturn(cafe);
+
+        service.bulkUpdate(bulkPayee("Cafe du coin", 1L));
+
+        verify(payeeService, never()).deleteIfOrphan(any());
+    }
+
+    // --- marquages definitifs : "pas un doublon", "suggestion periodique ignoree" ---
+
+    @Test
+    void markAsNotDuplicate_marqueLesTransactionsDemandees() {
+        Transaction t1 = transaction(compte(1L), null, LocalDate.of(2026, 2, 1), "-3.00");
+        Transaction t2 = transaction(compte(1L), null, LocalDate.of(2026, 2, 1), "-3.00");
+        when(transactionRepository.findAllById(List.of(1L, 2L))).thenReturn(List.of(t1, t2));
+
+        service.markAsNotDuplicate(List.of(1L, 2L));
+
+        assertThat(t1.isDuplicateIgnored()).isTrue();
+        assertThat(t2.isDuplicateIgnored()).isTrue();
+        verify(transactionRepository).saveAll(List.of(t1, t2));
+    }
+
+    @Test
+    void ignorePeriodicSuggestion_marqueLesTransactionsDemandees() {
+        Transaction t1 = transaction(compte(1L), null, LocalDate.of(2026, 2, 1), "-9.99");
+        when(transactionRepository.findAllById(List.of(1L))).thenReturn(List.of(t1));
+
+        service.ignorePeriodicSuggestion(List.of(1L));
+
+        assertThat(t1.isPeriodicSuggestionIgnored()).isTrue();
+        verify(transactionRepository).saveAll(List.of(t1));
+    }
+
+    @Test
+    void marquagesDefinitifs_refusentUneSelectionVide() {
+        assertThatThrownBy(() -> service.markAsNotDuplicate(List.of())).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.ignorePeriodicSuggestion(null)).isInstanceOf(IllegalArgumentException.class);
+        verifyNoInteractions(transactionRepository);
     }
 }

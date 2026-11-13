@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="payees-page">
     <div class="page-header">
       <div>
         <h1>Tiers</h1>
@@ -55,12 +55,14 @@
     <div class="table-scroll" v-if="filteredPayees.length">
       <table class="payees-table">
         <colgroup>
-          <col style="width: 36px;" />
-          <col style="width: 400px;" />
-          <col style="width: 160px;" />
-          <col style="width: 130px;" />
-          <col style="width: 220px;" />
-          <col style="width: 90px;" />
+          <col style="width: 44px;" />
+          <col style="width: 21%;" />
+          <col style="width: 18%;" />
+          <col style="width: 100px;" />
+          <col style="width: 118px;" />
+          <col style="width: 104px;" />
+          <col />
+          <col style="width: 64px;" />
         </colgroup>
         <thead>
           <tr>
@@ -73,20 +75,37 @@
                 @change="toggleSelectAllFiltered"
               />
             </th>
-            <th>Nom</th>
+            <th :aria-sort="ariaSort('name')">
+              <button type="button" class="sort-header" @click="toggleSort('name')">
+                Nom <Icon :name="sortIcon('name')" size="sm" />
+              </button>
+            </th>
             <th title="Insensible aux majuscules. Tapez juste 'Carrefour' pour reconnaître tout libellé qui le contient.">Motif de reconnaissance</th>
             <th class="num">Montant</th>
+            <th class="num" :aria-sort="ariaSort('count')">
+              <button type="button" class="sort-header" title="Trier par nombre de transactions" @click="toggleSort('count')">
+                Transactions <Icon :name="sortIcon('count')" size="sm" />
+              </button>
+            </th>
+            <th class="num" :aria-sort="ariaSort('lastDate')">
+              <button type="button" class="sort-header" title="Trier par date de la dernière transaction" @click="toggleSort('lastDate')">
+                Dernière <Icon :name="sortIcon('lastDate')" size="sm" />
+              </button>
+            </th>
             <th>Catégorie associée</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           <tr
-            v-for="p in filteredPayees"
+            v-for="p in visiblePayees"
             :key="p.id"
+            :data-payee-id="p.id"
             :class="{ 'row-editing': editingId === p.id }"
+            :tabindex="editingId === p.id ? undefined : 0"
+            :aria-label="editingId === p.id ? undefined : `${p.name} — Entrée pour modifier`"
             @click="editingId !== p.id && startEdit(p)"
-            @keydown.enter.prevent="editingId === p.id && confirmEdit()"
+            @keydown.enter="onRowEnter($event, p)"
             @keydown.esc="cancelEdit"
           >
             <td @click.stop><input type="checkbox" :value="p.id" v-model="selectedIds" :aria-label="'Sélectionner ' + p.name" /></td>
@@ -97,6 +116,8 @@
               <td class="num" @click.stop>
                 <AmountInput v-model="editForm.amount" aria-label="Montant" style="text-align:right;" placeholder="Tous montants" :allow-relative="false" />
               </td>
+              <td class="num usage-cell">{{ usageOf(p.id).count }}</td>
+              <td class="num usage-cell usage-date">{{ usageOf(p.id).lastDate ? formatDate(usageOf(p.id).lastDate) : '—' }}</td>
               <td @click.stop>
                 <label for="payee-edit-category" class="sr-only">Catégorie associée</label>
                 <CategoryAutocomplete
@@ -107,14 +128,22 @@
                 />
               </td>
               <td @click.stop class="row-actions">
-                <button class="btn secondary" style="padding: 6px 10px;" @click="confirmEdit">✓</button>
-                <button class="btn secondary" style="padding: 6px 10px;" @click="cancelEdit">✕</button>
+                <button class="btn" style="padding: 6px 9px;" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
+                <button class="btn secondary" style="padding: 6px 9px;" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
               </td>
             </template>
             <template v-else>
               <td>{{ p.name }}</td>
-              <td><code>{{ p.pattern }}</code></td>
+              <td>
+                <span class="pattern-segments">
+                  <code v-for="(segment, index) in patternSegmentsById.get(p.id)" :key="index">{{ segment }}</code>
+                </span>
+              </td>
               <td class="num">{{ p.amount != null ? formatAmount(p.amount) : '' }}</td>
+              <td class="num usage-cell" :class="{ unused: !usageOf(p.id).count }">
+                <span class="usage-count">{{ usageOf(p.id).count }}</span>
+              </td>
+              <td class="num usage-cell usage-date">{{ usageOf(p.id).lastDate ? formatDate(usageOf(p.id).lastDate) : '—' }}</td>
               <td>
                 <template v-if="p.categoryId">{{ categoryLabel(p.categoryId) }}</template>
                 <button
@@ -130,13 +159,20 @@
                 <template v-else>—</template>
               </td>
               <td class="row-actions" @click.stop>
-                <button class="btn danger" @click="remove(p)">Suppr.</button>
+                <div class="hover-actions">
+                  <button class="icon-btn danger" title="Supprimer le tiers" :aria-label="'Supprimer ' + p.name" @click="remove(p)"><Icon name="trash" /></button>
+                </div>
               </td>
             </template>
           </tr>
         </tbody>
       </table>
+      <div v-if="hasMorePayees" ref="payeesSentinel" class="load-more-sentinel">Chargement…</div>
     </div>
+    <div v-else-if="!payeesLoaded && loadFailed" class="empty-state">
+      Tiers indisponibles tant que le serveur ne répond pas.
+    </div>
+    <SkeletonRows v-else-if="!payeesLoaded" label="Chargement des tiers…" :columns="['4%', '20%', '24%', '8%', '28%']" />
     <div v-else class="empty-state">
       {{
         searchQuery.trim()
@@ -147,7 +183,7 @@
 
     <!-- Modal création uniquement -->
     <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
-      <div class="modal">
+      <div v-dialog="() => (showModal = false)" class="modal" role="dialog" aria-modal="true">
         <h2>Nouveau tiers</h2>
         <div class="form-grid">
           <div class="form-field" style="grid-column: span 2;">
@@ -156,7 +192,7 @@
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label for="new-payee-pattern">Motif de reconnaissance</label>
-            <input id="new-payee-pattern" v-model="form.pattern" placeholder='Ex : Carrefour' />
+            <input id="new-payee-pattern" v-model="form.pattern" placeholder="Ex : Carrefour" />
             <div class="text-hint">
               Tapez simplement le texte à repérer (ex : <code>Carrefour</code>) : il sera
               reconnu partout où il apparaît dans le libellé de la transaction, quelle que
@@ -222,17 +258,24 @@
 </template>
 
 <script setup>
+import { notify, askConfirm } from '../services/feedback'
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { PayeesAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { normalizeSearch, parseSearchTerms } from '../services/search'
 import { flattenCategories } from '../services/categories'
-import { formatAmount } from '../services/format'
+import { splitPatternSegments } from '../services/payee'
+import { handleRowEnter, restoreFocusToRow } from '../services/rowKeyboard'
+import { nextSort, sortPayees, usageByPayeeId } from '../services/payeeUsage'
+import { formatAmount, formatDate } from '../services/format'
 import { alertApiError } from '../services/errors'
+import { useProgressiveList } from '../services/progressiveList'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import AmountInput from '../components/AmountInput.vue'
 import MergeModal from '../components/MergeModal.vue'
+import Icon from '../components/Icon.vue'
+import SkeletonRows from '../components/SkeletonRows.vue'
 
 const route = useRoute()
 
@@ -244,6 +287,8 @@ const route = useRoute()
 // que le cache partage n'etait pas revalide par autre chose (navigation,
 // F5...).
 const payees = computed(() => dataStore.state.payees)
+const payeesLoaded = computed(() => dataStore.state.loaded.payees)
+const loadFailed = computed(() => dataStore.state.loadFailed)
 const categories = computed(() => dataStore.state.categories)
 const showModal = ref(false)
 const searchQuery = ref('')
@@ -335,6 +380,9 @@ const filteredPayees = computed(() => {
 
 const flatCategories = computed(() => flattenCategories(categories.value))
 
+/** Segments du motif de chaque tiers, découpés une seule fois (affichés en pastilles séparées). */
+const patternSegmentsById = computed(() => new Map(payees.value.map(p => [p.id, splitPatternSegments(p.pattern)])))
+
 // Index Map (id -> libelle deja compose "Parent : Enfant"), precalcule une
 // seule fois quand `categories` change, pour eviter un scan lineaire de
 // flatCategories pour chaque tiers a chaque frappe dans la recherche (voir
@@ -369,6 +417,52 @@ const categoryIdsByPayeeId = computed(() => {
   return map
 })
 
+/* --- Utilisation et tri (voir services/payeeUsage.js) --- */
+
+/** Nombre de transactions et dernière date par tiers, recalculé seulement quand les transactions changent. */
+const payeeUsage = computed(() => usageByPayeeId(dataStore.state.transactions))
+const NO_USAGE = { count: 0, lastDate: '' }
+
+function usageOf(payeeId) {
+  return payeeUsage.value.get(payeeId) || NO_USAGE
+}
+
+/**
+ * Tri choisi en cliquant sur un en-tête ({ key, dir }, null = ordre d'origine).
+ * Recliquer la même colonne inverse le sens (voir nextSort).
+ */
+const sort = ref(null)
+const displayedPayees = computed(() => sortPayees(filteredPayees.value, sort.value, payeeUsage.value))
+
+/**
+ * Affichage progressif (voir services/progressiveList.js) : les ~500 tiers
+ * rendus d'un coup coutaient 30-60 ms a chaque changement de la recherche.
+ */
+const {
+  visibleItems: visiblePayees,
+  hasMore: hasMorePayees,
+  sentinel: payeesSentinel,
+  reset: resetVisiblePayees,
+  revealIndex: revealPayeeIndex
+} = useProgressiveList(displayedPayees, { pageSize: 50 })
+
+watch([searchQuery, withoutCategoryOnly, sort], resetVisiblePayees)
+
+function toggleSort(key) {
+  sort.value = nextSort(sort.value, key)
+}
+
+function ariaSort(key) {
+  if (sort.value?.key !== key) return 'none'
+  return sort.value.dir === 'asc' ? 'ascending' : 'descending'
+}
+
+/** Flèche du sens actif sur la colonne triée, double flèche « triable » sur les autres. */
+function sortIcon(key) {
+  if (sort.value?.key !== key) return 'sortable'
+  return sort.value.dir === 'asc' ? 'arrowUp' : 'arrowDown'
+}
+
 /** Categorie suggeree pour un tiers sans categorie, ou null si aucun signal exploitable (aucune transaction categorisee, ou categories divergentes). */
 function suggestedCategoryId(payee) {
   if (payee.categoryId) return null
@@ -392,6 +486,8 @@ async function applySuggestion(payee) {
       categoryId
     })
     await refreshAfterMutation()
+  } catch (e) {
+    alertApiError("Erreur lors de l'application de la catégorie suggérée", e)
   } finally {
     applyingSuggestionId.value = null
   }
@@ -417,6 +513,8 @@ async function runAutoCategorize() {
   try {
     autoCategorizeResult.value = await PayeesAPI.autoCategorize()
     await Promise.all([dataStore.refreshPayees(), dataStore.refreshTransactions()])
+  } catch (e) {
+    alertApiError('Erreur lors de la catégorisation automatique', e)
   } finally {
     autoCategorizing.value = false
   }
@@ -429,18 +527,35 @@ function openCreate() {
 
 async function save() {
   if (!form.value.name.trim() || !form.value.pattern.trim()) {
-    alert('Le nom et le motif sont obligatoires.')
+    notify('Le nom et le motif sont obligatoires.', 'warning')
     return
   }
-  await PayeesAPI.create(form.value)
-  showModal.value = false
-  await refreshAfterMutation()
+  try {
+    await PayeesAPI.create(form.value)
+    notify('Tiers créé.', 'success')
+    showModal.value = false
+    await refreshAfterMutation()
+  } catch (e) {
+    alertApiError('Erreur lors de la création du tiers', e)
+  }
 }
 
 async function remove(payee) {
-  if (!confirm(`Supprimer le tiers "${payee.name}" ?`)) return
-  await PayeesAPI.remove(payee.id)
-  await refreshAfterMutation()
+  // Même règle que le backend (ServiceTiers#delete) : prévenue ici pour ne
+  // pas demander une confirmation qui aboutirait forcément à un refus.
+  const usedBy = usageOf(payee.id).count
+  if (usedBy > 0) {
+    notify(`Le tiers "${payee.name}" est utilisé par ${usedBy} transaction(s) : fusionnez-le avec un autre tiers plutôt que de le supprimer.`, 'warning', 6000)
+    return
+  }
+  if (!(await askConfirm(`Supprimer le tiers "${payee.name}" ?`))) return
+  try {
+    await PayeesAPI.remove(payee.id)
+    await refreshAfterMutation()
+    notify('Tiers supprimé.', 'success')
+  } catch (e) {
+    alertApiError('Erreur lors de la suppression du tiers', e)
+  }
 }
 
 /* --- Édition inline --- */
@@ -457,14 +572,29 @@ function startEdit(payee) {
 }
 
 function cancelEdit() {
+  const id = editingId.value
   editingId.value = null
   editForm.value = null
+  restoreRowFocus(id)
+}
+
+/** Entrée sur une ligne : ouvre l'édition, ou enregistre si elle est déjà en édition (voir services/rowKeyboard.js). */
+function onRowEnter(event, payee) {
+  handleRowEnter(event, {
+    isEditing: editingId.value === payee.id,
+    confirm: confirmEdit,
+    startEdit: () => startEdit(payee)
+  })
+}
+
+function restoreRowFocus(id) {
+  if (id != null) restoreFocusToRow(`tr[data-payee-id="${id}"]`)
 }
 
 async function confirmEdit() {
   if (!editingId.value || !editForm.value) return
   if (!editForm.value.name.trim() || !editForm.value.pattern.trim()) {
-    alert('Le nom et le motif sont obligatoires.')
+    notify('Le nom et le motif sont obligatoires.', 'warning')
     return
   }
   const id = editingId.value
@@ -475,18 +605,25 @@ async function confirmEdit() {
   // retaper sans savoir pourquoi.
   try {
     await PayeesAPI.update(id, payload)
+    notify('Tiers modifié.', 'success')
   } catch (e) {
     alertApiError('Erreur lors de la modification', e)
     return
   }
   editingId.value = null
   editForm.value = null
+  restoreRowFocus(id)
   await refreshAfterMutation()
 }
 
+// Set plutot que includes() : avec "tout selectionner" sur des milliers de
+// tiers, includes() dans un every()/filter() devenait quadratique a chaque
+// coche (meme principe que selectedIdSet dans Categories.vue).
+const selectedIdSet = computed(() => new Set(selectedIds.value))
+
 /** Vrai si tous les tiers actuellement affichés (selon le filtre) sont sélectionnés. */
 const allFilteredSelected = computed(() =>
-  filteredPayees.value.length > 0 && filteredPayees.value.every(p => selectedIds.value.includes(p.id))
+  filteredPayees.value.length > 0 && filteredPayees.value.every(p => selectedIdSet.value.has(p.id))
 )
 
 /**
@@ -503,9 +640,7 @@ function toggleSelectAllFiltered() {
 
 /* --- Fusion --- */
 
-const selectedPayeeObjects = computed(() =>
-  payees.value.filter(p => selectedIds.value.includes(p.id))
-)
+const selectedPayeeObjects = computed(() => payees.value.filter(p => selectedIdSet.value.has(p.id)))
 
 function payeeOptionLabel(p) {
   return p.name + (p.amount != null ? ' — ' + formatAmount(p.amount) : '')
@@ -527,7 +662,7 @@ watch(mergeTargetId, (id) => {
 async function confirmMerge() {
   if (!mergeTargetId.value) return
   if (!mergePattern.value.trim()) {
-    alert('Le motif de reconnaissance final est obligatoire.')
+    notify('Le motif de reconnaissance final est obligatoire.', 'warning')
     return
   }
   merging.value = true
@@ -554,27 +689,50 @@ onMounted(async () => {
   try {
     await dataStore.ensureLoaded()
   } catch (e) {
-    alertApiError('Erreur lors du chargement des donnees', e)
+    alertApiError('Erreur lors du chargement des données', e)
     return
   }
   // Revalidation silencieuse en arriere-plan a chaque visite de la page, au
   // cas ou tiers/categories/transactions ont change depuis le prechargement.
   dataStore.refreshAll()
 
-  // Arrivee depuis "Transactions > À traiter > Créer une règle" :
-  // - si le tiers existe deja (cas quasi systematique, il a ete cree
-  //   automatiquement des la premiere transaction), on l'ouvre directement
-  //   en edition pour lui affecter une categorie ;
-  // - sinon (repli), on ouvre la modal de creation pre-remplie.
-  if (route.query.editId) {
-    const target = payees.value.find(p => p.id === Number(route.query.editId))
-    if (target) startEdit(target)
-  } else if (route.query.prefillName || route.query.prefillPattern) {
+  applyRouteQuery(route.query)
+})
+
+/**
+ * Arrivee depuis "Transactions > À traiter > Créer une règle" ou depuis la
+ * palette de commandes (Ctrl+K) :
+ * - si le tiers existe deja (cas quasi systematique, il a ete cree
+ *   automatiquement des la premiere transaction), on l'ouvre directement
+ *   en edition (et on le fait defiler a l'ecran) ;
+ * - sinon (repli), on ouvre la modal de creation pre-remplie.
+ * Reappliquee a chaque changement de query : la page n'est pas remontee
+ * quand on y navigue alors qu'elle est deja affichee.
+ */
+function applyRouteQuery(query) {
+  if (query.editId) {
+    const target = payees.value.find(p => p.id === Number(query.editId))
+    if (!target) return
+    searchQuery.value = ''
+    withoutCategoryOnly.value = false
+    startEdit(target)
+    // Apres le watch qui remet l'affichage progressif au premier lot (filtres
+    // effaces ci-dessus) : on etend alors le lot jusqu'au tiers, puis on defile.
+    nextTick(async () => {
+      revealPayeeIndex(displayedPayees.value.findIndex(p => p.id === target.id))
+      await nextTick()
+      document.querySelector(`tr[data-payee-id="${target.id}"]`)?.scrollIntoView({ block: 'center' })
+    })
+  } else if (query.prefillName || query.prefillPattern) {
     form.value = emptyForm()
-    form.value.name = route.query.prefillName || ''
-    form.value.pattern = route.query.prefillPattern || ''
+    form.value.name = query.prefillName || ''
+    form.value.pattern = query.prefillPattern || ''
     showModal.value = true
   }
+}
+
+watch(() => route.query, (query) => {
+  if (dataStore.state.loaded.payees) applyRouteQuery(query)
 })
 </script>
 
@@ -619,8 +777,13 @@ onMounted(async () => {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
 }
-.payees-table tbody tr {
+.payees-page .payees-table tbody tr {
   cursor: pointer;
+}
+/* Ligne atteinte au clavier (Tab) : cadre visible à l'intérieur de la ligne. */
+.payees-page .payees-table tbody tr:focus-visible {
+  outline: 2px solid var(--azure);
+  outline-offset: -2px;
 }
 .payees-table tbody tr.row-editing {
   cursor: default;
@@ -659,23 +822,28 @@ onMounted(async () => {
 }
 .category-suggestion:hover:not(:disabled) {
   background: var(--amber);
-  color: #FFFFFF;
+  color: var(--on-accent);
 }
 .category-suggestion:disabled {
   opacity: 0.6;
   cursor: default;
 }
 
-.row-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
+/* Pas de display:flex sur la cellule elle-même : elle cesserait d'être une
+   cellule de tableau et ne s'étirerait plus à la hauteur de la ligne
+   (bande décalée dans la colonne fixe à droite). */
+td.row-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+td.row-actions > .btn + .btn {
+  margin-left: 6px;
 }
 .payees-table tbody tr:has(input[type="checkbox"]:checked) {
   background: var(--azure-dim);
 }
 
-.payees-table thead th {
+.payees-page .payees-table thead th {
   position: sticky;
   top: 0;
   z-index: 6;
@@ -685,7 +853,7 @@ onMounted(async () => {
   position: sticky;
   right: 0;
   background: var(--ink-900);
-  box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
+  box-shadow: var(--sticky-edge-shadow);
 }
 /*
  * z-index plus eleve que le thead sticky "simple" ci-dessus car cette
@@ -731,4 +899,45 @@ onMounted(async () => {
   border-radius: 4px;
   font-family: var(--font-mono);
 }
+</style>
+
+<style scoped>
+/* table-layout fixed : les largeurs du <colgroup> sont respectées (sinon le
+   navigateur les répartit selon le contenu et le nom s'étale sur 4 lignes). */
+.payees-page .payees-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; width: 100%; min-width: 1000px; }
+.payees-page .payees-table thead th { background: var(--surface-sunken); color: var(--text-muted); font-size: 12.5px; font-weight: 600; text-transform: none; }
+.payees-page .payees-table tbody td { padding-top: 13px; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
+.payees-page .payees-table tbody tr:last-child td { border-bottom: 0; }
+.payees-page .payees-table tbody tr:hover { background: var(--row-hover); }
+.payees-page .payees-table tbody tr.row-editing { background: var(--azure-dim); }
+.payees-page code { border-radius: 5px; padding: 3px 6px; background: var(--ink-800); color: var(--text-muted); }
+/* En-têtes triables : bouton qui garde l'apparence de l'en-tête. */
+.sort-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sort-header .icon { color: var(--text-faint); }
+.sort-header:hover, .sort-header:hover .icon { color: var(--text-primary); }
+th[aria-sort="ascending"] .sort-header .icon,
+th[aria-sort="descending"] .sort-header .icon { color: var(--azure); }
+th[aria-sort="ascending"] .sort-header,
+th[aria-sort="descending"] .sort-header { color: var(--text-primary); }
+
+/* Utilisation : nombre de transactions et date de la dernière, tiers inutilisés atténués. */
+.usage-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.usage-count { font-weight: 600; color: var(--text-primary); }
+.usage-date { color: var(--text-muted); font-size: 13px; }
+.usage-cell.unused .usage-count { color: var(--text-faint); font-weight: 500; }
+
+/* Un segment de motif = une pastille : jamais coupée au milieu, les segments passent à la ligne entre eux. */
+.pattern-segments { display: flex; flex-wrap: wrap; gap: 4px; }
+.pattern-segments code { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 760px) { .payees-page .page-header { align-items: flex-start; flex-direction: column; } .payees-page .toolbar { align-items: stretch; } }
 </style>

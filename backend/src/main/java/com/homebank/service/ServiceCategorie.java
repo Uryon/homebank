@@ -2,19 +2,25 @@ package com.homebank.service;
 
 import com.homebank.dto.CategorieDTO;
 import com.homebank.model.Categorie;
+import com.homebank.model.Categorie.TypeCategorie;
 import com.homebank.repository.DepotCategorie;
 import com.homebank.repository.DepotTiers;
 import com.homebank.repository.DepotTransaction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
 @Service
 public class ServiceCategorie {
+
+    private static final Logger log = LoggerFactory.getLogger(ServiceCategorie.class);
 
     private final DepotCategorie categoryRepository;
     private final DepotTransaction transactionRepository;
@@ -39,7 +45,7 @@ public class ServiceCategorie {
 
     public Categorie create(CategorieDTO payload) {
         Categorie category = new Categorie();
-        category.setName(payload.getName());
+        category.setName(requireName(payload));
         category.setIcon(payload.getIcon());
         if (payload.getParentId() != null) {
             Categorie parent = findById(payload.getParentId());
@@ -49,7 +55,7 @@ public class ServiceCategorie {
             category.setType(parent.getType());
         } else {
             category.setParent(null);
-            category.setType(payload.getType());
+            category.setType(requireRootType(payload));
         }
         return categoryRepository.save(category);
     }
@@ -57,7 +63,7 @@ public class ServiceCategorie {
     @Transactional
     public Categorie update(Long id, CategorieDTO payload) {
         Categorie existing = findById(id);
-        existing.setName(payload.getName());
+        existing.setName(requireName(payload));
         existing.setIcon(payload.getIcon());
 
         if (payload.getParentId() != null) {
@@ -73,7 +79,7 @@ public class ServiceCategorie {
             existing.setType(parent.getType());
         } else {
             existing.setParent(null);
-            existing.setType(payload.getType());
+            existing.setType(requireRootType(payload));
         }
         // Repercute le type sur toute la descendance (enfants, petits-enfants...)
         // pour qu'elle reste dans le meme groupe (revenu/depense), que le type
@@ -81,6 +87,23 @@ public class ServiceCategorie {
         cascadeTypeToDescendants(existing);
 
         return categoryRepository.save(existing);
+    }
+
+    /** Nom obligatoire (espaces retires) : refuse cote service plutot qu'a l'insertion SQL (colonne NOT NULL). */
+    private static String requireName(CategorieDTO payload) {
+        String name = payload.getName() != null ? payload.getName().trim() : "";
+        if (name.isEmpty()) {
+            throw new IllegalArgumentException("Le nom de la categorie est obligatoire");
+        }
+        return name;
+    }
+
+    /** Type obligatoire pour une categorie racine (une sous-categorie herite toujours de son parent). */
+    private static TypeCategorie requireRootType(CategorieDTO payload) {
+        if (payload.getType() == null) {
+            throw new IllegalArgumentException("Le type (revenu, depense ou les deux) est obligatoire");
+        }
+        return payload.getType();
     }
 
     /** Indique si `candidate` est `ancestor` lui-meme ou l'une de ses descendantes (remonte la chaine des parents). */
@@ -114,14 +137,39 @@ public class ServiceCategorie {
      * etrangere : contrairement a une transaction, une categorie par defaut
      * de tiers n'est qu'un raccourci de saisie, sa perte est sans consequence
      * sur l'historique. Les transactions qui utilisent encore cette
-     * categorie, elles, continuent de bloquer la suppression (voir
-     * GlobalExceptionHandler) — il faut les reaffecter via "Fusionner".
+     * categorie (ou une sous-categorie), elles, bloquent la suppression :
+     * refus explicite (409) avec leur nombre, il faut les reaffecter via
+     * "Fusionner".
+     * <p>
+     * Les sous-categories sont supprimees avec leur parent (cascade de
+     * Categorie#children) : les tiers rattaches a l'une d'elles sont donc
+     * detaches eux aussi, sans quoi leur cle etrangere bloquait la
+     * suppression avec un message sans rapport.
      */
     @Transactional
     public void delete(Long id) {
         Categorie category = findById(id);
-        payeeRepository.clearCategory(category);
-        categoryRepository.deleteById(id);
+        List<Categorie> subtree = new ArrayList<>();
+        collectSubtree(category, subtree);
+
+        long transactionCount = transactionRepository.countByCategoryIn(subtree);
+        if (transactionCount > 0) {
+            String scope = subtree.size() > 1 ? "Cette catégorie ou l'une de ses sous-catégories est utilisée" : "Cette catégorie est utilisée";
+            throw new IllegalStateException(scope + " par " + transactionCount
+                    + " transaction(s). Fusionnez-la avec une autre catégorie plutôt que de la supprimer.");
+        }
+
+        subtree.forEach(payeeRepository::clearCategory);
+        categoryRepository.delete(category);
+        log.info("Categorie supprimee : {} ({}), avec {} sous-categorie(s)", category.getName(), id, subtree.size() - 1);
+    }
+
+    /** `category` et toute sa descendance, parents avant enfants (voir delete). */
+    private void collectSubtree(Categorie category, List<Categorie> subtree) {
+        subtree.add(category);
+        for (Categorie child : categoryRepository.findByParent(category)) {
+            collectSubtree(child, subtree);
+        }
     }
 
     /** Bascule le statut masque/visible d'une categorie (ne touche a rien d'autre) */
@@ -152,6 +200,12 @@ public class ServiceCategorie {
      */
     @Transactional
     public Categorie merge(List<Long> sourceIds, Long targetId) {
+        if (targetId == null) {
+            throw new IllegalArgumentException("La categorie a conserver est obligatoire");
+        }
+        if (sourceIds == null) {
+            throw new IllegalArgumentException("La liste des elements a fusionner est obligatoire");
+        }
         Categorie target = findById(targetId);
 
         for (Long sourceId : sourceIds) {

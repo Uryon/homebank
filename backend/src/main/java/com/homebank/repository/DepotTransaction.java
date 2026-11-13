@@ -10,43 +10,44 @@ import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
+
+import static com.homebank.repository.RequetesTransaction.NEWEST_FIRST;
+import static com.homebank.repository.RequetesTransaction.SELECT_FOR_DISPLAY;
+import static com.homebank.repository.RequetesTransaction.SELECT_FOR_REPORTS;
 
 public interface DepotTransaction extends JpaRepository<Transaction, Long> {
 
-    /**
-     * Tiers, categorie et virement correspondant deja charges (fetch join) :
-     * MappeurTransaction#payeeLabel lit le nom du tiers (ou, pour un virement,
-     * le compte de la transaction correspondante) de CHAQUE transaction —
-     * sans ce fetch join, chaque tiers/virement distinct de la liste
-     * declencherait sa propre requete au premier acces (LAZY), potentiellement
-     * des centaines de requetes N+1 sur une liste de transactions.
-     */
-    @Query("select t from Transaction t"
-            + " left join fetch t.payee left join fetch t.category"
-            + " left join fetch t.transferTransaction tt left join fetch tt.account"
-            + " where t.account.id = :accountId order by t.date desc, t.id desc")
+    long countByAccount_Id(Long accountId);
+
+    /** Fetch joins de SELECT_FOR_DISPLAY : voir RequetesTransaction (evite un N+1 par tiers/virement). */
+    @Query(SELECT_FOR_DISPLAY + " where t.account.id = :accountId" + NEWEST_FIRST)
     List<Transaction> findByAccount_IdOrderByDateDescIdDesc(@Param("accountId") Long accountId);
 
-    @Query("select t from Transaction t"
-            + " left join fetch t.payee left join fetch t.category"
-            + " left join fetch t.transferTransaction tt left join fetch tt.account"
-            + " order by t.date desc, t.id desc")
+    @Query(SELECT_FOR_DISPLAY + NEWEST_FIRST)
     List<Transaction> findAllByOrderByDateDescIdDesc();
 
     /**
-     * Tiers, categorie et virement correspondant deja charges (fetch join) :
-     * meme raison que findAllByOrderByDateDescIdDesc ci-dessus (utilisee via
-     * ServiceTransaction#findByPeriod, qui mappe chaque resultat vers un DTO).
+     * Tiers, categorie (et son parent) et virement correspondant deja charges
+     * (fetch join) : meme raison que findAllByOrderByDateDescIdDesc ci-dessus
+     * (utilisee via ServiceTransaction#findByPeriod, qui mappe chaque resultat
+     * vers un DTO, et par les rapports de ServiceRapport, qui lisent aussi la
+     * categorie parente pour regrouper/libeller par categorie racine).
      */
-    @Query("select t from Transaction t"
-            + " left join fetch t.payee left join fetch t.category"
-            + " left join fetch t.transferTransaction tt left join fetch tt.account"
-            + " where t.date between :from and :to")
+    @Query(SELECT_FOR_REPORTS + " where t.date between :from and :to")
     List<Transaction> findByDateBetween(@Param("from") LocalDate from, @Param("to") LocalDate to);
 
-    List<Transaction> findByAccountIdAndDateBetween(Long accountId, LocalDate from, LocalDate to);
+    /**
+     * Variante de findByDateBetween filtree sur un compte (tableau de bord
+     * filtre par compte), avec les memes fetch joins : sans eux, chaque
+     * categorie/tiers distinct declencherait sa propre requete (N+1) dans
+     * ServiceRapport.
+     */
+    @Query(SELECT_FOR_REPORTS + " where t.account.id = :accountId and t.date between :from and :to")
+    List<Transaction> findByAccountIdAndDateBetween(@Param("accountId") Long accountId,
+                                                    @Param("from") LocalDate from,
+                                                    @Param("to") LocalDate to);
 
     /**
      * Recherche de transactions par montant (operateur > < =), utilisee par
@@ -54,40 +55,22 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
      * correspondant deja charges (fetch join), meme raison que
      * findAllByOrderByDateDescIdDesc ci-dessus.
      */
-    @Query("select t from Transaction t"
-            + " left join fetch t.payee left join fetch t.category"
-            + " left join fetch t.transferTransaction tt left join fetch tt.account"
-            + " where t.amount > :amount order by t.date desc, t.id desc")
+    @Query(SELECT_FOR_DISPLAY + " where t.amount > :amount" + NEWEST_FIRST)
     List<Transaction> findByAmountGreaterThanOrderByDateDescIdDesc(@Param("amount") BigDecimal amount);
 
-    @Query("select t from Transaction t"
-            + " left join fetch t.payee left join fetch t.category"
-            + " left join fetch t.transferTransaction tt left join fetch tt.account"
-            + " where t.amount < :amount order by t.date desc, t.id desc")
+    @Query(SELECT_FOR_DISPLAY + " where t.amount < :amount" + NEWEST_FIRST)
     List<Transaction> findByAmountLessThanOrderByDateDescIdDesc(@Param("amount") BigDecimal amount);
 
-    @Query("select t from Transaction t"
-            + " left join fetch t.payee left join fetch t.category"
-            + " left join fetch t.transferTransaction tt left join fetch tt.account"
-            + " where t.amount = :amount order by t.date desc, t.id desc")
+    @Query(SELECT_FOR_DISPLAY + " where t.amount = :amount" + NEWEST_FIRST)
     List<Transaction> findByAmountOrderByDateDescIdDesc(@Param("amount") BigDecimal amount);
 
-    @Query("select t from Transaction t"
-            + " left join fetch t.payee left join fetch t.category"
-            + " left join fetch t.transferTransaction tt left join fetch tt.account"
-            + " where t.account.id = :accountId and t.amount > :amount order by t.date desc, t.id desc")
+    @Query(SELECT_FOR_DISPLAY + " where t.account.id = :accountId and t.amount > :amount" + NEWEST_FIRST)
     List<Transaction> findByAccount_IdAndAmountGreaterThanOrderByDateDescIdDesc(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
 
-    @Query("select t from Transaction t"
-            + " left join fetch t.payee left join fetch t.category"
-            + " left join fetch t.transferTransaction tt left join fetch tt.account"
-            + " where t.account.id = :accountId and t.amount < :amount order by t.date desc, t.id desc")
+    @Query(SELECT_FOR_DISPLAY + " where t.account.id = :accountId and t.amount < :amount" + NEWEST_FIRST)
     List<Transaction> findByAccount_IdAndAmountLessThanOrderByDateDescIdDesc(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
 
-    @Query("select t from Transaction t"
-            + " left join fetch t.payee left join fetch t.category"
-            + " left join fetch t.transferTransaction tt left join fetch tt.account"
-            + " where t.account.id = :accountId and t.amount = :amount order by t.date desc, t.id desc")
+    @Query(SELECT_FOR_DISPLAY + " where t.account.id = :accountId and t.amount = :amount" + NEWEST_FIRST)
     List<Transaction> findByAccount_IdAndAmountOrderByDateDescIdDesc(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
 
     /**
@@ -102,6 +85,13 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
     @Query("select t from Transaction t left join fetch t.transferTransaction where t.id in :ids")
     List<Transaction> findAllByIdWithTransferTransaction(@Param("ids") List<Long> ids);
 
+    /**
+     * Transactions marquees "periodique", tiers deja charge (fetch join) :
+     * ServiceRapport#periodicExpensesSummary lit le nom du tiers de chacune
+     * pour les regrouper (N+1 sinon).
+     */
+    @Query("select t from Transaction t left join fetch t.payee"
+            + " where t.periodicExpense = true" + NEWEST_FIRST)
     List<Transaction> findByPeriodicExpenseTrueOrderByDateDescIdDesc();
 
     /**
@@ -123,7 +113,12 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
      * rapport meme sur un mois different de sa date reelle de paiement, tant
      * que ce mois appartient a la fenetre glissante de 12 mois qui demarre a
      * son propre mois de paiement.
+     * Tiers et categorie (et son parent) deja charges (fetch join) : lus par
+     * ServiceRapport pour chaque tranche mensuelle (N+1 sinon).
      */
+    @Query("select t from Transaction t"
+            + " join fetch t.category c left join fetch c.parent left join fetch t.payee"
+            + " where c.annualized = true")
     List<Transaction> findByCategory_AnnualizedTrue();
 
     /**
@@ -141,11 +136,35 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
     BigDecimal sumAmountByAccountIdAsOf(@Param("accountId") Long accountId, @Param("asOf") LocalDate asOf);
 
     /**
+     * Somme des montants survenus jusqu'a `asOf`, pour tous les comptes en une
+     * seule requete (voir ServiceCompte#allBalances) : lignes [accountId, somme].
+     * Un compte sans transaction n'a pas de ligne.
+     */
+    @Query("select t.account.id, sum(t.amount) from Transaction t where t.date <= :asOf group by t.account.id")
+    List<Object[]> sumAmountGroupedByAccountIdAsOf(@Param("asOf") LocalDate asOf);
+
+    /** Somme des montants par jour sur [from, to], tous comptes (voir ServiceRapport#monthlyMovements) : lignes [date, somme]. */
+    @Query("select t.date, sum(t.amount) from Transaction t where t.date between :from and :to group by t.date")
+    List<Object[]> sumAmountGroupedByDate(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /** Idem pour un seul compte. */
+    @Query("select t.date, sum(t.amount) from Transaction t"
+            + " where t.account.id = :accountId and t.date between :from and :to group by t.date")
+    List<Object[]> sumAmountByAccountIdGroupedByDate(@Param("accountId") Long accountId,
+                                                     @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    /**
      * Vrai si au moins une transaction est encore liee a ce tiers. Utilise
      * pour detecter un tiers auto-cree devenu orphelin (voir
      * ServiceTiers#pruneIfOrphan) sans avoir a charger les transactions.
      */
     boolean existsByPayee(Tiers payee);
+
+    /** Nombre de transactions d'un tiers, pour expliquer un refus de suppression (voir ServiceTiers#delete). */
+    long countByPayee(Tiers payee);
+
+    /** Nombre de transactions rattachees a l'une de ces categories, pour expliquer un refus de suppression (voir ServiceCategorie#delete). */
+    long countByCategoryIn(Collection<Categorie> categories);
 
     /**
      * Reaffecte en masse toutes les transactions d'un tiers vers un autre.
@@ -170,13 +189,6 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
     @Modifying
     @Query("update Transaction t set t.validated = true where t.validated = false")
     int validateAllPending();
-
-    /**
-     * Recherche une transaction correspondant a un identifiant externe donne
-     * (fourni par la banque ou le fichier importe), utilisee en priorite pour
-     * la detection de doublons.
-     */
-    Optional<Transaction> findByAccountIdAndExternalId(Long accountId, String externalId);
 
     /**
      * Vrai si l'ancienne colonne texte "transactions.payee" existe encore en

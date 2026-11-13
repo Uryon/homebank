@@ -14,7 +14,7 @@
         @keydown.down.prevent="moveHighlight(1)"
         @keydown.up.prevent="moveHighlight(-1)"
         @keydown.enter.prevent="selectHighlighted"
-        @keydown.esc="closeDropdown"
+        @keydown.esc="onEscape"
         @blur="handleBlur"
       />
       <button
@@ -92,9 +92,26 @@ const open = ref(false)
 // Cle du "group.key + '-' + option.id" actuellement surligne au clavier/survol.
 const highlightedKey = ref(null)
 
+// Index recalcules seulement quand `categories` change (jamais a la frappe) :
+// ce composant est instancie sur chaque ligne editee du tableau des
+// transactions, un .find() lineaire par appel y etait inutilement couteux.
+const categoryById = computed(() => new Map(props.categories.map(c => [c.id, c])))
+
+/** Categories proposables, indexees par libelle en minuscules (correspondance exacte, voir reconcileTypedText). */
+const selectableByLowerLabel = computed(() => {
+  const index = new Map()
+  for (const c of props.categories) {
+    if (c.selectable && !c.hidden) {
+      const key = c.label.toLowerCase()
+      if (!index.has(key)) index.set(key, c)
+    }
+  }
+  return index
+})
+
 function labelFor(id) {
   if (!id) return ''
-  return props.categories.find(c => c.id === id)?.label || ''
+  return categoryById.value.get(id)?.label || ''
 }
 
 // Synchronise le texte affiché avec la valeur (id) reçue depuis le parent,
@@ -168,6 +185,17 @@ function closeDropdown() {
   highlightedKey.value = null
 }
 
+/**
+ * Échap ferme d'abord la liste ouverte, sans remonter au parent (sinon elle
+ * annulait aussi l'édition de la ligne ou fermait la fenêtre). Liste déjà
+ * fermée : Échap remonte normalement.
+ */
+function onEscape(event) {
+  if (!open.value) return
+  event.stopPropagation()
+  closeDropdown()
+}
+
 function handleInput() {
   open.value = true
   highlightedKey.value = null
@@ -226,7 +254,7 @@ function reconcileTypedText() {
     if (props.modelValue !== null) emit('update:modelValue', null)
     return
   }
-  const exact = props.categories.find(c => c.selectable && !c.hidden && c.label.toLowerCase() === trimmed)
+  const exact = selectableByLowerLabel.value.get(trimmed)
   if (exact) {
     if (exact.id !== props.modelValue) emit('update:modelValue', exact.id)
     query.value = exact.label
@@ -294,7 +322,7 @@ defineExpose({ focus: () => inputEl.value?.focus() })
   background: var(--ink-900);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 20px rgba(23, 32, 46, 0.14);
+  box-shadow: var(--shadow-popover);
 }
 .cat-autocomplete-group-label {
   position: sticky;
@@ -302,7 +330,7 @@ defineExpose({ focus: () => inputEl.value?.focus() })
   padding: 6px 12px;
   font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: .04em;
   color: var(--text-faint);
   background: var(--ink-800);

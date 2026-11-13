@@ -26,14 +26,14 @@
 
     --text-primary: #131722;
     --text-muted: #566070;
-    --text-faint: #6B7585;
+    --text-faint: #646E7E;  /* ≥ 4,5:1 (WCAG AA) aussi sur le fond de page et les pastilles */
 
     /* Sens financier uniquement */
     --mint: #0F7B57;       /* revenus / positif */
     --mint-dim: #E3F4EC;
     --coral: #C2372F;      /* dépenses / négatif */
     --coral-dim: #FBECEA;
-    --amber: #A86A0A;      /* alertes / en attente */
+    --amber: #94600A;      /* alertes / en attente — ≥ 4,5:1 même sur --amber-dim */
     --amber-dim: #FBF1DC;
     --azure: #2F5FD0;      /* liens / focus / sélection */
     --azure-dim: #E6EDFB;
@@ -47,6 +47,7 @@
     --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05), 0 0 0 1px rgba(16, 24, 40, 0.02);
     --shadow-md: 0 4px 14px rgba(16, 24, 40, 0.08);
     --shadow-lg: 0 16px 40px rgba(16, 24, 40, 0.18);
+    --shadow-popover: 0 8px 20px rgba(23, 32, 46, 0.14);   /* menus déroulants, popovers */
 
     /* Sidebar : reste sombre (identité), plus neutre et plus profonde */
     --sidebar-bg: #0E1424;
@@ -68,6 +69,165 @@
        tabulaires s'alignent aussi bien et se lisent mieux. La variable est
        conservée car quelques composants la référencent encore. */
     --font-mono: var(--font-ui);
+
+    /* Rôles sémantiques (à utiliser plutôt que des couleurs en dur : ce sont
+       eux que le thème sombre redéfinit). */
+    --surface-sunken: #F7F8FA;     /* en-têtes de tableaux, fonds en creux */
+    --row-hover: #F7F9FC;
+    --row-selected: #EAF0FC;
+    --row-editing: #F0F4FC;
+    --on-accent: #FFFFFF;          /* texte posé sur --azure / --amber */
+    --violet: #5B3FC4;
+    --violet-dim: #EEEAFB;
+    --info-bg: #EEF3FD;
+    --info-border: #C8D6F3;
+    --info-text: #233B70;
+    --placeholder: #6C7686;  /* lisible (≥ 4,5:1), reste nettement plus clair que la saisie (--text-primary) */
+    --input-hover-border: #B9C3D2;
+    --grid-line: rgba(148, 163, 184, 0.18);
+    /* Graphiques Chart.js (canvas) : lus en JS par services/chartTheme.js
+       au moment du dessin, donc en couleurs hexadécimales uniquement. */
+    --chart-accent: #3E63DD;       /* série principale (solde) */
+    --chart-secondary: #E08A1E;    /* série secondaire (capital des prêts) */
+    --chart-positive: #12805C;
+    --chart-negative: #C2372F;
+    --chart-forecast: #9AA3B5;     /* prévisionnel, quelle que soit la série */
+    --chart-tooltip-bg: #172033;
+    --sticky-edge-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
+    --hero-bg: #17223B;            /* carte « Solde total » du tableau de bord */
+    --hero-positive: #75D6B0;
+    --hero-negative: #FF9B91;
+    --toast-bg: #FFFFFF;
+    /* Pastilles de catégorie : la teinte vient de la catégorie (--h), le
+       thème fixe saturation et luminosité. */
+    --chip-bg-saturation: 70%;
+    --chip-bg-lightness: 94%;
+    --chip-text-saturation: 55%;
+    --chip-text-lightness: 28%;
+    /* Icône des états vides : la couleur du trait est figée dans le SVG, d'où
+       une variante par thème (même bleu que --azure). */
+    --empty-state-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%232F5FD0' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9h18M9 9v2h6V9'/%3E%3C/svg%3E");
+}
+
+/* ---------------- Thème sombre ----------------
+   Deux déclencheurs : le réglage du système (sauf si l'utilisateur a forcé
+   le thème clair) ou le choix explicite « sombre » (data-theme, voir
+   services/theme.js). Seules les variables changent : composants inchangés. */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --ink-950: #0B0F17;
+        --ink-900: #121826;
+        --ink-800: #1A2131;
+        --ink-700: #242C3E;
+        --ink-600: #36415A;
+        --line: #232B3B;
+        --line-strong: #2F394D;
+        --text-primary: #E6EAF2;
+        --text-muted: #A3ADBF;
+        --text-faint: #8A95A8;
+        --mint: #3FCF94;
+        --mint-dim: rgba(63, 207, 148, 0.13);
+        --coral: #FF7D73;
+        --coral-dim: rgba(255, 125, 115, 0.13);
+        --amber: #F0B44C;
+        --amber-dim: rgba(240, 180, 76, 0.14);
+        --azure: #7EA6FF;
+        --azure-dim: rgba(126, 166, 255, 0.15);
+        --brand: #E6EAF2;
+        --brand-hover: #FFFFFF;
+        --brand-text: #0E1424;
+        --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.02);
+        --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
+        --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
+        --shadow-popover: 0 10px 28px rgba(0, 0, 0, 0.55);
+        --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --sidebar-bg: #080B12;
+        --surface-sunken: #0F1420;
+        --row-hover: #172031;
+        --row-selected: rgba(126, 166, 255, 0.16);
+        --row-editing: rgba(126, 166, 255, 0.10);
+        --on-accent: #0B0F17;
+        --violet: #B9A6FF;
+        --violet-dim: rgba(185, 166, 255, 0.14);
+        --info-bg: rgba(126, 166, 255, 0.12);
+        --info-border: rgba(126, 166, 255, 0.30);
+        --info-text: #C9D8FF;
+        --placeholder: #6B7689;
+        --input-hover-border: #45516A;
+        --sticky-edge-shadow: -6px 0 8px -6px rgba(0, 0, 0, 0.6);
+        --hero-bg: #1B2742;
+        --toast-bg: #1A2131;
+        --chart-accent: #7EA6FF;
+        --chart-secondary: #F0A84C;
+        --chart-positive: #3FCF94;
+        --chart-negative: #FF7D73;
+        --chart-forecast: #6B7689;
+        --chart-tooltip-bg: #242C3E;
+        --chip-bg-saturation: 35%;
+        --chip-bg-lightness: 20%;
+        --chip-text-saturation: 70%;
+        --chip-text-lightness: 80%;
+        --empty-state-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%237EA6FF' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9h18M9 9v2h6V9'/%3E%3C/svg%3E");
+    }
+}
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --ink-950: #0B0F17;
+    --ink-900: #121826;
+    --ink-800: #1A2131;
+    --ink-700: #242C3E;
+    --ink-600: #36415A;
+    --line: #232B3B;
+    --line-strong: #2F394D;
+    --text-primary: #E6EAF2;
+    --text-muted: #A3ADBF;
+    --text-faint: #8A95A8;
+    --mint: #3FCF94;
+    --mint-dim: rgba(63, 207, 148, 0.13);
+    --coral: #FF7D73;
+    --coral-dim: rgba(255, 125, 115, 0.13);
+    --amber: #F0B44C;
+    --amber-dim: rgba(240, 180, 76, 0.14);
+    --azure: #7EA6FF;
+    --azure-dim: rgba(126, 166, 255, 0.15);
+    --brand: #E6EAF2;
+    --brand-hover: #FFFFFF;
+    --brand-text: #0E1424;
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.02);
+    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
+    --shadow-popover: 0 10px 28px rgba(0, 0, 0, 0.55);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --sidebar-bg: #080B12;
+    --surface-sunken: #0F1420;
+    --row-hover: #172031;
+    --row-selected: rgba(126, 166, 255, 0.16);
+    --row-editing: rgba(126, 166, 255, 0.10);
+    --on-accent: #0B0F17;
+    --violet: #B9A6FF;
+    --violet-dim: rgba(185, 166, 255, 0.14);
+    --info-bg: rgba(126, 166, 255, 0.12);
+    --info-border: rgba(126, 166, 255, 0.30);
+    --info-text: #C9D8FF;
+    --placeholder: #6B7689;
+    --input-hover-border: #45516A;
+    --sticky-edge-shadow: -6px 0 8px -6px rgba(0, 0, 0, 0.6);
+    --hero-bg: #1B2742;
+    --toast-bg: #1A2131;
+    --chart-accent: #7EA6FF;
+    --chart-secondary: #F0A84C;
+    --chart-positive: #3FCF94;
+    --chart-negative: #FF7D73;
+    --chart-forecast: #6B7689;
+    --chart-tooltip-bg: #242C3E;
+    --chip-bg-saturation: 35%;
+    --chip-bg-lightness: 20%;
+    --chip-text-saturation: 70%;
+    --chip-text-lightness: 80%;
+    --empty-state-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%237EA6FF' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9h18M9 9v2h6V9'/%3E%3C/svg%3E");
 }
 
 * { box-sizing: border-box; }
@@ -132,7 +292,10 @@ input[type="checkbox"] {
 
 .app-shell {
     display: grid;
-    grid-template-columns: 252px 1fr;
+    /* minmax(0, 1fr) : sans le 0, la colonne s'élargit jusqu'à la largeur
+       minimale de son contenu (graphiques, tableaux larges) et la page
+       déborde à droite au lieu de laisser ces blocs défiler dans leur cadre. */
+    grid-template-columns: 252px minmax(0, 1fr);
     min-height: 100vh;
 }
 
@@ -267,6 +430,7 @@ input[type="checkbox"] {
 
 /* ---------------- Contenu ---------------- */
 .main-content {
+    position: relative;
     padding: 34px 44px 72px;
     max-width: 1600px;
 }
@@ -341,7 +505,7 @@ thead th {
     font-weight: 600;
     padding: 11px 12px;
     border-bottom: 1px solid var(--line);
-    background: #FAFBFC;
+    background: var(--surface-sunken);
 }
 tbody td {
     padding: 12px;
@@ -349,7 +513,7 @@ tbody td {
     color: var(--text-primary);
 }
 tbody tr { transition: background 0.1s; }
-tbody tr:hover { background: #F8F9FB; }
+tbody tr:hover { background: var(--row-hover); }
 tbody tr:last-child td { border-bottom: none; }
 td.num, th.num { text-align: right; }
 
@@ -359,7 +523,9 @@ td.num, th.num { text-align: right; }
 table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
-    overflow: hidden;
+    /* clip (et non hidden) : arrondit les coins sans créer de conteneur de
+       défilement, sinon le position: sticky des en-têtes cesse de fonctionner. */
+    overflow: clip;
     box-shadow: var(--shadow-sm);
 }
 
@@ -396,7 +562,38 @@ table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
     border: 1px solid var(--line-strong);
     box-shadow: var(--shadow-xs);
 }
-.btn.danger:hover { background: var(--coral-dim); border-color: #F0C9C5; }
+.btn.danger:hover { background: var(--coral-dim); border-color: color-mix(in srgb, var(--coral) 35%, transparent); }
+
+/* ---------------- Boutons-icônes d'action de ligne ---------------- */
+.icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    transition: background 0.12s, color 0.12s, opacity 0.12s;
+}
+.icon-btn .icon { width: 16px; height: 16px; }
+.icon-btn:hover { background: var(--ink-700); color: var(--text-primary); }
+.icon-btn.danger:hover { background: var(--coral-dim); color: var(--coral); }
+.icon-btn.on { background: var(--amber-dim); color: var(--amber); }
+.hover-actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+/* Sur un appareil avec survol : les actions n'apparaissent que sur la ligne visée
+   (ou au focus clavier). Un bouton à l'état actif (.on) reste visible en permanence.
+   Sans survol (tactile) : toujours visibles. */
+@media (hover: hover) {
+    .hover-actions .icon-btn:not(.on) { opacity: 0; }
+    tr:hover .hover-actions .icon-btn,
+    tr:focus-within .hover-actions .icon-btn,
+    .cat-row:hover .hover-actions .icon-btn,
+    .cat-row:focus-within .hover-actions .icon-btn,
+    .loan-card:hover .hover-actions .icon-btn,
+    .loan-card:focus-within .hover-actions .icon-btn { opacity: 1; }
+}
 
 /* ---------------- Filtres « chip » (bascule on/off) ---------------- */
 .chip {
@@ -425,7 +622,7 @@ table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
     text-align: center;
     font-variant-numeric: tabular-nums;
 }
-.chip.active .chip-count { background: rgba(255, 255, 255, 0.2); color: #fff; }
+.chip.active .chip-count { background: color-mix(in srgb, var(--brand-text) 20%, transparent); color: var(--brand-text); }
 
 /* ---------------- Pastilles ---------------- */
 .badge {
@@ -448,7 +645,7 @@ table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
 .badge.savings { background: var(--mint-dim); color: var(--mint); }
 .badge.cash { background: var(--amber-dim); color: var(--amber); }
 .badge.credit_card { background: var(--coral-dim); color: var(--coral); }
-.badge.investment { background: #EEEAFB; color: #5B3FC4; }
+.badge.investment { background: var(--violet-dim); color: var(--violet); }
 
 /* ---------------- Formulaires ---------------- */
 .form-grid {
@@ -508,12 +705,49 @@ table input:not([type="checkbox"]):focus, table select:focus {
 }
 
 .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 176px;
     text-align: center;
-    padding: 56px 20px;
+    /* Texte limité à ~560px et centré même quand il est posé directement
+       dans le bloc (nœud texte, que « > * » ne peut pas cibler). */
+    padding: 34px max(24px, calc((100% - 560px) / 2));
+    text-wrap: balance;
     color: var(--text-muted);
-    background: var(--ink-900);
+    background: linear-gradient(180deg, var(--ink-900) 0%, var(--surface-sunken) 100%);
     border: 1px dashed var(--line-strong);
     border-radius: var(--radius-lg);
+    font-size: 13.5px;
+    line-height: 1.65;
+}
+.empty-state::before {
+    content: '';
+    display: block;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    border-radius: 13px;
+    background-color: var(--azure-dim);
+    background-image: var(--empty-state-icon);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 21px 21px;
+}
+.empty-state > * { max-width: 520px; }
+.empty-state.compact-empty-state {
+    min-height: 112px;
+    padding: 20px 16px;
+    gap: 8px;
+}
+.empty-state.compact-empty-state::before {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+    border-radius: 10px;
+    background-size: 18px 18px;
 }
 
 .toolbar {
@@ -593,4 +827,886 @@ code {
     .pdf-ne-montrer-que-tableaux-larges .dashboard-page > *:not(.monthly-analysis-card):not(.page-header) {
         display: none;
     }
+}
+
+/* ================================================================
+   HomeBank — itération 1 : hiérarchie visuelle du tableau de bord
+   Travail volontairement limité au CSS : aucune donnée, règle métier,
+   route ou interaction Vue n'est modifiée.
+   ================================================================ */
+
+/* Une surface légèrement plus douce et des cartes mieux détachées du fond. */
+:root {
+    --radius-sm: 9px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --shadow-card: 0 2px 8px rgba(17, 24, 39, 0.035),
+                   0 12px 28px rgba(17, 24, 39, 0.035);
+}
+
+.main-content {
+    padding-top: 38px;
+}
+
+.card {
+    border-color: var(--line);
+    box-shadow: var(--shadow-card);
+    transition: border-color 160ms ease, box-shadow 160ms ease,
+                transform 160ms ease;
+}
+
+/* Le tableau de bord devient plus lisible sans supprimer de données. */
+.dashboard-page > .page-header {
+    margin-bottom: 30px;
+}
+
+.dashboard-page > .page-header h1 {
+    font-size: 30px;
+    letter-spacing: -0.04em;
+}
+
+.dashboard-page > .page-header .subtitle {
+    color: var(--text-muted);
+}
+
+/* Les quatre indicateurs forment un groupe cohérent.
+   Le solde total joue le rôle de point d'ancrage visuel. */
+.dashboard-page > .card-grid {
+    gap: 14px;
+    margin-bottom: 22px;
+}
+
+.dashboard-page > .card-grid > .card {
+    position: relative;
+    min-width: 0;
+    padding: 19px 20px 20px;
+    overflow: hidden;
+    border-radius: 15px;
+}
+
+.dashboard-page > .card-grid > .card:not(:first-child)::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 20px;
+    right: 20px;
+    height: 3px;
+    border-radius: 0 0 4px 4px;
+    background: var(--line-strong);
+}
+
+.dashboard-page > .card-grid > .card:nth-child(2)::before {
+    background: #68B99A;
+}
+
+.dashboard-page > .card-grid > .card:nth-child(3)::before {
+    background: #E28B83;
+}
+
+.dashboard-page > .card-grid > .card:nth-child(4)::before {
+    background: #8A9BC4;
+}
+
+.dashboard-page > .card-grid > .card:first-child {
+    background: var(--hero-bg);
+    border-color: var(--hero-bg);
+    box-shadow: 0 8px 22px rgba(23, 34, 59, 0.14);
+}
+
+.dashboard-page > .card-grid > .card:first-child .stat-label {
+    color: #B8C2D4;
+}
+
+.dashboard-page > .card-grid > .card:first-child .stat-value {
+    color: #FFFFFF;
+    font-size: clamp(25px, 2vw, 31px);
+}
+
+.dashboard-page > .card-grid > .card:first-child .stat-value.positive {
+    color: var(--hero-positive);
+}
+
+.dashboard-page > .card-grid > .card:first-child .stat-value.negative {
+    color: var(--hero-negative);
+}
+
+.dashboard-page > .card-grid > .card:not(:first-child) .stat-value {
+    font-size: clamp(23px, 1.8vw, 28px);
+}
+
+.dashboard-page > .card-grid .stat-label {
+    font-size: 12.5px;
+    letter-spacing: 0.005em;
+}
+
+/* Les graphiques sont des espaces d'analyse, pas de simples blocs encadrés. */
+.dashboard-page .forecast-card,
+.dashboard-page .monthly-analysis-card {
+    border-radius: 16px;
+}
+
+.dashboard-page .chart-header .stat-label {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 650;
+}
+
+.dashboard-page .chart-note {
+    line-height: 1.6;
+    color: var(--text-faint);
+}
+
+/* Navigation : état actif plus net, sans modifier les liens. */
+.sidebar {
+    padding-left: 16px;
+    padding-right: 16px;
+}
+
+.nav-item {
+    min-height: 40px;
+    border-radius: 10px;
+}
+
+.nav-item.active {
+    background: rgba(255, 255, 255, 0.105);
+}
+
+/* Les contrôles de période ont un rendu plus proche d'une barre d'outils. */
+.month-nav {
+    border-radius: 13px;
+    box-shadow: 0 5px 18px rgba(17, 24, 39, 0.08);
+}
+
+.month-nav-btn {
+    border-radius: 9px;
+}
+
+/* Adaptation progressive aux écrans d'ordinateur plus étroits. */
+@media (max-width: 1250px) {
+    .app-shell {
+        grid-template-columns: 224px minmax(0, 1fr);
+    }
+
+    .main-content {
+        padding-left: 28px;
+        padding-right: 28px;
+    }
+
+    .main-content.main-content-wide {
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+
+    .dashboard-page > .card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 760px) {
+    .app-shell {
+        grid-template-columns: minmax(0, 1fr);
+        /* La barre de navigation garde sa hauteur naturelle ; sur une page
+           courte, c'est le contenu qui prend la place restante. */
+        grid-template-rows: auto 1fr;
+    }
+
+    .sidebar {
+        position: relative;
+        top: auto;
+        height: auto;
+        overflow: visible;
+        padding: 14px 16px;
+    }
+
+    .brand {
+        margin-bottom: 12px;
+    }
+
+    .sidebar nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .nav-group,
+    .nav-group + .nav-group {
+        display: contents;
+        margin: 0;
+        padding: 0;
+        border: 0;
+    }
+
+    .nav-item {
+        min-height: 36px;
+        padding: 7px 9px;
+        font-size: 12px;
+    }
+
+    .nav-item.active::before {
+        display: none;
+    }
+
+    .sidebar-accounts {
+        display: none;
+    }
+
+    .main-content,
+    .main-content.main-content-wide {
+        padding: 24px 16px 48px;
+    }
+
+    .dashboard-page > .card-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+
+    .dashboard-page > .card-grid > .card {
+        padding: 15px;
+    }
+
+    .dashboard-page > .page-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .month-nav {
+        position: static;
+        width: fit-content;
+        max-width: 100%;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
+}
+
+
+/* ---------------- Itération 5 : formulaires et fenêtres modales ---------------- */
+.form-field label,
+.form-field .form-field-label {
+    letter-spacing: 0.01em;
+}
+
+.form-field input,
+.form-field select,
+.form-field textarea,
+table input:not([type="checkbox"]),
+table select {
+    min-height: 40px;
+}
+
+.form-field textarea {
+    min-height: 84px;
+    resize: vertical;
+}
+
+.form-field input:hover,
+.form-field select:hover,
+.form-field textarea:hover {
+    border-color: var(--input-hover-border);
+}
+
+.form-field input::placeholder,
+.form-field textarea::placeholder {
+    color: var(--placeholder);
+}
+
+/* Les cases à cocher ne doivent pas hériter du style des champs de saisie
+   (hauteur, bordure, marge, ombre) : sinon elles s'affichent dans un cadre étiré. */
+.form-field input[type="checkbox"] {
+    accent-color: var(--brand);
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+    background: none;
+    flex-shrink: 0;
+}
+
+.modal-overlay {
+    padding: 24px;
+    background: rgba(15, 23, 42, 0.58);
+    backdrop-filter: blur(5px) saturate(115%);
+    -webkit-backdrop-filter: blur(5px) saturate(115%);
+    overscroll-behavior: contain;
+    animation: modal-backdrop-in 0.14s ease-out;
+}
+
+.modal {
+    width: min(600px, 100%);
+    max-width: 100%;
+    max-height: min(88vh, 900px);
+    padding: 28px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 20px;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24), 0 4px 14px rgba(15, 23, 42, 0.08);
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.modal h2 {
+    margin: 0 0 22px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--line);
+    font-size: 20px;
+    line-height: 1.3;
+    letter-spacing: -0.025em;
+}
+
+.modal .form-grid {
+    column-gap: 16px;
+    row-gap: 17px;
+}
+
+.modal .form-field {
+    min-width: 0;
+}
+
+.modal .btn {
+    min-height: 40px;
+    padding-inline: 16px;
+}
+
+.btn:focus-visible,
+.chip:focus-visible,
+.form-field input:focus-visible,
+.form-field select:focus-visible,
+.form-field textarea:focus-visible {
+    outline: 3px solid rgba(59, 130, 246, 0.28);
+    outline-offset: 2px;
+}
+
+@keyframes modal-backdrop-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@media (max-width: 760px) {
+    .modal-overlay {
+        align-items: flex-end;
+        padding: 12px;
+    }
+
+    .modal {
+        width: 100%;
+        max-width: 100%;
+        max-height: 90vh;
+        padding: 22px 18px;
+        border-radius: 20px 20px 14px 14px;
+    }
+
+    .modal .form-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .modal .form-grid > * {
+        grid-column: 1 / -1 !important;
+    }
+
+    .modal h2 {
+        font-size: 18px;
+        margin-bottom: 18px;
+        padding-bottom: 13px;
+    }
+
+    .modal > div[style*="justify-content"] {
+        flex-wrap: wrap;
+        row-gap: 10px;
+    }
+
+    .modal > div[style*="justify-content"] .btn {
+        flex: 1 1 auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .modal-overlay,
+    .modal {
+        animation: none;
+    }
+}
+
+/* ---------------- Itération 6 : ergonomie responsive et micro-interactions ---------------- */
+:root {
+    --motion-fast: 140ms;
+    --motion-standard: 200ms;
+}
+
+/* Retours d'interaction cohérents, sans animer les éléments purement statiques. */
+.nav-item,
+.sidebar-account,
+.btn,
+.chip,
+.month-nav-btn,
+button.icon-button {
+    -webkit-tap-highlight-color: transparent;
+}
+
+.btn:not(:disabled),
+.chip,
+.month-nav-btn {
+    transition:
+        color var(--motion-fast) ease,
+        background-color var(--motion-fast) ease,
+        border-color var(--motion-fast) ease,
+        box-shadow var(--motion-fast) ease,
+        transform var(--motion-fast) ease;
+}
+
+.btn:not(:disabled):active,
+.month-nav-btn:active {
+    transform: translateY(1px);
+}
+
+.table-scroll {
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--ink-600) transparent;
+}
+
+/* Sentinelle du chargement progressif (services/progressiveList.js), partagée
+   par Transactions et Tiers : juste un peu de hauteur pour que
+   l'IntersectionObserver ait quelque chose à observer ; le texte n'est qu'un
+   repli si elle reste visible plus que le temps d'un rendu. */
+.load-more-sentinel {
+    padding: 14px 0;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 12px;
+}
+
+.table-scroll:focus-visible {
+    outline: 2px solid var(--azure);
+    outline-offset: 3px;
+}
+
+/* Les tableaux conservent leur largeur utile et défilent dans leur panneau,
+   au lieu d'écraser les colonnes sur les écrans intermédiaires. */
+@media (max-width: 900px) {
+    .main-content,
+    .main-content.main-content-wide {
+        padding-left: 22px;
+        padding-right: 22px;
+    }
+
+    .page-header {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .page-header h1 {
+        font-size: 25px;
+    }
+
+    .card {
+        padding: 18px;
+    }
+}
+
+@media (max-width: 760px) {
+    /* Navigation horizontale compacte : les rubriques ne se dispersent plus
+       sur plusieurs lignes et restent accessibles au doigt. */
+    .sidebar {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        padding: 10px 14px 9px;
+        border-right: 0;
+        border-bottom: 1px solid var(--sidebar-border);
+        box-shadow: 0 5px 18px rgba(14, 20, 36, 0.12);
+    }
+
+    .brand {
+        padding: 0 3px;
+        margin: 0 0 8px;
+        min-height: 34px;
+    }
+
+    .brand-name {
+        font-size: 16px;
+    }
+
+    .sidebar nav {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 5px;
+        margin: 0 -2px;
+        padding: 0 2px 3px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .sidebar nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    .nav-group,
+    .nav-group + .nav-group {
+        display: contents;
+    }
+
+    .nav-item {
+        flex: 0 0 auto;
+        min-height: 36px;
+        padding: 7px 11px;
+        margin: 0;
+        border: 1px solid transparent;
+        border-radius: 9px;
+        white-space: nowrap;
+        font-size: 12.5px;
+    }
+
+    .nav-item.active {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.08);
+    }
+
+    .nav-item.active::before {
+        display: none;
+    }
+
+    .main-content,
+    .main-content.main-content-wide {
+        padding: 22px 14px 40px;
+    }
+
+    .page-header {
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+
+    .page-header h1 {
+        font-size: 23px;
+    }
+
+    .page-header .subtitle {
+        font-size: 13px;
+    }
+
+    .toolbar {
+        gap: 8px;
+    }
+
+    .toolbar > * {
+        max-width: 100%;
+    }
+
+    .card {
+        padding: 15px;
+        border-radius: 12px;
+    }
+
+    .card-grid {
+        gap: 10px;
+        margin-bottom: 18px;
+    }
+
+    .stat-value {
+        font-size: clamp(20px, 5vw, 26px);
+        overflow-wrap: anywhere;
+    }
+
+    /* Mobile : les tableaux larges (Transactions, Tiers) défilent dans leur
+       cadre au lieu de faire défiler toute la page en largeur. Contrepartie
+       assumée : l'en-tête n'y reste plus collé en haut (voir le commentaire
+       de .table-scroll dans Transactions.vue). Le chargement progressif,
+       basé sur le défilement vertical de la page, n'est pas affecté. */
+    .table-scroll {
+        /* relative : les libellés .sr-only (position absolue) des cellules
+           se positionnent dans ce cadre et y sont découpés, au lieu
+           d'élargir toute la page. */
+        position: relative;
+        border-radius: 11px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .table-scroll table {
+        min-width: 640px;
+    }
+
+    .main-content .empty-state {
+        padding: 38px 16px;
+    }
+}
+
+@media (max-width: 420px) {
+    .main-content,
+    .main-content.main-content-wide {
+        padding-left: 11px;
+        padding-right: 11px;
+    }
+
+    .dashboard-page > .card-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dashboard-page > .card-grid > .card {
+        padding: 14px;
+    }
+
+    .page-header h1 {
+        font-size: 21px;
+    }
+
+    .btn {
+        min-height: 38px;
+        padding: 7px 11px;
+        font-size: 13px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .btn:not(:disabled),
+    .chip,
+    .month-nav-btn {
+        transition: none;
+    }
+}
+
+
+/* Itération 7 — finition des états vides et des icônes d'action */
+.btn > .icon { margin-right: 2px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.btn:disabled .icon { opacity: .55; }
+
+/* --- Feedback global : notifications, confirmations et transitions --- */
+.toast-region {
+  position: fixed;
+  z-index: 3000;
+  top: 18px;
+  right: 20px;
+  width: min(410px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast-stack { display: grid; gap: 10px; }
+.app-toast {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--text-faint);
+  border-radius: 12px;
+  background: var(--toast-bg);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-md);
+  pointer-events: auto;
+}
+.app-toast.is-success { border-left-color: var(--mint); }
+.app-toast.is-error { border-left-color: var(--coral); }
+.app-toast.is-warning { border-left-color: var(--amber); }
+.app-toast.is-info { border-left-color: var(--azure); }
+.toast-mark {
+  display: grid;
+  flex: 0 0 25px;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink-800);
+  color: var(--text-muted);
+  font-weight: 800;
+}
+.is-success .toast-mark { background: var(--mint-dim); color: var(--mint); }
+.is-error .toast-mark { background: var(--coral-dim); color: var(--coral); }
+.is-warning .toast-mark { background: var(--amber-dim); color: var(--amber); }
+.is-info .toast-mark { background: var(--azure-dim); color: var(--azure); }
+.toast-message { flex: 1; font-size: 13px; line-height: 1.45; }
+.toast-close { border: 0; background: transparent; color: var(--text-muted); font-size: 21px; cursor: pointer; padding: 0 3px; }
+.toast-enter-active, .toast-leave-active { transition: opacity .18s ease, transform .18s ease; }
+.toast-enter-from, .toast-leave-to { opacity: 0; transform: translateX(14px); }
+.toast-leave-active { position: absolute; right: 0; left: 0; }
+.feedback-overlay {
+  position: fixed;
+  z-index: 2990;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(12, 20, 34, .48);
+  backdrop-filter: blur(3px);
+}
+.feedback-dialog {
+  width: min(440px, 100%);
+  padding: 25px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--ink-900);
+  box-shadow: 0 24px 70px rgba(8, 15, 30, .24);
+  animation: feedback-dialog-in .18s ease-out;
+}
+.feedback-dialog-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  margin-bottom: 15px;
+  border-radius: 13px;
+  background: var(--ink-800);
+  color: var(--text-muted);
+  font-size: 21px;
+  font-weight: 800;
+}
+.feedback-dialog-icon.destructive { background: var(--coral-dim); color: var(--coral); }
+.feedback-dialog h2 { margin: 0 0 8px; color: var(--text-primary); font-size: 18px; letter-spacing: -.02em; }
+.feedback-dialog p { margin: 0; color: var(--text-muted); font-size: 14px; line-height: 1.55; }
+.feedback-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 24px; }
+.feedback-dialog-actions .btn { min-width: 104px; }
+.dialog-fade-enter-active, .dialog-fade-leave-active { transition: opacity .16s ease; }
+.dialog-fade-enter-from, .dialog-fade-leave-to { opacity: 0; }
+@keyframes feedback-dialog-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+/* Indicateur de navigation discret, sans bloquer les interactions. */
+.route-progress { position: absolute; z-index: 1200; top: 0; left: 0; right: 0; height: 3px; overflow: hidden; pointer-events: none; }
+.route-progress span { display: block; width: 38%; height: 100%; border-radius: 0 3px 3px 0; background: #16845b; animation: route-progress 1s ease-in-out infinite; }
+@keyframes route-progress { 0% { transform: translateX(-110%); } 100% { transform: translateX(370%); } }
+.page-enter-active, .page-leave-active { transition: opacity .14s ease, transform .14s ease; }
+.page-enter-from { opacity: 0; transform: translateY(5px); }
+.page-leave-to { opacity: 0; transform: translateY(-3px); }
+@media (max-width: 640px) {
+  .toast-region { top: 10px; right: 10px; width: calc(100vw - 20px); }
+  .feedback-dialog { padding: 21px; border-radius: 16px; }
+  .feedback-dialog-actions { flex-direction: column-reverse; }
+  .feedback-dialog-actions .btn { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-enter-active, .toast-leave-active, .dialog-fade-enter-active, .dialog-fade-leave-active,
+  .page-enter-active, .page-leave-active { transition: none !important; }
+  .feedback-dialog { animation: none !important; }
+  .route-progress span { animation: none !important; width: 100%; opacity: .65; }
+}
+
+
+/* Iteration 9 — accessibilite clavier et saisie HomeBank */
+.skip-link {
+  position: fixed; left: 16px; top: 12px; z-index: 3000;
+  transform: translateY(-160%); padding: 10px 14px;
+  color: var(--text-primary); background: var(--ink-900);
+  border: 2px solid var(--azure); border-radius: 8px;
+  box-shadow: var(--shadow-md);
+}
+.skip-link:focus { transform: translateY(0); }
+.feedback-input-label { display: block; margin: 14px 0 6px; color: var(--text-muted); font-size: 13px; }
+.feedback-text-input { width: 100%; min-height: 42px; padding: 10px 12px; color: var(--text-primary); background: var(--ink-900); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.feedback-text-input:focus-visible { outline: 2px solid var(--azure); outline-offset: 2px; }
+
+/* Bandeau « serveur injoignable » (App.vue), en tête du contenu. */
+.connection-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 0 22px;
+  padding: 12px 14px 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--coral) 35%, transparent);
+  border-radius: var(--radius-md);
+  background: var(--coral-dim);
+  color: var(--text-primary);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.connection-banner-dot {
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--coral);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--coral) 20%, transparent);
+}
+.connection-banner-text { flex: 1; }
+.connection-banner strong { color: var(--coral); }
+.connection-banner .btn { flex-shrink: 0; }
+
+/* Pastille de compteur dans la navigation (ex : transactions sans catégorie). */
+.nav-badge {
+  margin-left: auto;
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(226, 167, 107, 0.16);
+  color: var(--sidebar-accent);
+  font-size: 11.5px;
+  font-weight: 650;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 760px) {
+  .nav-badge { margin-left: 2px; }
+}
+
+/* Bouton d'ouverture de la palette de commandes (Ctrl+K), sous le logo. */
+.sidebar-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin: -12px 0 18px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--sidebar-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--sidebar-text);
+  font-size: 13px;
+  text-align: left;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+.sidebar-search:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-active); }
+.sidebar-search span { flex: 1; }
+.sidebar-search kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--sidebar-border);
+  border-radius: 5px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--sidebar-text);
+}
+@media (max-width: 760px) {
+  .sidebar-search { display: none; }
+}
+
+/* Aide des raccourcis clavier : sous le sélecteur de thème, même style discret que la recherche. */
+.sidebar-shortcuts {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 10px 6px 12px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--sidebar-text);
+  font-size: 12.5px;
+  text-align: left;
+  transition: background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+.sidebar-shortcuts:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-active); }
+.sidebar-shortcuts span { flex: 1; }
+.sidebar-shortcuts kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--sidebar-border);
+  border-radius: 5px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--sidebar-text);
+}
+/* Mobile : pas de clavier physique, comme la recherche. */
+@media (max-width: 760px) {
+  .sidebar-shortcuts { display: none; }
+}
+
+/* Sélecteur de thème : toujours en bas de la sidebar, sous les comptes s'il y en a. */
+.sidebar-theme { margin-top: auto; padding-top: 12px; }
+.sidebar-accounts + .sidebar-theme { margin-top: 0; }
+/* Mobile : place comptée dans la barre de navigation, on suit le thème du
+   système. Sélecteur à triple classe pour l'emporter sur le style scopé du
+   composant. */
+@media (max-width: 760px) {
+  .app-shell .sidebar .sidebar-theme { display: none; }
+}
+
+/* Transition douce lors du changement de thème (couleurs uniquement). */
+@media (prefers-reduced-motion: no-preference) {
+  body { transition: background-color 0.2s ease, color 0.2s ease; }
 }

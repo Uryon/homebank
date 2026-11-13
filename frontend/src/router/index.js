@@ -1,27 +1,27 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Dashboard from '../views/Dashboard.vue'
-import Accounts from '../views/Accounts.vue'
-import Transactions from '../views/Transactions.vue'
-import TransactionsPeriodicSuggestions from '../views/TransactionsPeriodicSuggestions.vue'
-import TransactionsDuplicates from '../views/TransactionsDuplicates.vue'
-import Categories from '../views/Categories.vue'
-import Payees from '../views/Payees.vue'
-import Loans from '../views/Loans.vue'
-import ImportView from '../views/ImportView.vue'
 
+// Pages chargées à la demande : chacune devient un fichier JS séparé, et
+// Chart.js (tableau de bord, prêts) n'est plus téléchargé pour les autres pages.
 const routes = [
-    { path: '/', name: 'dashboard', component: Dashboard },
-    { path: '/accounts', name: 'accounts', component: Accounts },
-    { path: '/transactions', name: 'transactions', component: Transactions },
-    { path: '/transactions/periodiques', name: 'transactions-periodic-suggestions', component: TransactionsPeriodicSuggestions },
-    { path: '/transactions/doublons', name: 'transactions-duplicates', component: TransactionsDuplicates },
-    { path: '/categories', name: 'categories', component: Categories },
-    { path: '/payees', name: 'payees', component: Payees },
-    { path: '/loans', name: 'loans', component: Loans },
-    { path: '/import', name: 'import', component: ImportView }
+    { path: '/', name: 'dashboard', component: () => import('../views/Dashboard.vue'), meta: { title: 'Tableau de bord' } },
+    { path: '/accounts', name: 'accounts', component: () => import('../views/Accounts.vue'), meta: { title: 'Comptes' } },
+    { path: '/transactions', name: 'transactions', component: () => import('../views/Transactions.vue'), meta: { title: 'Transactions' } },
+    { path: '/transactions/periodiques', name: 'transactions-periodic-suggestions', component: () => import('../views/TransactionsPeriodicSuggestions.vue'), meta: { title: 'Transactions périodiques' } },
+    { path: '/transactions/doublons', name: 'transactions-duplicates', component: () => import('../views/TransactionsDuplicates.vue'), meta: { title: 'Doublons' } },
+    { path: '/categories', name: 'categories', component: () => import('../views/Categories.vue'), meta: { title: 'Catégories' } },
+    { path: '/payees', name: 'payees', component: () => import('../views/Payees.vue'), meta: { title: 'Tiers' } },
+    { path: '/loans', name: 'loans', component: () => import('../views/Loans.vue'), meta: { title: 'Prêts' } },
+    { path: '/import', name: 'import', component: () => import('../views/ImportView.vue'), meta: { title: 'Importer' } }
 ]
 
-export default createRouter({
+const router = createRouter({
     history: createWebHistory(),
     routes
 })
+
+// Titre de l'onglet du navigateur propre à chaque page (repérage parmi plusieurs onglets, historique).
+router.afterEach((to) => {
+    document.title = to.meta.title ? `${to.meta.title} · HomeBank` : 'HomeBank'
+})
+
+export default router

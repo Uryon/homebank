@@ -11,6 +11,7 @@ import com.homebank.repository.DepotTransaction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -30,6 +31,16 @@ import java.util.stream.Collectors;
 public class ServiceTiers {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceTiers.class);
+
+    /**
+     * Suite d'espaces au sens large : \s (ASCII) plus l'espace insecable
+     * (U+00A0, frequente dans les exports bancaires Windows-1252) et les
+     * espaces fines (U+2007, U+202F). Meme definition que \s cote frontend
+     * (JavaScript), pour que la page Doublons et l'import reconnaissent les
+     * memes libelles. Compilee une seule fois : normalizeWhitespace est
+     * appelee pour chaque tiers et chaque ligne d'un import.
+     */
+    private static final Pattern WHITESPACE_RUN = Pattern.compile("[\\s\\u00A0\\u2007\\u202F]+");
 
     private final DepotTiers payeeRepository;
     private final ServiceCategorie categoryService;
@@ -73,12 +84,29 @@ public class ServiceTiers {
         return payeeMapper.toDTO(payeeRepository.save(existing));
     }
 
+    /**
+     * Supprime un tiers inutilise. Un tiers encore reference par des
+     * transactions est refuse (409) avec un message explicite, plutot que de
+     * laisser la cle etrangere echouer avec un message generique : la
+     * fusion vers un autre tiers est alors la bonne operation.
+     */
     public void delete(Long id) {
-        payeeRepository.deleteById(id);
+        Tiers payee = findEntityById(id);
+        long transactionCount = transactionRepository.countByPayee(payee);
+        if (transactionCount > 0) {
+            throw new IllegalStateException("Ce tiers est utilisé par " + transactionCount
+                    + " transaction(s). Fusionnez-le avec un autre tiers plutôt que de le supprimer.");
+        }
+        payeeRepository.delete(payee);
+        log.info("Tiers supprime : {} ({})", payee.getName(), id);
     }
 
     private void applyPayload(Tiers p, TiersDTO payload) {
-        p.setName(payload.getName());
+        String name = payload.getName() != null ? payload.getName().trim() : "";
+        if (name.isEmpty()) {
+            throw new IllegalArgumentException("Le nom du tiers est obligatoire.");
+        }
+        p.setName(name);
 
         // Le champ "pattern" est du texte simple, stocke et affiche TEL QUEL
         // (sans etoile) : "Carrefour" suffit. Les etoiles ne sont ajoutees
@@ -88,7 +116,7 @@ public class ServiceTiers {
         if (pattern == null || pattern.isBlank()) {
             pattern = (p.getPattern() != null && !p.getPattern().isBlank())
                     ? p.getPattern()
-                    : defaultPattern(payload.getName());
+                    : defaultPattern(name);
         } else {
             pattern = normalizePatternSegments(pattern);
         }
@@ -162,7 +190,7 @@ public class ServiceTiers {
      * texte "correspond" bien pour l'utilisateur.
      */
     private static String normalizeWhitespace(String s) {
-        return s == null ? null : s.trim().replaceAll("\\s+", " ");
+        return s == null ? null : WHITESPACE_RUN.matcher(s).replaceAll(" ").trim();
     }
 
     /** Teste si le champ "pattern" (un ou plusieurs motifs separes par ";") correspond au texte donne. */
@@ -267,11 +295,23 @@ public class ServiceTiers {
      */
     Tiers resolveOrCreate(String rawText, BigDecimal amount, List<Tiers> knownPayees) {
         if (rawText == null || rawText.isBlank()) return null;
+        return findExisting(rawText, amount, knownPayees)
+                .orElseGet(() -> createFromText(rawText, knownPayees));
+    }
+
+    /**
+     * Tiers deja connu correspondant au texte brut (par motif, sinon par nom
+     * exact), SANS jamais en creer : permet a l'import de verifier qu'une
+     * ligne n'est pas un doublon avant de creer un tiers pour elle (voir
+     * ServiceImport). Vide si le texte est vide ou ne correspond a aucun tiers.
+     */
+    Optional<Tiers> findExisting(String rawText, BigDecimal amount, List<Tiers> knownPayees) {
+        if (rawText == null || rawText.isBlank()) return Optional.empty();
         String trimmed = rawText.trim();
         BigDecimal normalizedAmount = amount != null ? amount.abs() : null;
 
         Optional<Tiers> matched = matchPayee(trimmed, normalizedAmount, knownPayees);
-        if (matched.isPresent()) return matched.get();
+        if (matched.isPresent()) return matched;
 
         // Filet de securite : evite un doublon si un tiers de meme nom existe
         // deja mais que son motif ne matchait pas ce texte precis (ex :
@@ -281,12 +321,19 @@ public class ServiceTiers {
         // ailleurs dans ce fichier (voir matchPayee) : sans ce cas, retaper
         // le nom d'un tiers generique sur une transaction d'un montant
         // different creait un second tiers generique portant le meme nom.
-        Optional<Tiers> byNameAndAmount = knownPayees.stream()
+        return knownPayees.stream()
                 .filter(p -> p.getName() != null && p.getName().equalsIgnoreCase(trimmed))
                 .filter(p -> p.getAmount() == null || sameAmount(p.getAmount(), normalizedAmount))
                 .findFirst();
-        if (byNameAndAmount.isPresent()) return byNameAndAmount.get();
+    }
 
+    /**
+     * Cree un tiers generique nomme d'apres le texte brut, et l'ajoute a
+     * `knownPayees` pour que les lignes suivantes du meme lot le retrouvent
+     * sans requete supplementaire.
+     */
+    Tiers createFromText(String rawText, List<Tiers> knownPayees) {
+        String trimmed = rawText.trim();
         Tiers created = new Tiers();
         created.setName(trimmed);
         created.setPattern(defaultPattern(trimmed));
@@ -304,21 +351,25 @@ public class ServiceTiers {
     }
 
     /**
-     * A appeler apres la modification (ou suppression) d'une transaction :
-     * si le tiers lie a change, verifie si l'ANCIEN tiers devient orphelin
-     * (plus aucune transaction ne pointe vers lui) et le supprime le cas
-     * echeant. Evite d'accumuler des tiers "fantomes" a chaque fois qu'on
-     * modifie le tiers d'une transaction a la main.
+     * A appeler apres la modification (ou suppression) d'une transaction
+     * dont le tiers a change : si l'ANCIEN tiers est devenu orphelin (plus
+     * aucune transaction ne pointe vers lui), il est supprime. Evite
+     * d'accumuler des tiers "fantomes" a chaque fois qu'on modifie le tiers
+     * d'une transaction a la main.
      *
      * Par securite, ne supprime que les tiers encore dans leur etat
      * "auto-cree" (motif = nom exact, jamais personnalise depuis) :
      * un tiers renomme ou dont le motif a ete modifie a la main par l'utilisateur
      * (page Tiers, fusion...) n'est jamais supprime automatiquement.
+     *
+     * Toujours dans sa propre transaction (REQUIRES_NEW), et appele APRES le
+     * commit de la modification (voir ServiceTransaction#prunePayeesAfterCommit) :
+     * un echec de ce nettoyage annexe ne peut ainsi jamais annuler la
+     * modification ou la suppression de transaction qui l'a declenche.
      */
-    @Transactional
-    public void cleanupIfPayeeChanged(Tiers previousPayee, Tiers newPayee) {
-        if (previousPayee == null || previousPayee.equals(newPayee)) return;
-        pruneIfOrphan(previousPayee);
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void deleteIfOrphan(Long payeeId) {
+        payeeRepository.findById(payeeId).ifPresent(this::pruneIfOrphan);
     }
 
     private void pruneIfOrphan(Tiers payee) {
@@ -349,6 +400,12 @@ public class ServiceTiers {
      */
     @Transactional
     public TiersDTO merge(List<Long> sourceIds, Long targetId, String pattern) {
+        if (targetId == null) {
+            throw new IllegalArgumentException("Le tiers a conserver est obligatoire");
+        }
+        if (sourceIds == null) {
+            throw new IllegalArgumentException("La liste des elements a fusionner est obligatoire");
+        }
         Tiers target = findEntityById(targetId);
 
         for (Long sourceId : sourceIds) {

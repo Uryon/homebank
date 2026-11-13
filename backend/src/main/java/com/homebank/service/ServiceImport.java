@@ -9,12 +9,16 @@ import com.homebank.repository.DepotTransaction;
 import com.homebank.repository.DepotTransactionSupprimee;
 import lombok.Getter;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -33,28 +37,35 @@ public class ServiceImport {
     private final DepotTransactionSupprimee deletedTransactionRepository;
     private final ServiceTiers payeeService;
     private final ServiceDernierImport dernierImportService;
+    private final TransactionTemplate transactionTemplate;
 
+    // "d"/"M" (et non "dd"/"MM") acceptent un ou deux chiffres : "5/1/2026"
+    // (courant en QIF) comme "05/01/2026". Jour avant mois en priorite
+    // (releves francais) ; le format US n'est tente qu'en dernier recours.
     private static final List<DateTimeFormatter> DATE_FORMATS = List.of(
-            DateTimeFormatter.ofPattern("dd-MM-yy"),
-            DateTimeFormatter.ofPattern("dd-MM-yyyy"),
-            DateTimeFormatter.ofPattern("dd/MM/yy"),
-            DateTimeFormatter.ofPattern("dd/MM/yyyy"),
-            DateTimeFormatter.ofPattern("yyyy-MM-dd"),
-            DateTimeFormatter.ofPattern("MM/dd/yyyy"),
-            DateTimeFormatter.ofPattern("MM/dd/yy")
+            DateTimeFormatter.ofPattern("d-M-yy"),
+            DateTimeFormatter.ofPattern("d-M-yyyy"),
+            DateTimeFormatter.ofPattern("d/M/yy"),
+            DateTimeFormatter.ofPattern("d/M/yyyy"),
+            DateTimeFormatter.ofPattern("d.M.yyyy"),
+            DateTimeFormatter.ofPattern("yyyy-M-d"),
+            DateTimeFormatter.ofPattern("M/d/yyyy"),
+            DateTimeFormatter.ofPattern("M/d/yy")
     );
 
     public ServiceImport(ServiceCompte accountService, ServiceCategorie categoryService,
                           DepotTransaction transactionRepository,
                           DepotTransactionSupprimee deletedTransactionRepository,
                           ServiceTiers payeeService,
-                          ServiceDernierImport dernierImportService) {
+                          ServiceDernierImport dernierImportService,
+                          PlatformTransactionManager transactionManager) {
         this.accountService = accountService;
         this.categoryService = categoryService;
         this.transactionRepository = transactionRepository;
         this.deletedTransactionRepository = deletedTransactionRepository;
         this.payeeService = payeeService;
         this.dernierImportService = dernierImportService;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     // Champs prives (accessibles depuis ServiceImport, classe englobante) :
@@ -69,17 +80,36 @@ public class ServiceImport {
     }
 
     /**
-     * Determine le tiers canonique (cree automatiquement si inconnu) et la
-     * categorie a appliquer, sans encore creer/sauvegarder la transaction.
-     * Renvoie le tiers resolu (peut etre null si le texte brut est vide).
-     *
+     * Tiers d'une ligne importee : le tiers deja connu qui correspond au texte
+     * brut, ou a defaut le texte lui-meme. Le tiers n'est cree (voir
+     * payeeToSave) qu'une fois la ligne confirmee comme non doublon : le
+     * creer avant la detection laissait un tiers orphelin a chaque ligne
+     * ignoree, par exemple au reimport d'une transaction supprimee depuis
+     * (dont le tiers avait ete nettoye avec elle).
+     */
+    private record TiersLigne(Tiers existing, String text) {
+        /** Nom compare aux doublons : celui du tiers existant, ou celui que portera le tiers cree. */
+        String canonicalName() {
+            if (existing != null) return existing.getName();
+            return text != null && !text.isBlank() ? text.trim() : text;
+        }
+    }
+
+    /**
      * `knownPayees` est charge UNE FOIS par import (voir importCsv/importQif)
      * et reutilise pour toutes les lignes du fichier, plutot que de recharger
      * tous les tiers en base a chaque ligne (un import peut contenir des
      * centaines/milliers de lignes).
      */
-    private Tiers resolvePayee(String payeeText, BigDecimal amount, List<Tiers> knownPayees) {
-        return payeeService.resolveOrCreate(payeeText, amount, knownPayees);
+    private TiersLigne matchPayee(String payeeText, BigDecimal amount, List<Tiers> knownPayees) {
+        return new TiersLigne(payeeService.findExisting(payeeText, amount, knownPayees).orElse(null), payeeText);
+    }
+
+    /** Tiers a enregistrer sur la transaction : l'existant, sinon cree a partir du texte (null si texte vide). */
+    private Tiers payeeToSave(TiersLigne payeeLine, List<Tiers> knownPayees) {
+        if (payeeLine.existing() != null) return payeeLine.existing();
+        String text = payeeLine.text();
+        return text != null && !text.isBlank() ? payeeService.createFromText(text, knownPayees) : null;
     }
 
     private Categorie resolveCategory(Tiers payee, String categoryNameFromFile, BigDecimal amount) {
@@ -124,28 +154,15 @@ public class ServiceImport {
     }
 
     /**
-     * Detection de doublons, commune aux imports CSV/QIF :
-     * - si un identifiant externe (fourni par la banque/le fichier) est
-     *   disponible et qu'une transaction du meme compte le porte deja (encore
-     *   presente, ou supprimee depuis, voir TransactionSupprimee), c'est un
-     *   doublon certain ;
-     * - sinon, on considere qu'il y a doublon si une transaction du meme
-     *   compte, a la meme date, pour le meme montant et le meme tiers
-     *   (canonique, insensible a la casse) existe deja, ou a existe puis a ete
-     *   supprimee (voir CleDoublon / loadDuplicateKeys). Cette combinaison
-     *   large (date+montant+tiers) evite de rejeter deux operations distinctes
-     *   qui se ressembleraient partiellement.
+     * Detection de doublons, commune aux imports CSV/QIF : il y a doublon si
+     * une transaction du meme compte, a la meme date, pour le meme montant et
+     * le meme tiers (canonique, insensible a la casse) existe deja, ou a
+     * existe puis a ete supprimee (voir CleDoublon / loadDuplicateKeys).
+     * Cette combinaison large (date+montant+tiers) evite de rejeter deux
+     * operations distinctes qui se ressembleraient partiellement.
      */
-    private boolean isDuplicate(Long accountId, LocalDate date, BigDecimal amount,
-                                 String canonicalPayee, String externalId, Set<CleDoublon> existingKeys) {
-        if (externalId != null && !externalId.isBlank()) {
-            if (transactionRepository.findByAccountIdAndExternalId(accountId, externalId).isPresent()) {
-                return true;
-            }
-            if (deletedTransactionRepository.findByAccountIdAndExternalId(accountId, externalId).isPresent()) {
-                return true;
-            }
-        }
+    private static boolean isDuplicate(LocalDate date, BigDecimal amount, String canonicalPayee,
+                                       Set<CleDoublon> existingKeys) {
         return existingKeys.contains(CleDoublon.of(date, amount, canonicalPayee));
     }
 
@@ -155,6 +172,44 @@ public class ServiceImport {
      * une longue liste de parametres individuels.
      */
     private record ImportContext(Compte account, List<Tiers> knownPayees, Set<CleDoublon> existingKeys, ImportResult result) {}
+
+    /** Donnees d'une ligne CSV / d'un enregistrement QIF, deja lues et reconnues comme non doublon. */
+    private record LigneImportee(LocalDate date, BigDecimal amount, String memo, String tags,
+                                 String categoryName, TiersLigne payeeLine) {}
+
+    /**
+     * Enregistre une ligne importee dans SA PROPRE transaction : le tiers et
+     * la categorie eventuellement crees pour elle sont annules avec elle si
+     * son enregistrement echoue, au lieu de rester en base, orphelins. Les
+     * autres lignes du fichier ne sont pas affectees (l'import reste "ligne
+     * par ligne", une ligne en erreur est seulement comptee comme ignoree).
+     */
+    private void saveLine(ImportContext ctx, LigneImportee line) {
+        List<Tiers> knownPayees = ctx.knownPayees();
+        int knownPayeesBefore = knownPayees.size();
+        try {
+            transactionTemplate.executeWithoutResult(status -> {
+                Tiers payee = payeeToSave(line.payeeLine(), knownPayees);
+                Transaction t = new Transaction();
+                t.setAccount(ctx.account());
+                t.setDate(line.date());
+                t.setAmount(line.amount());
+                t.setMemo(sanitizeMemo(line.memo()));
+                t.setTags(line.tags());
+                t.setPayee(payee);
+                t.setCategory(resolveCategory(payee, line.categoryName(), line.amount()));
+                t.setValidated(false); // toute transaction importee demarre "en attente"
+                transactionRepository.save(t);
+            });
+        } catch (RuntimeException e) {
+            // Tiers crees pour cette ligne annules avec elle (rollback) : les
+            // retirer aussi du cache, sinon une ligne suivante les reutiliserait.
+            knownPayees.subList(knownPayeesBefore, knownPayees.size()).clear();
+            throw e;
+        }
+        ctx.existingKeys().add(CleDoublon.of(line.date(), line.amount(), line.payeeLine().canonicalName()));
+        ctx.result().imported++;
+    }
 
     /**
      * Positions des colonnes utiles dans un CSV, deduites de sa ligne
@@ -185,15 +240,15 @@ public class ServiceImport {
      */
     public ImportResult importCsv(MultipartFile file, Long accountId) {
         Compte account = accountService.findById(accountId);
+        ServiceCompte.ensureNotArchived(account);
         dernierImportService.enregistrerImport();
         ImportResult result = new ImportResult();
         List<Tiers> knownPayees = payeeService.findAllForMatching();
         Set<CleDoublon> existingKeys = loadDuplicateKeys(accountId);
 
         List<String> lines;
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
-            lines = reader.lines().toList();
+        try {
+            lines = decodeImportedText(file.getBytes()).lines().toList();
         } catch (IOException e) {
             result.errors.add("Erreur de lecture du fichier : " + e.getMessage());
             return result;
@@ -201,7 +256,7 @@ public class ServiceImport {
 
         int headerLineIndex = findHeaderLineIndex(lines);
         CsvLayout layout = headerLineIndex >= 0
-                ? layoutFromHeader(lines.get(headerLineIndex).split(";", -1))
+                ? layoutFromHeader(splitCsvLine(lines.get(headerLineIndex)))
                 : CsvLayout.HOMEBANK_DEFAULT;
         int firstDataLine = headerLineIndex >= 0 ? headerLineIndex + 1 : 0;
         int minRequiredFields = Math.max(layout.dateIdx(), layout.amountIdx()) + 1;
@@ -219,7 +274,7 @@ public class ServiceImport {
         if (line.isBlank()) return;
         ImportResult result = ctx.result();
 
-        String[] fields = line.split(";", -1);
+        String[] fields = splitCsvLine(line);
         if (fields.length < minRequiredFields) {
             result.skipped++;
             result.errors.add("Ligne " + lineNumber + " : nombre de colonnes insuffisant");
@@ -234,30 +289,29 @@ public class ServiceImport {
             String categoryName = csvField(fields, layout.categoryIdx());
             String tags = csvField(fields, layout.tagsIdx());
 
-            Tiers payee = resolvePayee(payeeText, amount, ctx.knownPayees());
-            String canonicalPayee = payee != null ? payee.getName() : payeeText;
+            TiersLigne payeeLine = matchPayee(payeeText, amount, ctx.knownPayees());
+            String canonicalPayee = payeeLine.canonicalName();
 
-            if (isDuplicate(ctx.account().getId(), date, amount, canonicalPayee, null, ctx.existingKeys())) {
+            if (isDuplicate(date, amount, canonicalPayee, ctx.existingKeys())) {
                 result.duplicates++;
                 return;
             }
 
-            Transaction t = new Transaction();
-            t.setAccount(ctx.account());
-            t.setDate(date);
-            t.setAmount(amount);
-            t.setMemo(sanitizeMemo(memo));
-            t.setTags(tags);
-            t.setPayee(payee);
-            t.setCategory(resolveCategory(payee, categoryName, amount));
-            t.setValidated(false); // toute transaction importee demarre "en attente"
-            transactionRepository.save(t);
-            ctx.existingKeys().add(CleDoublon.of(date, amount, canonicalPayee));
-            result.imported++;
+            saveLine(ctx, new LigneImportee(date, amount, memo, tags, categoryName, payeeLine));
         } catch (Exception e) {
             result.skipped++;
-            result.errors.add("Ligne " + lineNumber + " : " + e.getMessage());
+            result.errors.add("Ligne " + lineNumber + " : " + describeError(e));
         }
+    }
+
+    /**
+     * Texte d'erreur affiche a l'utilisateur pour une ligne ignoree : le
+     * message de l'exception, ou a defaut son type (une NullPointerException
+     * sans message s'affichait sinon "Ligne 2 : null").
+     */
+    private static String describeError(Exception e) {
+        String message = e.getMessage();
+        return message != null && !message.isBlank() ? message : e.getClass().getSimpleName();
     }
 
     /**
@@ -275,7 +329,7 @@ public class ServiceImport {
             String line = lines.get(i);
             if (line.isBlank()) continue;
 
-            String[] fields = line.split(";", -1);
+            String[] fields = splitCsvLine(line);
             if (fields.length >= 3) {
                 // 3+ colonnes : soit la vraie ligne d'en-tete ("Date;..."), soit deja
                 // de la donnee (pas d'en-tete du tout) — dans les deux cas la
@@ -294,6 +348,43 @@ public class ServiceImport {
      */
     private CsvLayout layoutFromHeader(String[] header) {
         return header.length >= 6 ? CsvLayout.HOMEBANK_DEFAULT : CsvLayout.BANK_STATEMENT;
+    }
+
+    /**
+     * Decoupe une ligne CSV sur ';' en respectant les guillemets : un libelle
+     * bancaire entre guillemets peut contenir lui-meme un ';' ("VIR SEPA ACME;
+     * REF 2024-03"), qu'un simple split decoupait en deux, decalant toutes les
+     * colonnes suivantes (montant lu dans la mauvaise colonne). Les guillemets
+     * entourant un champ sont retires, et "" a l'interieur d'un champ entre
+     * guillemets vaut un guillemet (RFC 4180). Le contenu n'est pas rogne :
+     * voir csvField/stripQuotes.
+     */
+    static String[] splitCsvLine(String line) {
+        List<String> fields = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuotes = false;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (inQuotes) {
+                if (c != '"') {
+                    current.append(c);
+                } else if (i + 1 < line.length() && line.charAt(i + 1) == '"') {
+                    current.append('"');
+                    i++;
+                } else {
+                    inQuotes = false;
+                }
+            } else if (c == '"') {
+                inQuotes = true;
+            } else if (c == ';') {
+                fields.add(current.toString());
+                current.setLength(0);
+            } else {
+                current.append(c);
+            }
+        }
+        fields.add(current.toString());
+        return fields.toArray(String[]::new);
     }
 
     /** Valeur d'un champ CSV a une position donnee, guillemets et espaces retires ; "" si la colonne n'existe pas pour ce format. */
@@ -316,28 +407,24 @@ public class ServiceImport {
      */
     public ImportResult importQif(MultipartFile file, Long accountId) {
         Compte account = accountService.findById(accountId);
+        ServiceCompte.ensureNotArchived(account);
         dernierImportService.enregistrerImport();
         ImportResult result = new ImportResult();
         List<Tiers> knownPayees = payeeService.findAllForMatching();
         Set<CleDoublon> existingKeys = loadDuplicateKeys(accountId);
         ImportContext ctx = new ImportContext(account, knownPayees, existingKeys, result);
 
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
-
-            String line;
-            QifRecordState state = new QifRecordState();
-            int lineNumber = 0;
-
-            while ((line = reader.readLine()) != null) {
-                lineNumber++;
-                processQifLine(line, lineNumber, ctx, state);
-            }
-
+        List<String> lines;
+        try {
+            lines = decodeImportedText(file.getBytes()).lines().toList();
         } catch (IOException e) {
-            result.errors.add(
-                    "Erreur de lecture du fichier : " + e.getMessage()
-            );
+            result.errors.add("Erreur de lecture du fichier : " + e.getMessage());
+            return result;
+        }
+
+        QifRecordState state = new QifRecordState();
+        for (int i = 0; i < lines.size(); i++) {
+            processQifLine(lines.get(i), i + 1, ctx, state);
         }
 
         return result;
@@ -355,8 +442,15 @@ public class ServiceImport {
         String payeeText;
         String memo;
         String categoryName;
+        // Premiere erreur de lecture d'un champ (date/montant illisible) : l'enregistrement
+        // entier sera ignore a sa fin ("^"), sans interrompre l'import des suivants.
+        String invalidReason;
         // On ne traite les transactions qu'apres !Type:Bank.
         boolean inBankSection;
+
+        void markInvalid(String reason) {
+            if (invalidReason == null) invalidReason = reason;
+        }
 
         void reset() {
             date = null;
@@ -364,6 +458,7 @@ public class ServiceImport {
             payeeText = null;
             memo = null;
             categoryName = null;
+            invalidReason = null;
         }
     }
 
@@ -383,16 +478,21 @@ public class ServiceImport {
         char code = line.charAt(0);
         String value = line.length() > 1 ? line.substring(1).trim() : "";
 
-        switch (code) {
-            case 'D' -> state.date = parseDate(value);
-            case 'T', 'U' -> state.amount = parseAmount(value);
-            case 'P' -> state.payeeText = value;
-            case 'M' -> state.memo = value;
-            case 'L' -> state.categoryName = value;
-            case '^' -> finalizeQifRecord(lineNumber, ctx, state);
-            default -> {
-                // Champs QIF non geres : N, C, A, etc.
+        try {
+            switch (code) {
+                case 'D' -> state.date = parseDate(value);
+                case 'T', 'U' -> state.amount = parseAmount(value);
+                case 'P' -> state.payeeText = value;
+                case 'M' -> state.memo = value;
+                case 'L' -> state.categoryName = value;
+                case '^' -> finalizeQifRecord(lineNumber, ctx, state);
+                default -> {
+                    // Champs QIF non geres : N, C, A, etc.
+                }
             }
+        } catch (IllegalArgumentException e) {
+            // Date/montant illisible : seul cet enregistrement sera ignore (voir finalizeQifRecord).
+            state.markInvalid(e.getMessage());
         }
     }
 
@@ -400,41 +500,58 @@ public class ServiceImport {
     private void finalizeQifRecord(int lineNumber, ImportContext ctx, QifRecordState state) {
         ImportResult result = ctx.result();
         try {
+            if (state.invalidReason != null) {
+                throw new IllegalArgumentException(state.invalidReason);
+            }
             if (state.date == null || state.amount == null) {
                 throw new IllegalStateException("date ou montant manquant");
             }
 
-            Tiers payee = resolvePayee(state.payeeText, state.amount, ctx.knownPayees());
-            String canonicalPayee = payee != null ? payee.getName() : state.payeeText;
+            TiersLigne payeeLine = matchPayee(state.payeeText, state.amount, ctx.knownPayees());
+            String canonicalPayee = payeeLine.canonicalName();
 
-            if (isDuplicate(ctx.account().getId(), state.date, state.amount, canonicalPayee, null, ctx.existingKeys())) {
+            if (isDuplicate(state.date, state.amount, canonicalPayee, ctx.existingKeys())) {
                 result.duplicates++;
             } else {
-                Transaction t = new Transaction();
-                t.setAccount(ctx.account());
-                t.setDate(state.date);
-                t.setAmount(state.amount);
-                t.setMemo(sanitizeMemo(state.memo));
-                t.setPayee(payee);
-                t.setCategory(resolveCategory(payee, state.categoryName, state.amount));
-                t.setValidated(false);
-
-                transactionRepository.save(t);
-                ctx.existingKeys().add(CleDoublon.of(state.date, state.amount, canonicalPayee));
-                result.imported++;
+                saveLine(ctx, new LigneImportee(state.date, state.amount, state.memo, null, state.categoryName, payeeLine));
             }
         } catch (Exception e) {
             result.skipped++;
-            result.errors.add("Enregistrement termine ligne " + lineNumber + " : " + e.getMessage());
+            result.errors.add("Enregistrement termine ligne " + lineNumber + " : " + describeError(e));
         } finally {
             state.reset();
         }
     }
 
-    private LocalDate parseDate(String raw) {
+    private static final Charset WINDOWS_1252 = Charset.forName("windows-1252");
+
+    /**
+     * Texte d'un fichier importe. UTF-8 si le contenu est de l'UTF-8 valide
+     * (marque BOM d'Excel "CSV UTF-8" retiree : sinon le premier en-tete
+     * commencait par U+FEFF ("Date" non reconnu) et toutes les lignes d'un export
+     * bancaire etaient rejetees), sinon Windows-1252 : encodage de beaucoup
+     * d'exports de banques francaises et d'Excel "CSV (separateur : point-virgule)",
+     * dont les accents devenaient sinon des caracteres de remplacement
+     * U+FFFD (tiers "Pr?l?vement" non reconnus, crees en double).
+     */
+    static String decodeImportedText(byte[] bytes) {
+        try {
+            String text = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes))
+                    .toString();
+            return text.startsWith("\uFEFF") ? text.substring(1) : text;
+        } catch (CharacterCodingException e) {
+            return new String(bytes, WINDOWS_1252);
+        }
+    }
+
+    static LocalDate parseDate(String raw) {
+        String trimmed = raw == null ? "" : raw.trim();
         for (DateTimeFormatter fmt : DATE_FORMATS) {
             try {
-                return LocalDate.parse(raw, fmt);
+                return LocalDate.parse(trimmed, fmt);
             } catch (DateTimeParseException ignored) {
                 // essai du format suivant
             }
@@ -442,8 +559,18 @@ public class ServiceImport {
         throw new IllegalArgumentException("Format de date non reconnu : " + raw);
     }
 
-    private BigDecimal parseAmount(String raw) {
-        String cleaned = raw.replace(" ", "").replace("'", "");
+    /**
+     * Montant tel qu'ecrit dans un releve : separateurs de milliers (espace,
+     * espace insecable U+00A0/U+202F des exports Excel francais, apostrophe
+     * suisse), symbole/code monetaire et signe moins typographique (U+2212)
+     * sont toleres. Message explicite si le montant reste illisible, plutot
+     * que celui de NumberFormatException.
+     */
+    static BigDecimal parseAmount(String raw) {
+        String cleaned = (raw == null ? "" : raw)
+                .replaceAll("[\\s\\u00A0\\u202F'€]", "")
+                .replace("EUR", "")
+                .replace('\u2212', '-');
         // gestion des formats "1.234,56" (europeen) et "1,234.56" (US)
         if (cleaned.contains(",") && cleaned.contains(".")) {
             if (cleaned.indexOf(',') > cleaned.indexOf('.')) {
@@ -454,6 +581,10 @@ public class ServiceImport {
         } else if (cleaned.contains(",")) {
             cleaned = cleaned.replace(",", ".");
         }
-        return new BigDecimal(cleaned);
+        try {
+            return new BigDecimal(cleaned);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Montant non reconnu : " + raw);
+        }
     }
 }

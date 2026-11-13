@@ -4,6 +4,8 @@ import com.homebank.dto.TiersDTO;
 import com.homebank.mapper.MappeurTiers;
 import com.homebank.model.Categorie;
 import com.homebank.model.Tiers;
+import com.homebank.model.Transaction;
+import com.homebank.dto.CategorisationAutoResultatDTO;
 import com.homebank.repository.DepotTiers;
 import com.homebank.repository.DepotTransaction;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,9 +17,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -55,6 +59,23 @@ class ServiceTiersTest {
     // --- matchPayee : reconnaissance par motif "joker" ---
 
     @Test
+    void merge_refuseUneDemandeSansCibleOuSansSources() {
+        assertThatThrownBy(() -> service.merge(List.of(1L), null, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.merge(null, 1L, null)).isInstanceOf(IllegalArgumentException.class);
+        verify(payeeRepository, never()).delete(any(Tiers.class));
+    }
+
+    @Test
+    void create_refuseUnNomVideSansRienEnregistrer() {
+        TiersDTO payload = TiersDTO.builder().name("  ").pattern("Carrefour").build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nom");
+        verify(payeeRepository, never()).save(any(Tiers.class));
+    }
+
+    @Test
     void matchPayee_reconnaitUnMotifSimpleContenuDansLeTexteSansTenirCompteDeLaCasse() {
         Tiers carrefour = tiers(1L, "Carrefour", "Carrefour", null);
         when(payeeRepository.findAll()).thenReturn(List.of(carrefour));
@@ -62,6 +83,15 @@ class ServiceTiersTest {
         Optional<Tiers> result = service.matchPayee("CARREFOUR PARIS 12", new BigDecimal("10.00"));
 
         assertThat(result).contains(carrefour);
+    }
+
+    @Test
+    void matchPayee_traiteLEspaceInsecableDuReleveCommeUnEspaceOrdinaire() {
+        Tiers sgc = tiers(1L, "SGC Tourcoing", "SGC TOURCOING", null);
+        when(payeeRepository.findAll()).thenReturn(List.of(sgc));
+
+        assertThat(service.matchPayee("CB SGC\u00A0 TOURCOING 12/03", null)).contains(sgc);
+        assertThat(service.matchPayee("CB SGC\u202FTOURCOING", null)).contains(sgc);
     }
 
     @Test
@@ -249,5 +279,186 @@ class ServiceTiersTest {
         assertThat(migrated).isEqualTo(1);
         verify(transactionRepository).saveAll(List.of());
         verify(payeeRepository, never()).save(any());
+    }
+
+    // --- create / update : validation et normalisation du formulaire ---
+
+    private static Categorie categorie(Long id, String name) {
+        Categorie c = new Categorie();
+        c.setId(id);
+        c.setName(name);
+        return c;
+    }
+
+    private static Transaction transaction(Long id, Tiers payee, Categorie category) {
+        Transaction t = new Transaction();
+        t.setId(id);
+        t.setPayee(payee);
+        t.setCategory(category);
+        t.setAmount(new BigDecimal("-10.00"));
+        return t;
+    }
+
+    @Test
+    void create_nettoieLeNomEtReprendLeNomCommeMotifParDefaut() {
+        when(payeeRepository.save(any(Tiers.class))).thenAnswer(inv -> inv.getArgument(0));
+        TiersDTO payload = TiersDTO.builder().name("  Boulangerie Paul  ").pattern("  ").amount(new BigDecimal("-4.50")).build();
+
+        TiersDTO created = service.create(payload);
+
+        assertThat(created.getName()).isEqualTo("Boulangerie Paul");
+        assertThat(created.getPattern()).isEqualTo("Boulangerie Paul");
+        // Montant de reconnaissance stocke en valeur absolue (le signe vient de la transaction).
+        assertThat(created.getAmount()).isEqualByComparingTo("4.50");
+        assertThat(created.getCategoryId()).isNull();
+    }
+
+    @Test
+    void create_nettoieChaqueMorceauDUnMotifMultipleSansAjouterDEtoile() {
+        when(payeeRepository.save(any(Tiers.class))).thenAnswer(inv -> inv.getArgument(0));
+        TiersDTO payload = TiersDTO.builder().name("Carrefour").pattern(" Carrefour ; CRF*Paris ").build();
+
+        assertThat(service.create(payload).getPattern()).isEqualTo("Carrefour;CRF*Paris");
+    }
+
+    @Test
+    void update_motifVide_conserveLeMotifPersonnaliseExistant() {
+        Tiers existing = tiers(7L, "Free", "FREE MOBILE;FREE TELECOM", null);
+        when(payeeRepository.findById(7L)).thenReturn(Optional.of(existing));
+        when(payeeRepository.save(any(Tiers.class))).thenAnswer(inv -> inv.getArgument(0));
+        Categorie internet = categorie(3L, "Internet");
+        when(categoryService.findById(3L)).thenReturn(internet);
+
+        TiersDTO updated = service.update(7L, TiersDTO.builder().name("Free").pattern("").categoryId(3L).build());
+
+        assertThat(updated.getPattern()).isEqualTo("FREE MOBILE;FREE TELECOM");
+        assertThat(updated.getCategoryId()).isEqualTo(3L);
+    }
+
+    // --- delete : suppression manuelle depuis la page Tiers ---
+
+    @Test
+    void delete_tiersInutilise_estSupprime() {
+        Tiers inutilise = tiers(1L, "Ancien", "Ancien", null);
+        when(payeeRepository.findById(1L)).thenReturn(Optional.of(inutilise));
+        when(transactionRepository.countByPayee(inutilise)).thenReturn(0L);
+
+        service.delete(1L);
+
+        verify(payeeRepository).delete(inutilise);
+    }
+
+    @Test
+    void delete_tiersUtilise_estRefuseAvecLeNombreDeTransactions() {
+        Tiers utilise = tiers(1L, "EDF", "EDF", null);
+        when(payeeRepository.findById(1L)).thenReturn(Optional.of(utilise));
+        when(transactionRepository.countByPayee(utilise)).thenReturn(12L);
+
+        assertThatThrownBy(() -> service.delete(1L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("12 transaction(s)")
+                .hasMessageContaining("Fusionnez");
+        verify(payeeRepository, never()).delete(any(Tiers.class));
+    }
+
+    @Test
+    void delete_tiersInexistant_renvoieIntrouvable() {
+        when(payeeRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.delete(99L)).isInstanceOf(NoSuchElementException.class);
+    }
+
+    // --- deleteIfOrphan : suppression des tiers auto-crees devenus orphelins ---
+
+    @Test
+    void deleteIfOrphan_supprimeUnTiersAutoCreeQuiNAPlusDeTransaction() {
+        Tiers ancien = tiers(1L, "SUMUP CAFE", "SUMUP CAFE", null);
+        when(payeeRepository.findById(1L)).thenReturn(Optional.of(ancien));
+        when(transactionRepository.existsByPayee(ancien)).thenReturn(false);
+
+        service.deleteIfOrphan(1L);
+
+        verify(payeeRepository).delete(ancien);
+    }
+
+    @Test
+    void deleteIfOrphan_gardeUnTiersEncoreUtiliseOuPersonnaliseOuDejaSupprime() {
+        Tiers encoreUtilise = tiers(1L, "EDF", "EDF", null);
+        when(payeeRepository.findById(1L)).thenReturn(Optional.of(encoreUtilise));
+        when(transactionRepository.existsByPayee(encoreUtilise)).thenReturn(true);
+        Tiers personnalise = tiers(3L, "Free", "FREE MOBILE", null);
+        when(payeeRepository.findById(3L)).thenReturn(Optional.of(personnalise));
+        when(payeeRepository.findById(4L)).thenReturn(Optional.empty());
+
+        service.deleteIfOrphan(1L);
+        service.deleteIfOrphan(3L);
+        service.deleteIfOrphan(4L);
+
+        verify(payeeRepository, never()).delete(any(Tiers.class));
+        // Tiers personnalise : jamais supprime, sans meme verifier ses transactions.
+        verify(transactionRepository, never()).existsByPayee(personnalise);
+    }
+
+    // --- autoCategorize : categorisation automatique en masse (page Tiers) ---
+
+    @Test
+    void autoCategorize_deduitLaCategorieUnanimeEtCombleLesTransactionsSansCategorie() {
+        Categorie courses = categorie(10L, "Courses");
+        Tiers carrefour = tiers(1L, "Carrefour", "Carrefour", null);
+        Transaction categorisee1 = transaction(1L, carrefour, courses);
+        Transaction categorisee2 = transaction(2L, carrefour, courses);
+        Transaction sansCategorie = transaction(3L, carrefour, null);
+        Transaction sansTiers = transaction(4L, null, null);
+        when(payeeRepository.findAll()).thenReturn(List.of(carrefour));
+        when(transactionRepository.findAllWithPayeeAndCategory())
+                .thenReturn(List.of(categorisee1, categorisee2, sansCategorie, sansTiers));
+
+        CategorisationAutoResultatDTO result = service.autoCategorize();
+
+        assertThat(carrefour.getCategory()).isSameAs(courses);
+        assertThat(sansCategorie.getCategory()).isSameAs(courses);
+        assertThat(sansTiers.getCategory()).isNull();
+        verify(payeeRepository).saveAll(List.of(carrefour));
+        verify(transactionRepository).saveAll(List.of(sansCategorie));
+        assertThat(result.getPayeesUpdated()).isEqualTo(1);
+        assertThat(result.getTransactionsUpdated()).isEqualTo(1);
+    }
+
+    @Test
+    void autoCategorize_categoriesEnDesaccord_neModifieRien() {
+        Tiers amazon = tiers(1L, "Amazon", "Amazon", null);
+        Transaction livre = transaction(1L, amazon, categorie(10L, "Livres"));
+        Transaction maison = transaction(2L, amazon, categorie(11L, "Maison"));
+        Transaction sansCategorie = transaction(3L, amazon, null);
+        when(payeeRepository.findAll()).thenReturn(List.of(amazon));
+        when(transactionRepository.findAllWithPayeeAndCategory()).thenReturn(List.of(livre, maison, sansCategorie));
+
+        CategorisationAutoResultatDTO result = service.autoCategorize();
+
+        assertThat(amazon.getCategory()).isNull();
+        assertThat(sansCategorie.getCategory()).isNull();
+        assertThat(result.getPayeesUpdated()).isZero();
+        assertThat(result.getTransactionsUpdated()).isZero();
+    }
+
+    @Test
+    void autoCategorize_tiersDejaCategorise_combleLesVidesSansToucherAuxChoixExistants() {
+        Categorie telephone = categorie(10L, "Telephone");
+        Categorie cadeaux = categorie(11L, "Cadeaux");
+        Tiers bouygues = tiers(1L, "Bouygues", "Bouygues", null);
+        bouygues.setCategory(telephone);
+        Transaction choixUtilisateur = transaction(1L, bouygues, cadeaux);
+        Transaction sansCategorie = transaction(2L, bouygues, null);
+        when(payeeRepository.findAll()).thenReturn(List.of(bouygues));
+        when(transactionRepository.findAllWithPayeeAndCategory()).thenReturn(List.of(choixUtilisateur, sansCategorie));
+
+        CategorisationAutoResultatDTO result = service.autoCategorize();
+
+        assertThat(choixUtilisateur.getCategory()).isSameAs(cadeaux);
+        assertThat(sansCategorie.getCategory()).isSameAs(telephone);
+        assertThat(bouygues.getCategory()).isSameAs(telephone);
+        // Le tiers avait deja sa categorie : il n'est pas compte comme "categorise".
+        assertThat(result.getPayeesUpdated()).isZero();
+        assertThat(result.getTransactionsUpdated()).isEqualTo(1);
     }
 }

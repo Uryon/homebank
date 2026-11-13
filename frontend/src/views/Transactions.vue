@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="transactions-page">
     <div class="page-header">
       <div>
         <h1>Transactions</h1>
@@ -13,12 +13,12 @@
 
     <TransactionsSubNav />
 
-    <div class="toolbar">
+    <div class="toolbar transactions-toolbar">
       <div class="form-field">
         <label for="tx-filter-account">Compte</label>
         <select id="tx-filter-account" v-model="filterAccount" @change="load">
           <option :value="null">Tous les comptes</option>
-          <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+          <option v-for="a in accounts" :key="a.id" :value="a.id">{{ accountOptionLabel(a) }}</option>
         </select>
       </div>
 
@@ -56,45 +56,55 @@
           Sans catégorie <span class="chip-count">{{ uncategorizedCount }}</span>
         </button>
 
-        <button
-          class="btn"
-          :class="{ secondary: pendingCount === 0 }"
-          :disabled="pendingCount === 0 || validating"
-          @click="validateAll"
-        >
-          {{ validating ? 'Validation…' : `Tout valider (${pendingCount})` }}
-        </button>
+        <!-- Actions en masse affichées seulement s'il y a des transactions à traiter. -->
+        <template v-if="pendingCount > 0">
+          <button
+            class="btn"
+            :disabled="validating"
+            @click="validateAll"
+          >
+            {{ validating ? 'Validation…' : `Tout valider (${pendingCount})` }}
+          </button>
 
-        <button
-          class="btn danger"
-          :class="{ secondary: pendingCount === 0 }"
-          :disabled="pendingCount === 0 || deletingPending"
-          @click="deletePending"
-        >
-          {{ deletingPending ? 'Suppression…' : `Supprimer les non validées` }}
-        </button>
+          <button
+            class="btn danger"
+            :disabled="deletingPending"
+            @click="deletePending"
+          >
+            {{ deletingPending ? 'Suppression…' : `Supprimer les non validées` }}
+          </button>
+        </template>
       </div>
 
       <div class="form-field" style="margin-left: auto;">
         <label for="tx-search" title="Tiers, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Entre guillemets (&quot;CAF&quot;), le critère doit correspondre exactement au lieu de simplement le contenir. Ou &gt; / &lt; / = un montant seul.">Rechercher</label>
-        <input id="tx-search" v-model="searchQuery" placeholder='Tiers, catégorie, montant… ex : > 100' style="min-width: 280px;" />
+        <input id="tx-search" v-model="searchQuery" placeholder="Tiers, catégorie, montant… ex : > 100" style="min-width: 280px;" />
         <div v-if="amountQuery" class="text-hint">
           {{ amountSearchLoading ? 'Recherche…' : `${filteredTransactions.length} transaction(s) trouvée(s)` }}
         </div>
       </div>
     </div>
 
-    <div v-if="selectedIds.size" class="bulk-bar">
-      <span>{{ selectedIds.size }} transaction(s) sélectionnée(s)</span>
-      <span class="bulk-total amount" :class="selectedTotal >= 0 ? 'positive' : 'negative'">
-        Total : {{ formatAmount(selectedTotal) }}
-      </span>
-      <button class="btn" @click="openBulkEdit">Modifier en masse</button>
-      <button class="btn danger" :disabled="deletingSelection" @click="deleteSelected">
-        {{ deletingSelection ? 'Suppression…' : 'Supprimer la sélection' }}
-      </button>
-      <button class="btn secondary" @click="clearSelection">Désélectionner tout</button>
-    </div>
+    <!-- Barre flottante en bas de l'écran : reste visible même quand on coche
+         des lignes loin dans la liste (elle était auparavant au-dessus du tableau). -->
+    <Transition name="bulk-bar">
+      <div v-if="selectedIds.size" class="bulk-bar" role="region" aria-label="Actions sur la sélection">
+        <span class="bulk-count" aria-live="polite">
+          {{ selectedIds.size }} sélectionnée{{ selectedIds.size > 1 ? 's' : '' }}
+        </span>
+        <span class="bulk-total" :class="selectedTotal >= 0 ? 'positive' : 'negative'">
+          {{ formatAmount(selectedTotal) }}
+        </span>
+        <span class="bulk-separator" aria-hidden="true" />
+        <button class="btn" @click="openBulkEdit"><Icon name="edit" size="sm" /> Modifier</button>
+        <button class="btn danger" :disabled="deletingSelection" @click="deleteSelected">
+          <Icon name="trash" size="sm" /> {{ deletingSelection ? 'Suppression…' : 'Supprimer' }}
+        </button>
+        <button class="bulk-close" type="button" title="Désélectionner tout (Échap)" aria-label="Désélectionner tout" @click="clearSelection">
+          <Icon name="x" size="sm" />
+        </button>
+      </div>
+    </Transition>
 
     <div class="table-scroll" v-if="filteredTransactions.length">
       <table class="transactions-table">
@@ -131,16 +141,30 @@
             <th>Mémo</th>
             <th class="num">Dépense</th>
             <th class="num">Revenu</th>
-            <th class="num" title="Dépense périodique récurrente">Récurrent</th>
-            <th class="num" title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)">Exception</th>
+            <th class="num th-icon" title="Dépense périodique récurrente">
+              <Icon name="refresh" size="sm" /><span class="sr-only">Récurrent</span>
+            </th>
+            <th class="num th-icon" title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)">
+              <Icon name="eyeOff" size="sm" /><span class="sr-only">Exception</span>
+            </th>
             <th></th>
           </tr>
         </thead>
 
         <tbody>
+          <template v-for="(t, index) in pagedTransactions" :key="t.id">
+          <!-- Intertitre à chaque changement de mois (liste triée par date décroissante) -->
+          <tr v-if="monthStartsAt(index)" class="month-row">
+            <th colspan="12" scope="rowgroup">
+              <span class="month-row-label">{{ monthHeading(t.date) }}</span>
+              <span class="month-row-meta">
+                {{ monthSummary(t.date).count }} transaction{{ monthSummary(t.date).count > 1 ? 's' : '' }}
+                · solde
+                <span class="amount" :class="monthSummary(t.date).total >= 0 ? 'positive' : 'negative'">{{ formatAmount(monthSummary(t.date).total) }}</span>
+              </span>
+            </th>
+          </tr>
           <TransactionRow
-            v-for="t in pagedTransactions"
-            :key="t.id"
             :transaction="t"
             :is-editing="editingId === t.id"
             :accounts="accounts"
@@ -161,6 +185,7 @@
             @remove="remove"
             @split="openSplit"
           />
+          </template>
         </tbody>
       </table>
     </div>
@@ -173,6 +198,10 @@
       <div v-if="hasMoreToShow" ref="loadMoreSentinel" class="load-more-sentinel">Chargement…</div>
     </div>
 
+    <div v-else-if="!transactionsLoaded && loadFailed" class="empty-state">
+      Transactions indisponibles tant que le serveur ne répond pas.
+    </div>
+    <SkeletonRows v-else-if="!transactionsLoaded" label="Chargement des transactions…" :columns="['3%', '10%', '10%', '16%', '20%', '18%', '9%']" :rows="10" />
     <div v-else class="empty-state">
       {{
         !accounts.length
@@ -185,14 +214,14 @@
 
     <!-- Modal : création uniquement -->
     <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
-      <div class="modal">
+      <div v-dialog="() => (showModal = false)" class="modal" role="dialog" aria-modal="true">
         <h2>Nouvelle transaction</h2>
 
         <div class="form-grid">
           <div class="form-field">
             <label for="new-tx-account">Compte</label>
             <select id="new-tx-account" v-model.number="form.accountId">
-              <option v-for="a in accounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+              <option v-for="a in entryAccounts" :key="a.id" :value="a.id">{{ a.name }}</option>
             </select>
           </div>
 
@@ -265,7 +294,7 @@
 
     <!-- Modal : édition en masse des transactions sélectionnées -->
     <div v-if="showBulkEditModal" class="modal-overlay" @click.self="showBulkEditModal = false">
-      <div class="modal bulk-edit-modal">
+      <div v-dialog="() => (showBulkEditModal = false)" class="modal bulk-edit-modal" role="dialog" aria-modal="true">
         <h2>Modifier {{ selectedIds.size }} transaction(s)</h2>
         <div class="text-hint" style="margin-bottom: 20px;">
           Modifiez uniquement les champs à changer : un champ non touché reste inchangé sur chaque transaction.
@@ -389,7 +418,7 @@
 
     <!-- Modal : division d'une transaction en deux -->
     <div v-if="showSplitModal" class="modal-overlay" @click.self="closeSplitModal">
-      <div class="modal">
+      <div v-dialog="closeSplitModal" class="modal" role="dialog" aria-modal="true">
         <h2>Diviser la transaction</h2>
         <div class="text-hint" style="margin-bottom: 20px;">
           {{ splitTransaction?.payee || 'Sans tiers' }} · {{ formatDate(splitTransaction?.date) }} ·
@@ -449,7 +478,7 @@
       </div>
     </div>
 
-    <div v-if="lastAction" class="undo-bar" role="status">
+    <div v-if="lastAction" class="undo-bar" :class="{ 'above-bulk-bar': selectedIds.size }" role="status">
       <span>{{ lastAction.label }}</span>
       <button class="btn secondary" :disabled="undoing" @click="runLastAction">
         {{ undoing ? 'Annulation…' : 'Annuler' }}
@@ -459,12 +488,14 @@
 </template>
 
 <script setup>
+import { notify, askConfirm } from '../services/feedback'
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   TransactionsAPI
 } from '../services/api'
 import { dataStore } from '../services/dataStore'
+import { planRestore, transactionPayloadFrom } from '../services/undoRestore'
 import { normalizeSearch, parseAmountQuery, parseSearchTerms, matchesSearchTerm } from '../services/search'
 import { flattenCategories } from '../services/categories'
 import PayeeAutocomplete from '../components/PayeeAutocomplete.vue'
@@ -472,12 +503,19 @@ import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import TransactionRow from '../components/TransactionRow.vue'
 import AmountInput from '../components/AmountInput.vue'
 import MonthYearFilter from '../components/MonthYearFilter.vue'
+import SkeletonRows from '../components/SkeletonRows.vue'
+import { formatMonthHeading, monthKey, startsNewMonth, summarizeByMonth } from '../services/monthGroups'
+import Icon from '../components/Icon.vue'
 import TransactionsSubNav from './TransactionsSubNav.vue'
-import { formatAmount, formatDate } from '../services/format'
+import { formatAmount, formatDate, toLocalIsoDate } from '../services/format'
 import { findPayeeByName } from '../services/payee'
-import { alertApiError } from '../services/errors'
+import { accountOptionLabel, activeAccounts } from '../services/accounts'
+import { alertApiError, apiErrorMessage } from '../services/errors'
+import { bulkTouchedFields, bulkUpdatePayload, countTouchedFields, emptyBulkForm } from '../services/bulkEdit'
+import { useProgressiveList } from '../services/progressiveList'
 
 const route = useRoute()
+const router = useRouter()
 
 const filterAccount = ref(null)
 const filterMonth = ref(null)
@@ -490,6 +528,11 @@ const searchQuery = ref('')
 // voir App.vue / dataStore.js) : s'affichent instantanement sans attendre
 // de nouvel appel reseau.
 const accounts = computed(() => dataStore.state.accounts)
+// Comptes proposés pour une nouvelle transaction : jamais un compte archivé
+// (refusé par le backend, voir ServiceCompte#ensureNotArchived).
+const entryAccounts = computed(() => activeAccounts(accounts.value))
+const transactionsLoaded = computed(() => dataStore.state.loaded.transactions && dataStore.state.loaded.accounts)
+const loadFailed = computed(() => dataStore.state.loadFailed)
 const categories = computed(() => dataStore.state.categories)
 const payees = computed(() => dataStore.state.payees)
 
@@ -541,6 +584,8 @@ async function runLastAction() {
   undoing.value = true
   try {
     await undo()
+  } catch (e) {
+    alertApiError("Erreur lors de l'annulation", e)
   } finally {
     undoing.value = false
     clearLastAction()
@@ -550,84 +595,22 @@ async function runLastAction() {
 onBeforeUnmount(clearLastAction)
 
 /**
- * Reconstruit le payload API (meme forme que TransactionDTO cote backend, et
- * que le payload envoye par save() ci-dessous) a partir d'une transaction
- * deja chargee — utilise pour recreer/restaurer une transaction lors d'une
- * annulation (voir setLastAction).
- */
-function transactionPayloadFrom(t) {
-  return {
-    accountId: t.accountId,
-    date: t.date,
-    payee: t.payee,
-    amount: t.amount,
-    categoryId: t.categoryId,
-    paymentMode: t.paymentMode,
-    memo: t.memo,
-    tags: t.tags,
-    transferTransactionId: t.transferTransactionId,
-    periodicExpense: t.periodicExpense,
-    exceptional: t.exceptional,
-    validated: t.validated
-  }
-}
-
-/**
- * Construit, pour un lot de transactions sur le point d'etre supprimees, les
- * actions de restauration a executer en cas d'annulation. Une transaction
- * normale se recree via un simple create() du payload capture avant
- * suppression. Une transaction de virement, elle, ne peut pas se recreer
- * ainsi : le backend supprime TOUJOURS les deux cotes ensemble (voir
- * ServiceTransaction#delete/unlinkTransferPairs), y compris quand une seule
- * des deux a ete explicitement selectionnee/supprimee, et un simple create()
- * ignorerait de toute facon transferTransactionId (non repris par
- * ServiceTransaction#applyPayload) — il faut donc recreer la paire via
- * TransactionsAPI.transfer(), en retrouvant la jumelle dans le store global
- * (pas necessairement presente dans `transactionsToDelete` elle-meme). Une
- * paire deja traitee (les deux cotes etaient dans le lot) n'est traitee
- * qu'une fois.
+ * Actions de restauration d'un lot de transactions sur le point d'etre
+ * supprimees (voir planRestore dans services/undoRestore.js pour le cas des
+ * virements). Chaque action garde les ids qu'elle restaure, pour pouvoir
+ * ignorer celles dont la suppression a echoue (voir deletePending).
  */
 function buildRestoreActions(transactionsToDelete) {
-  const byId = new Map(dataStore.state.transactions.map(t => [t.id, t]))
-  const handledIds = new Set()
-  const actions = []
-
-  for (const t of transactionsToDelete) {
-    if (handledIds.has(t.id)) continue
-    handledIds.add(t.id)
-
-    const isTransferLeg = t.paymentMode === 'TRANSFER' || t.transferTransactionId
-    const pair = isTransferLeg ? byId.get(t.transferTransactionId) : null
-
-    if (isTransferLeg && !pair) {
-      // Jumelle introuvable dans le store (cas limite, ex : deja supprimee
-      // par ailleurs) : on ne peut pas restaurer l'appariement, seulement
-      // recreer ce cote en transaction normale. On le signale plutot que de
-      // laisser croire que l'annulation a tout restaure a l'identique.
-      console.warn(`Annulation : jumelle de virement introuvable pour la transaction ${t.id}, restauration en transaction simple sans appariement.`)
-    }
-
-    if (isTransferLeg && pair) {
-      handledIds.add(pair.id)
-      const from = t.amount < 0 ? t : pair
-      const to = t.amount < 0 ? pair : t
-      actions.push({
-        ids: [t.id, pair.id],
-        run: () => TransactionsAPI.transfer({
-          fromAccountId: from.accountId,
-          toAccountId: to.accountId,
-          amount: Math.abs(t.amount),
-          date: t.date,
-          memo: t.memo
-        })
-      })
-    } else {
-      const payload = transactionPayloadFrom(t)
-      actions.push({ ids: [t.id], run: () => TransactionsAPI.create(payload) })
-    }
+  const { steps, orphanTransferIds } = planRestore(transactionsToDelete, dataStore.state.transactions)
+  if (orphanTransferIds.length) {
+    // Jumelle introuvable (cas limite, ex : deja supprimee par ailleurs) :
+    // seul ce cote peut etre recree, sans appariement.
+    console.warn(`Annulation : jumelle de virement introuvable pour ${orphanTransferIds.join(', ')}, restauration en transaction simple sans appariement.`)
   }
-
-  return actions
+  return steps.map(step => ({
+    ids: step.ids,
+    run: () => (step.kind === 'transfer' ? TransactionsAPI.transfer(step.payload) : TransactionsAPI.create(step.payload))
+  }))
 }
 
 async function restoreAll(actions) {
@@ -679,6 +662,21 @@ function clearSelection() {
   lastSelectedId.value = null
 }
 
+/**
+ * Échap vide la sélection, sauf si Échap sert déjà ailleurs : saisie en
+ * cours, fenêtre ouverte, ligne en édition (Échap annule alors l'édition).
+ */
+function onSelectionEscape(event) {
+  if (event.key !== 'Escape' || !selectedIds.value.size || editingId.value !== null) return
+  const target = event.target
+  const typing = target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) && target.type !== 'checkbox'
+  if (typing || document.querySelector('.modal-overlay, .feedback-overlay, .palette-overlay')) return
+  clearSelection()
+}
+
+onMounted(() => window.addEventListener('keydown', onSelectionEscape))
+onBeforeUnmount(() => window.removeEventListener('keydown', onSelectionEscape))
+
 const allPagedSelected = computed(() =>
   pagedTransactions.value.length > 0 && pagedTransactions.value.every(t => selectedIds.value.has(t.id))
 )
@@ -704,6 +702,20 @@ const amountById = computed(() => {
   return map
 })
 
+/**
+ * Transactions actuellement selectionnees, lues dans la liste globale (tous
+ * comptes, voir dataStore) et non dans `transactions` (potentiellement
+ * filtree par compte) : la selection persiste a travers les filtres, et
+ * l'action de masse (backend) porte sur TOUS les ids selectionnes — un
+ * instantane pris sur la seule liste filtree oubliait les autres comptes,
+ * qui n'etaient alors jamais restaures par "Annuler".
+ */
+function selectedTransactionsSnapshot() {
+  const byId = new Map(dataStore.state.transactions.map(t => [t.id, t]))
+  for (const t of transactions.value) if (!byId.has(t.id)) byId.set(t.id, t)
+  return Array.from(selectedIds.value, id => byId.get(id)).filter(Boolean)
+}
+
 /** Somme des transactions selectionnees, affichee dans la barre de selection multiple. */
 const selectedTotal = computed(() => {
   const amounts = amountById.value
@@ -713,43 +725,15 @@ const selectedTotal = computed(() => {
 })
 
 /**
- * État du formulaire d'édition en masse : plus de case à cocher par champ
- * (voir modal correspondant) — modifier un champ suffit a le marquer comme
- * "a appliquer". Categorie/Tiers utilisent un drapeau *Touched explicite
- * (mis a true par onBulkCategoryChange/onBulkPayeeChange ci-dessous), car
- * leur valeur "non renseignee" (null / chaine vide) est aussi une valeur
- * metier legitime ("aucune categorie", tiers vide) qu'on doit pouvoir
- * distinguer de "champ pas touche". Les select simples (mode de paiement,
- * marqueurs, statut) n'ont pas ce probleme : ils demarrent a `null`, une
- * valeur qui n'existe dans aucune de leurs <option> reelles, donc "valeur
- * !== null" suffit a la fois a savoir si le champ est actif ET a construire
- * le payload, sans etat separe a synchroniser.
+ * Édition en masse : plus de case à cocher par champ (voir modal
+ * correspondant) — modifier un champ suffit a le marquer comme "a appliquer"
+ * (voir emptyBulkForm/bulkTouchedFields dans services/bulkEdit.js).
  */
-function emptyBulkForm() {
-  return {
-    categoryTouched: false,
-    categoryId: null,
-    payeeTouched: false,
-    payee: '',
-    paymentMode: null,
-    periodicExpense: null,
-    exceptional: null,
-    validated: null
-  }
-}
-
 const showBulkEditModal = ref(false)
 const bulkForm = ref(emptyBulkForm())
 const bulkSaving = ref(false)
 
-const bulkTouchedFieldCount = computed(() => [
-  bulkForm.value.categoryTouched,
-  bulkForm.value.payeeTouched,
-  bulkForm.value.paymentMode !== null,
-  bulkForm.value.periodicExpense !== null,
-  bulkForm.value.exceptional !== null,
-  bulkForm.value.validated !== null
-].filter(Boolean).length)
+const bulkTouchedFieldCount = computed(() => countTouchedFields(bulkTouchedFields(bulkForm.value)))
 
 const bulkHasAnyFieldEnabled = computed(() => bulkTouchedFieldCount.value > 0)
 
@@ -776,33 +760,7 @@ function onBulkPayeeChange(value) {
 async function saveBulkEdit() {
   if (!bulkHasAnyFieldEnabled.value || !selectedIds.value.size) return
 
-  const payload = { ids: Array.from(selectedIds.value) }
-  if (bulkForm.value.categoryTouched) {
-    payload.categoryIdProvided = true
-    payload.categoryId = bulkForm.value.categoryId
-  }
-  if (bulkForm.value.payeeTouched) {
-    payload.payeeProvided = true
-    payload.payee = bulkForm.value.payee
-  }
-  if (bulkForm.value.paymentMode !== null) {
-    payload.paymentModeProvided = true
-    payload.paymentMode = bulkForm.value.paymentMode
-  }
-  if (bulkForm.value.periodicExpense !== null) {
-    payload.periodicExpenseProvided = true
-    payload.periodicExpense = bulkForm.value.periodicExpense
-  }
-  if (bulkForm.value.exceptional !== null) {
-    payload.exceptionalProvided = true
-    payload.exceptional = bulkForm.value.exceptional
-  }
-  if (bulkForm.value.validated !== null) {
-    payload.validatedProvided = true
-    payload.validated = bulkForm.value.validated
-  }
-
-  // Champs effectivement touches par cette modification en masse : necessaire
+  // Champs effectivement touches par cette modification en masse : reutilises
   // pour ne restaurer que ceux-la lors de l'annulation (voir plus bas), sans
   // quoi passer par TransactionsAPI.update() (qui reenverrait TOUS les champs,
   // y compris compte/date/montant) est systematiquement refuse par le backend
@@ -810,17 +768,10 @@ async function saveBulkEdit() {
   // ServiceTransaction#update, qui interdit toute edition directe d'un
   // virement) alors que bulkUpdate, lui, autorise deja categorie/tiers/
   // marqueurs/statut sur un virement (voir ServiceTransaction#applyBulkFields).
-  const touchedFields = {
-    categoryId: bulkForm.value.categoryTouched,
-    payee: bulkForm.value.payeeTouched,
-    paymentMode: bulkForm.value.paymentMode !== null,
-    periodicExpense: bulkForm.value.periodicExpense !== null,
-    exceptional: bulkForm.value.exceptional !== null,
-    validated: bulkForm.value.validated !== null
-  }
+  const touchedFields = bulkTouchedFields(bulkForm.value)
+  const payload = bulkUpdatePayload(Array.from(selectedIds.value), touchedFields, bulkForm.value)
 
-  const previousSnapshots = transactions.value
-    .filter(t => selectedIds.value.has(t.id))
+  const previousSnapshots = selectedTransactionsSnapshot()
     .map(t => ({ id: t.id, before: transactionPayloadFrom(t) }))
 
   bulkSaving.value = true
@@ -830,36 +781,13 @@ async function saveBulkEdit() {
     clearSelection()
     await load()
     setLastAction(`Modification de ${previousSnapshots.length} transaction(s)`, async () => {
-      await Promise.all(previousSnapshots.map(({ id, before }) => {
-        const restorePayload = { ids: [id] }
-        if (touchedFields.categoryId) {
-          restorePayload.categoryIdProvided = true
-          restorePayload.categoryId = before.categoryId
-        }
-        if (touchedFields.payee) {
-          restorePayload.payeeProvided = true
-          restorePayload.payee = before.payee
-        }
-        if (touchedFields.paymentMode) {
-          restorePayload.paymentModeProvided = true
-          restorePayload.paymentMode = before.paymentMode
-        }
-        if (touchedFields.periodicExpense) {
-          restorePayload.periodicExpenseProvided = true
-          restorePayload.periodicExpense = before.periodicExpense
-        }
-        if (touchedFields.exceptional) {
-          restorePayload.exceptionalProvided = true
-          restorePayload.exceptional = before.exceptional
-        }
-        if (touchedFields.validated) {
-          restorePayload.validatedProvided = true
-          restorePayload.validated = before.validated
-        }
-        return TransactionsAPI.bulkUpdate(restorePayload)
-      }))
+      await Promise.all(previousSnapshots.map(({ id, before }) =>
+        TransactionsAPI.bulkUpdate(bulkUpdatePayload([id], touchedFields, before))
+      ))
       await load()
     })
+  } catch (e) {
+    alertApiError('Erreur lors de la modification en masse', e)
   } finally {
     bulkSaving.value = false
   }
@@ -868,7 +796,7 @@ async function saveBulkEdit() {
 function emptyForm() {
   return {
     accountId: null,
-    date: new Date().toISOString().slice(0, 10),
+    date: toLocalIsoDate(),
     payee: '',
     amount: 0,
     categoryId: null,
@@ -900,6 +828,10 @@ const uncategorizedCount = computed(() =>
   transactions.value.filter(t => !t.categoryId).length
 )
 
+// Categories a plat { id, label, type, selectable } (voir flattenCategories),
+// partagees par les autocompletes et l'index de recherche ci-dessous.
+const flatCategories = computed(() => flattenCategories(categories.value))
+
 /**
  * Libelle categorie ("Parent : Enfant", meme format que CategoryAutocomplete
  * — voir flattenCategories) par id, pour que la recherche retrouve aussi une
@@ -908,7 +840,7 @@ const uncategorizedCount = computed(() =>
  */
 const categoryLabelById = computed(() => {
   const map = new Map()
-  for (const c of flattenCategories(categories.value)) map.set(c.id, c.label)
+  for (const c of flatCategories.value) map.set(c.id, c.label)
   return map
 })
 
@@ -1010,45 +942,37 @@ const filteredTransactions = computed(() => {
 })
 
 /**
- * Chargement progressif au scroll cote client : avec un historique de
- * plusieurs milliers de transactions, rendre TOUTES les lignes filtrees dans
- * le DOM a chaque frappe (un composant TransactionRow par ligne) rend la
- * recherche inutilisable (reconciliation de milliers de composants a chaque
- * caractere). On ne rend donc au depart que PAGE_SIZE lignes, puis on
- * augmente ce nombre par paliers de PAGE_SIZE au fil du scroll (voir
- * loadMoreSentinel/loadMoreObserver plus bas) plutot que d'exposer une
- * pagination Precedent/Suivant.
+ * Chargement progressif au scroll cote client (voir services/progressiveList.js) :
+ * avec un historique de plusieurs milliers de transactions, rendre TOUTES
+ * les lignes filtrees a chaque frappe (un composant TransactionRow par
+ * ligne) rendait la recherche inutilisable. Lots de 50 lignes (~2-3 ecrans) :
+ * 100 lignes rendaient encore la frappe perceptiblement lente (50-100 ms
+ * mesures sur ~4 000 transactions).
  */
-const PAGE_SIZE = 100
-const visibleCount = ref(PAGE_SIZE)
-
-const pagedTransactions = computed(() => filteredTransactions.value.slice(0, visibleCount.value))
-
-const hasMoreToShow = computed(() => visibleCount.value < filteredTransactions.value.length)
-
-function loadMore() {
-  if (!hasMoreToShow.value) return
-  visibleCount.value += PAGE_SIZE
-}
+const {
+  visibleItems: pagedTransactions,
+  hasMore: hasMoreToShow,
+  sentinel: loadMoreSentinel,
+  reset: resetVisibleTransactions,
+  revealIndex: revealTransactionIndex
+} = useProgressiveList(filteredTransactions, { pageSize: 50 })
 
 /**
- * Sentinelle placee juste apres le tableau : des qu'elle entre dans le
- * viewport (ou approche, voir rootMargin), on charge le lot suivant. Le
- * ref change d'element a chaque fois que la sentinelle apparait/disparait du
- * DOM (v-if="hasMoreToShow"), d'ou le watch qui reobserve a chaque fois
- * plutot qu'un observe() unique au montage.
+ * Intertitres de mois : totaux calculés sur TOUTE la liste filtrée (pas
+ * seulement le lot affiché), une fois par changement de filtre — jamais
+ * recalculés ligne par ligne au rendu.
  */
-const loadMoreSentinel = ref(null)
-const loadMoreObserver = new IntersectionObserver((entries) => {
-  if (entries[0]?.isIntersecting) loadMore()
-}, { rootMargin: '600px' })
+const monthSummaries = computed(() => summarizeByMonth(filteredTransactions.value))
 
-watch(loadMoreSentinel, (el, oldEl) => {
-  if (oldEl) loadMoreObserver.unobserve(oldEl)
-  if (el) loadMoreObserver.observe(el)
-})
+function monthStartsAt(index) {
+  return startsNewMonth(pagedTransactions.value, index)
+}
 
-onBeforeUnmount(() => loadMoreObserver.disconnect())
+function monthSummary(isoDate) {
+  return monthSummaries.value.get(monthKey(isoDate)) || { count: 0, total: 0 }
+}
+
+const monthHeading = formatMonthHeading
 
 /**
  * Recherche par montant avec operateur (">", "<", "=") : filtree directement
@@ -1060,9 +984,19 @@ const amountQuery = computed(() => parseAmountQuery(searchQuery.value))
 const amountSearchResults = ref(null)
 const amountSearchLoading = ref(false)
 let amountSearchTimer = null
+// Jeton de la derniere recherche lancee : une reponse plus ancienne arrivee
+// apres coup (requete lente) ne doit jamais ecraser le resultat courant.
+let amountSearchToken = 0
+
+// En quittant la page : annule une recherche pas encore partie et ignore
+// celle deja en vol (pas de notification d'erreur affichee sur une autre page).
+onBeforeUnmount(() => {
+  clearTimeout(amountSearchTimer)
+  amountSearchToken++
+})
 
 /**
- * Etend visibleCount pour que la transaction cochee `id` (voir
+ * Etend le lot rendu pour que la transaction cochee `id` (voir
  * lastSelectedId) fasse partie du lot actuellement rendu, puis fait defiler
  * la ligne correspondante jusqu'au centre de l'ecran une fois le DOM a jour
  * — pour la retrouver avec les transactions voisines visibles autour d'elle.
@@ -1072,11 +1006,10 @@ let amountSearchTimer = null
  */
 function scrollToSelectedTransaction(id) {
   const index = filteredTransactions.value.findIndex(t => t.id === id)
-  if (index === -1) {
-    visibleCount.value = PAGE_SIZE
+  if (!revealTransactionIndex(index)) {
+    resetVisibleTransactions()
     return
   }
-  visibleCount.value = Math.max(visibleCount.value, Math.ceil((index + 1) / PAGE_SIZE) * PAGE_SIZE)
   nextTick(() => {
     document.querySelector(`tr[data-transaction-id="${id}"]`)
       ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1097,12 +1030,13 @@ watch(
       scrollToSelectedTransaction(lastSelectedId.value)
       return
     }
-    visibleCount.value = PAGE_SIZE
+    resetVisibleTransactions()
   }
 )
 
 watch([amountQuery, filterAccount], ([query, accountId]) => {
   clearTimeout(amountSearchTimer)
+  const token = ++amountSearchToken
   if (!query) {
     amountSearchResults.value = null
     amountSearchLoading.value = false
@@ -1111,18 +1045,21 @@ watch([amountQuery, filterAccount], ([query, accountId]) => {
   amountSearchLoading.value = true
   amountSearchTimer = setTimeout(async () => {
     try {
-      amountSearchResults.value = await TransactionsAPI.list({
+      const results = await TransactionsAPI.list({
         accountId: accountId ?? undefined,
         amountOperator: query.operator,
         amountValue: query.value
       })
+      if (token === amountSearchToken) amountSearchResults.value = results
+    } catch (e) {
+      if (token !== amountSearchToken) return
+      amountSearchResults.value = []
+      alertApiError('Erreur lors de la recherche par montant', e)
     } finally {
-      amountSearchLoading.value = false
+      if (token === amountSearchToken) amountSearchLoading.value = false
     }
   }, 250)
 })
-
-const flatCategories = computed(() => flattenCategories(categories.value))
 
 // Meme logique que TransactionRow.vue : ne proposer dans CategoryAutocomplete
 // que des categories du type correspondant au signe du montant saisi.
@@ -1145,7 +1082,7 @@ const categoriesById = computed(() => new Map(categories.value.map(c => [c.id, c
  * aujourd'hui : elle est prévue mais n'a pas encore réellement eu lieu
  * (comparaison de chaînes ISO "AAAA-MM-JJ", fiable sans passer par Date()).
  */
-const todayIso = new Date().toISOString().slice(0, 10)
+const todayIso = toLocalIsoDate()
 
 async function load() {
   if (filterAccount.value !== null) {
@@ -1210,25 +1147,30 @@ watch(() => form.value.payee, applyDefaultCategoryFromPayee)
 
 function openCreate() {
   form.value = emptyForm()
-  if (accounts.value.length) form.value.accountId = accounts.value[0].id
+  if (entryAccounts.value.length) form.value.accountId = entryAccounts.value[0].id
   showModal.value = true
 }
 
 async function save() {
   if (!form.value.accountId) {
-    alert('Veuillez sélectionner un compte.')
+    notify('Veuillez sélectionner un compte.', 'warning')
     return
   }
 
   const payload = transactionPayloadFrom(form.value)
 
-  const created = await TransactionsAPI.create(payload)
-  showModal.value = false
-  await load()
-  setLastAction('Transaction créée', async () => {
-    await TransactionsAPI.remove(created.id)
+  try {
+    const created = await TransactionsAPI.create(payload)
+    notify('Transaction créée.', 'success')
+    showModal.value = false
     await load()
-  })
+    setLastAction('Transaction créée', async () => {
+      await TransactionsAPI.remove(created.id)
+      await load()
+    })
+  } catch (e) {
+    alertApiError('Erreur lors de la création de la transaction', e)
+  }
 }
 
 /* --- Édition inline : clic sur une ligne --- */
@@ -1238,7 +1180,7 @@ function startEdit(t) {
   // directement (voir ServiceTransaction#update), qui rejette la requete
   // apres coup si on laisse l'edition s'ouvrir.
   if (t.paymentMode === 'TRANSFER' || t.transferTransactionId) {
-    alert('Un virement ne peut pas être modifié directement : supprimez-le et recréez-le si besoin.')
+    notify('Un virement ne peut pas être modifié directement : supprimez-le et recréez-le si besoin.', 'warning')
     return
   }
   editingId.value = t.id
@@ -1276,14 +1218,19 @@ async function confirmEdit(payload) {
 }
 
 async function remove(transaction) {
-  if (!confirm('Supprimer cette transaction ?')) return
+  if (!(await askConfirm('Supprimer cette transaction ?'))) return
   const restoreActions = buildRestoreActions([transaction])
-  await TransactionsAPI.remove(transaction.id)
-  await load()
-  setLastAction('Transaction supprimée', async () => {
-    await restoreAll(restoreActions)
+  try {
+    await TransactionsAPI.remove(transaction.id)
     await load()
-  })
+    notify('Transaction supprimée.', 'success')
+    setLastAction('Transaction supprimée', async () => {
+      await restoreAll(restoreActions)
+      await load()
+    })
+  } catch (e) {
+    alertApiError('Erreur lors de la suppression de la transaction', e)
+  }
 }
 
 /* --- Division d'une transaction en deux --- */
@@ -1310,7 +1257,7 @@ const splitAmountType = computed(() => {
 
 function openSplit(transaction) {
   if (transaction.paymentMode === 'TRANSFER' || transaction.transferTransactionId) {
-    alert('Un virement ne peut pas être divisé.')
+    notify('Un virement ne peut pas être divisé.', 'warning')
     return
   }
   splitTransaction.value = transaction
@@ -1353,29 +1300,38 @@ async function saveSplit() {
     })
     closeSplitModal()
     await load()
+  } catch (e) {
+    splitError.value = apiErrorMessage(e)
   } finally {
     splitSaving.value = false
   }
 }
 
-/** Bascule directement le statut "dépense périodique" sans passer par l'édition complète. */
-async function togglePeriodic(transaction) {
-  await TransactionsAPI.togglePeriodicExpense(transaction.id)
-  await load()
-  setLastAction('Statut "dépense périodique" modifié', async () => {
-    await TransactionsAPI.togglePeriodicExpense(transaction.id)
+/**
+ * Bascule d'un drapeau booleen d'une transaction (une bascule etant sa propre
+ * inverse, l'annulation rejoue simplement le meme appel).
+ */
+async function toggleFlag(apiCall, transaction, label) {
+  try {
+    await apiCall(transaction.id)
     await load()
-  })
+    setLastAction(label, async () => {
+      await apiCall(transaction.id)
+      await load()
+    })
+  } catch (e) {
+    alertApiError('Erreur lors de la modification de la transaction', e)
+  }
+}
+
+/** Bascule directement le statut "dépense périodique" sans passer par l'édition complète. */
+function togglePeriodic(transaction) {
+  return toggleFlag(TransactionsAPI.togglePeriodicExpense, transaction, 'Statut "dépense périodique" modifié')
 }
 
 /** Bascule directement le statut "exceptionnelle" sans passer par l'édition complète. */
-async function toggleExceptional(transaction) {
-  await TransactionsAPI.toggleExceptional(transaction.id)
-  await load()
-  setLastAction('Statut "exceptionnelle" modifié', async () => {
-    await TransactionsAPI.toggleExceptional(transaction.id)
-    await load()
-  })
+function toggleExceptional(transaction) {
+  return toggleFlag(TransactionsAPI.toggleExceptional, transaction, 'Statut "exceptionnelle" modifié')
 }
 
 /* --- Validation / rapprochement (façon "reconcile" YNAB) --- */
@@ -1383,13 +1339,8 @@ async function toggleExceptional(transaction) {
 const validating = ref(false)
 
 /** Bascule le statut validée/en attente d'une seule transaction. */
-async function toggleValidated(transaction) {
-  await TransactionsAPI.toggleValidated(transaction.id)
-  await load()
-  setLastAction('Statut "validée" modifié', async () => {
-    await TransactionsAPI.toggleValidated(transaction.id)
-    await load()
-  })
+function toggleValidated(transaction) {
+  return toggleFlag(TransactionsAPI.toggleValidated, transaction, 'Statut "validée" modifié')
 }
 
 /**
@@ -1400,7 +1351,7 @@ async function toggleValidated(transaction) {
  */
 async function validateAll() {
   if (pendingCount.value === 0) return
-  if (!confirm(`Valider les ${pendingCount.value} transaction(s) en attente ?`)) return
+  if (!(await askConfirm(`Valider les ${pendingCount.value} transaction(s) en attente ?`))) return
   validating.value = true
   // Valide TOUTES les transactions en attente cote backend (pas seulement
   // celles du compte/filtre courant, voir ServiceTransaction#validateAllPending)
@@ -1411,10 +1362,13 @@ async function validateAll() {
   try {
     await TransactionsAPI.validateAll()
     await load()
+    notify(`${pendingIds.length} transaction(s) validée(s).`, 'success')
     setLastAction(`Validation de ${pendingIds.length} transaction(s)`, async () => {
       await Promise.all(pendingIds.map(id => TransactionsAPI.toggleValidated(id)))
       await load()
     })
+  } catch (e) {
+    alertApiError('Erreur lors de la validation des transactions', e)
   } finally {
     validating.value = false
   }
@@ -1425,7 +1379,7 @@ const deletingPending = ref(false)
 /** Supprime d'un coup toutes les transactions en attente de validation, sans passer par la selection manuelle. */
 async function deletePending() {
   if (pendingCount.value === 0) return
-  if (!confirm(`Supprimer définitivement les ${pendingCount.value} transaction(s) non validée(s) ?`)) return
+  if (!(await askConfirm(`Supprimer définitivement les ${pendingCount.value} transaction(s) non validée(s) ?`))) return
   deletingPending.value = true
   // Supprime TOUTES les transactions en attente cote backend (voir
   // ServiceTransaction#deleteAllPending, pas filtre par compte) : meme
@@ -1435,6 +1389,7 @@ async function deletePending() {
   try {
     await TransactionsAPI.removePending()
     await load()
+    notify('Transactions en attente supprimées.', 'success')
     // Un cote de virement en attente dont la jumelle est deja validee est
     // ignore par le backend (voir ServiceTransaction#deleteAllPending) : il
     // est donc toujours present apres le rechargement, et ne doit pas etre
@@ -1446,6 +1401,8 @@ async function deletePending() {
       await restoreAll(restoreActions)
       await load()
     })
+  } catch (e) {
+    alertApiError('Erreur lors de la suppression des transactions en attente', e)
   } finally {
     deletingPending.value = false
   }
@@ -1456,19 +1413,22 @@ const deletingSelection = ref(false)
 /** Supprime d'un coup toutes les transactions actuellement cochees (voir selectedIds). */
 async function deleteSelected() {
   if (!selectedIds.value.size) return
-  if (!confirm(`Supprimer définitivement les ${selectedIds.value.size} transaction(s) sélectionnée(s) ?`)) return
+  if (!(await askConfirm(`Supprimer définitivement les ${selectedIds.value.size} transaction(s) sélectionnée(s) ?`))) return
   deletingSelection.value = true
   const ids = Array.from(selectedIds.value)
-  const selectedTransactions = transactions.value.filter(t => selectedIds.value.has(t.id))
+  const selectedTransactions = selectedTransactionsSnapshot()
   const restoreActions = buildRestoreActions(selectedTransactions)
   try {
     await TransactionsAPI.removeBulk(ids)
+    notify(`${selectedTransactions.length} transaction(s) supprimée(s).`, 'success')
     clearSelection()
     await load()
     setLastAction(`Suppression de ${selectedTransactions.length} transaction(s)`, async () => {
       await restoreAll(restoreActions)
       await load()
     })
+  } catch (e) {
+    alertApiError('Erreur lors de la suppression des transactions sélectionnées', e)
   } finally {
     deletingSelection.value = false
   }
@@ -1482,7 +1442,7 @@ onMounted(async () => {
   try {
     await dataStore.ensureLoaded()
   } catch (e) {
-    alertApiError('Erreur lors du chargement des donnees', e)
+    alertApiError('Erreur lors du chargement des données', e)
     return
   }
   // Revalidation silencieuse en arriere-plan a chaque visite de la page,
@@ -1491,13 +1451,39 @@ onMounted(async () => {
   dataStore.refreshAll()
   if (filterAccount.value !== null) await load()
 
-  // Arrivee depuis "À traiter" > "Modifier" : ouvre directement la
-  // transaction concernee en edition complete, sans action supplementaire.
-  const editId = route.query.edit ? Number(route.query.edit) : null
+  applyRouteQuery(route.query)
+})
+
+/**
+ * Paramètres d'URL reconnus (liens internes, palette de commandes Ctrl+K) :
+ * - edit=<id>   : ouvre la transaction en édition (« À traiter » > « Modifier ») ;
+ * - search=<t>  : pré-remplit la recherche ;
+ * - pending=1 / uncategorized=1 : active le filtre « À traiter » / « Sans catégorie » ;
+ * - new=1       : ouvre la fenêtre de création.
+ * Réappliqués à chaque changement de query : la page n'est pas remontée
+ * quand on y navigue alors qu'elle est déjà affichée.
+ */
+function applyRouteQuery(query) {
+  const editId = query.edit ? Number(query.edit) : null
   if (editId) {
     const target = transactions.value.find(t => t.id === editId)
     if (target) startEdit(target)
   }
+  if (typeof query.search === 'string') searchQuery.value = query.search
+  if (query.uncategorized) uncategorizedOnly.value = true
+  if (query.pending) pendingOnly.value = true
+  if (query.new && entryAccounts.value.length) {
+    openCreate()
+    // Retire "new" de l'URL : un retour arrière ou un nouveau raccourci
+    // (touche N, palette) doit pouvoir rouvrir la création.
+    const rest = { ...query }
+    delete rest.new
+    router.replace({ query: rest })
+  }
+}
+
+watch(() => route.query, (query) => {
+  if (dataStore.state.loaded.transactions) applyRouteQuery(query)
 })
 </script>
 
@@ -1526,11 +1512,11 @@ onMounted(async () => {
 }
 .undo-bar .btn.secondary {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.35);
+  border: 1px solid color-mix(in srgb, var(--ink-900) 35%, transparent);
   color: var(--ink-900);
 }
 .undo-bar .btn.secondary:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--ink-900) 12%, transparent);
 }
 
 /*
@@ -1547,21 +1533,60 @@ onMounted(async () => {
   background: var(--ink-900);
   box-shadow: var(--shadow-sm);
 }
+/* Largeurs calibrées pour tenir sans défilement horizontal sur un écran de
+   1440 px (sidebar comprise) ; en dessous, c'est la page qui défile. */
 .transactions-table {
-  min-width: 1180px;
+  min-width: 1130px;
   width: 100%;
   table-layout: fixed;
 }
+/* Tiers et Catégorie sont les colonnes qu'on lit : elles prennent la place
+   gagnée sur les cases à cocher (en-têtes en icônes) et sur le compte. */
 .col-select { width: 36px; }
-.col-date { width: 118px; }
-.col-status { width: 44px; }
-.col-account { width: 136px; }
-.col-payee { width: 180px; }
-.col-category { width: 210px; }
-.col-memo { width: auto; }
+.col-date { width: 110px; }
+.col-status { width: 40px; }
+.col-account { width: 84px; }
+.col-payee { width: 200px; }
+/* La catégorie prend toute la place restante ; le mémo, peu rempli, reste étroit. */
+.col-category { width: auto; }
+.col-memo { width: 56px; }
+/* Assez large pour « -100 000,00 € » : jamais de troncature sur un montant. */
 .col-amount { width: 104px; }
-.col-monthly { width: 92px; }
-.col-actions { width: 76px; }
+.col-monthly { width: 46px; }
+.col-actions { width: 72px; }
+
+/* Intertitre de mois : reste collé sous l'en-tête du tableau (43 px) pendant
+   le défilement, pour toujours savoir quel mois on est en train de lire. */
+.transactions-table .month-row th {
+  position: sticky;
+  top: 43px;
+  z-index: 5;
+  padding: 7px 12px;
+  background: var(--surface-sunken);
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+  overflow: visible;
+}
+.month-row-label {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.month-row-meta {
+  margin-left: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.month-row-meta .amount { font-size: 12px; }
+
+.transactions-table th.th-icon {
+  text-align: center;
+  color: var(--text-faint);
+}
 
 .transactions-table th {
   white-space: nowrap;
@@ -1588,9 +1613,9 @@ onMounted(async () => {
 .transactions-table th:last-child {
   position: sticky;
   right: 0;
-  background: #FAFBFC;
+  background: var(--surface-sunken);
   z-index: 7;
-  box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
+  box-shadow: var(--sticky-edge-shadow);
 }
 
 /*
@@ -1620,16 +1645,73 @@ onMounted(async () => {
   line-height: 1.4;
 }
 
+/* Barre d'actions sur la sélection : flottante, centrée en bas de l'écran,
+   sombre dans les deux thèmes (même teinte que la carte « Solde total »). */
 .bulk-bar {
+  position: fixed;
+  left: calc(50% + 126px); /* centrée sur la zone de contenu (sidebar de 252 px) */
+  bottom: 22px;
+  z-index: 55;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  margin-bottom: 10px;
-  background: var(--azure-dim);
-  border: 1px solid var(--azure);
-  border-radius: var(--radius-md);
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  padding: 8px 8px 8px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: var(--hero-bg);
+  color: #FFFFFF;
+  box-shadow: 0 14px 40px rgba(8, 15, 30, 0.35);
+  transform: translateX(-50%);
 }
+.bulk-count { font-size: 13.5px; font-weight: 650; white-space: nowrap; }
+.bulk-total {
+  padding: 3px 9px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.bulk-total.positive { color: var(--hero-positive); }
+.bulk-total.negative { color: var(--hero-negative); }
+.bulk-separator { width: 1px; align-self: stretch; margin: 2px 2px; background: rgba(255, 255, 255, 0.14); }
+.bulk-bar .btn {
+  min-height: 34px;
+  padding: 6px 12px;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.1);
+  color: #FFFFFF;
+  box-shadow: none;
+  white-space: nowrap;
+}
+.bulk-bar .btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
+.bulk-bar .btn.danger { color: var(--hero-negative); }
+.bulk-bar .btn.danger:hover:not(:disabled) { background: rgba(255, 155, 145, 0.16); }
+.bulk-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+}
+.bulk-close:hover { background: rgba(255, 255, 255, 0.12); color: #FFFFFF; }
+.bulk-bar-enter-active, .bulk-bar-leave-active { transition: opacity 0.16s ease, transform 0.16s ease; }
+.bulk-bar-enter-from, .bulk-bar-leave-to { opacity: 0; transform: translate(-50%, 10px); }
+@media (prefers-reduced-motion: reduce) {
+  .bulk-bar-enter-active, .bulk-bar-leave-active { transition: none; }
+}
+@media (max-width: 1250px) { .bulk-bar { left: calc(50% + 112px); } } /* sidebar de 224 px */
+@media (max-width: 760px) { .bulk-bar { left: 50%; } }                /* sidebar devenue barre du haut */
+/* Place sous la barre flottante pour ne pas masquer les dernières lignes. */
+.transactions-page:has(.bulk-bar) { padding-bottom: 72px; }
+/* Bandeau « Annuler » affiché au-dessus de la barre de sélection quand les deux coexistent. */
+.undo-bar.above-bulk-bar { bottom: 84px; }
 
 /* Modale un peu plus large que le gabarit standard (520px) : les lignes
    label + champ + pastille ont besoin de plus de place pour respirer. */
@@ -1705,7 +1787,7 @@ onMounted(async () => {
   height: 20px;
   border-radius: 50%;
   background: var(--azure);
-  color: #FFFFFF;
+  color: var(--on-accent);
   font-size: 11px;
   font-weight: 700;
 }
@@ -1740,17 +1822,6 @@ onMounted(async () => {
   margin-top: 12px;
 }
 
-/* Sentinelle invisible (juste un peu de hauteur pour que l'IntersectionObserver
-   ait quelque chose a observer) : le texte n'est qu'un repli si jamais elle
-   reste visible plus que le temps d'un rendu (chargement quasi instantane,
-   les donnees sont deja en memoire cote client, voir loadMore). */
-.load-more-sentinel {
-  padding: 14px 0;
-  text-align: center;
-  color: var(--text-faint);
-  font-size: 12px;
-}
-
 /* Montant de la 2e partie (modale de division) : lecture seule, calcule a
    partir du montant total et de la 1ere partie (voir secondAmount) — meme
    gabarit qu'un champ input pour rester aligne avec les autres champs du
@@ -1770,5 +1841,187 @@ onMounted(async () => {
   color: var(--coral);
   font-size: 13px;
   margin-top: 12px;
+}
+
+/* -----------------------------------------------------------------------
+   HomeBank — itération 2 : écran Transactions
+   Refonte de présentation uniquement : aucun changement aux filtres,
+   événements, appels API, édition inline ou pagination.
+   ----------------------------------------------------------------------- */
+.transactions-page .page-header {
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.transactions-page .page-header h1 {
+  letter-spacing: -0.035em;
+}
+
+.transactions-toolbar {
+  align-items: flex-end;
+  gap: 14px;
+  padding: 16px;
+  margin: 0 0 14px;
+  background: var(--ink-900);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.transactions-toolbar .form-field {
+  min-width: 150px;
+}
+
+.transactions-toolbar .form-field select,
+.transactions-toolbar .form-field input {
+  min-height: 38px;
+}
+
+.transactions-toolbar .form-field:has(#tx-search) {
+  min-width: 230px;
+  flex: 1 1 260px;
+}
+
+.transactions-toolbar #tx-search {
+  width: 100%;
+  min-width: 0 !important;
+}
+
+.transactions-toolbar .toolbar-divider {
+  align-self: stretch;
+  margin: 2px 3px 0;
+  background: var(--line-strong);
+}
+
+.transactions-toolbar .toolbar-actions {
+  gap: 7px;
+}
+
+.transactions-toolbar .toolbar-actions .btn {
+  min-height: 36px;
+  white-space: nowrap;
+}
+
+.transactions-toolbar .chip {
+  min-height: 34px;
+  background: var(--surface-sunken);
+}
+
+.transactions-toolbar .chip.active {
+  background: var(--brand);
+  color: var(--brand-text);
+}
+
+.transactions-page .table-scroll {
+  border-color: var(--line-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.transactions-page .transactions-table {
+  font-size: 13px;
+  border-spacing: 0;
+}
+
+.transactions-page .transactions-table thead th {
+  height: 43px;
+  padding: 10px 8px;
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .055em;
+  text-transform: none;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.transactions-page .transactions-table tbody td {
+  padding: 10px 11px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 1.45;
+  vertical-align: middle;
+}
+
+.transactions-page .transactions-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.transactions-page .transactions-table tbody tr:hover td {
+  background: var(--row-hover);
+}
+
+.transactions-page .transactions-table tbody tr.row-selected td,
+.transactions-page .transactions-table tbody tr.row-selected:hover td {
+  background: var(--row-selected);
+}
+
+.transactions-page .transactions-table tbody tr.row-editing td {
+  background: var(--row-editing);
+}
+
+.transactions-page .transactions-table td.amount {
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: -.015em;
+}
+
+
+.transactions-page .scroll-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 0 4px;
+}
+
+.transactions-page .text-hint {
+  color: var(--text-muted);
+}
+
+@media (max-width: 1180px) {
+  .transactions-toolbar {
+    align-items: stretch;
+  }
+  .transactions-toolbar .toolbar-divider {
+    display: none;
+  }
+  .transactions-toolbar .toolbar-actions {
+    flex: 1 1 100%;
+    align-self: auto;
+  }
+  .transactions-toolbar .form-field:has(#tx-search) {
+    flex: 1 1 240px;
+  }
+}
+
+@media (max-width: 700px) {
+  .transactions-page .page-header {
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .transactions-toolbar {
+    padding: 12px;
+    gap: 10px;
+  }
+  .transactions-toolbar .form-field,
+  .transactions-toolbar .form-field:has(#tx-search) {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .transactions-toolbar .toolbar-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .transactions-toolbar .toolbar-actions .btn {
+    white-space: normal;
+  }
+  .bulk-bar {
+    left: 50%;
+    bottom: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .bulk-separator { display: none; }
 }
 </style>

@@ -9,6 +9,13 @@
 
     <TransactionsSubNav />
 
+    <div v-if="loading" class="empty-state" role="status">Analyse des transactions en cours…</div>
+    <div v-else-if="loadError" class="empty-state" role="alert">
+      <p>Impossible de charger les doublons. Tes transactions n'ont pas été modifiées.</p>
+      <button class="btn secondary" type="button" @click="load">Réessayer</button>
+    </div>
+
+    <template v-else>
     <div v-if="certainGroups.length" class="duplicate-section">
       <h2 class="duplicate-section-title">Doublons certains ({{ certainGroups.length }})</h2>
       <div class="duplicate-section-subtitle">Même compte, date, montant et tiers (ou même identifiant fourni par la banque) — les occurrences sont interchangeables.</div>
@@ -181,8 +188,9 @@
     </div>
 
     <div v-if="!certainGroups.length && !probableGroups.length && !reimbursementGroups.length" class="empty-state">
-      🎉 Aucun doublon détecté pour l'instant.
+      Aucun doublon détecté pour l'instant.
     </div>
+    </template>
   </div>
 </template>
 
@@ -209,11 +217,16 @@
  */
 import { ref, computed, onMounted } from 'vue'
 import { TransactionsAPI, PayeesAPI } from '../services/api'
+import { notify, askText } from '../services/feedback'
+import { alertApiError } from '../services/errors'
 import { dataStore } from '../services/dataStore'
 import { formatAmount, formatDate } from '../services/format'
+import { matchesPatternField } from '../services/payee'
 import TransactionsSubNav from './TransactionsSubNav.vue'
 
 const groups = ref([])
+const loading = ref(false)
+const loadError = ref(false)
 const certainGroups = computed(() => groups.value.filter(g => g.certain))
 const probableGroups = computed(() => groups.value.filter(g => !g.certain && !g.reimbursement))
 const reimbursementGroups = computed(() => groups.value.filter(g => g.reimbursement))
@@ -262,7 +275,16 @@ function deleteLabel(group) {
 }
 
 async function load() {
-  groups.value = await TransactionsAPI.duplicates()
+  loading.value = true
+  loadError.value = false
+  try {
+    groups.value = await TransactionsAPI.duplicates()
+  } catch (error) {
+    loadError.value = true
+    alertApiError('Erreur lors du chargement des doublons', error)
+  } finally {
+    loading.value = false
+  }
 }
 
 /**
@@ -280,6 +302,13 @@ async function removeDuplicates(group) {
   try {
     await Promise.all(idsToRemove.map(id => TransactionsAPI.remove(id)))
     await dataStore.refreshTransactions()
+    notify(`${idsToRemove.length} doublon(s) supprimé(s).`)
+    await load()
+  } catch (error) {
+    alertApiError('Erreur lors de la suppression des doublons', error)
+    // Promise.all peut échouer après une suppression partielle : resynchronise
+    // malgré tout l'écran pour ne pas afficher un état périmé.
+    await dataStore.refreshTransactions().catch(() => {})
     await load()
   } finally {
     removingGroupKey.value = null
@@ -295,7 +324,10 @@ async function markGroupNotDuplicate(group) {
   markingGroupKey.value = group.transactions[0].id
   try {
     await TransactionsAPI.markNotDuplicate(group.transactions.map(t => t.id))
+    notify('Groupe marqué comme non doublon.')
     await load()
+  } catch (error) {
+    alertApiError('Erreur lors du marquage', error)
   } finally {
     markingGroupKey.value = null
   }
@@ -311,7 +343,10 @@ async function markSingleNotDuplicate(transaction) {
   markingId.value = transaction.id
   try {
     await TransactionsAPI.markNotDuplicate([transaction.id])
+    notify('Transaction marquée comme non doublon.')
     await load()
+  } catch (error) {
+    alertApiError('Erreur lors du marquage', error)
   } finally {
     markingId.value = null
   }
@@ -332,6 +367,11 @@ async function removeReimbursementGroup(group) {
   try {
     await Promise.all(group.transactions.map(t => TransactionsAPI.remove(t.id)))
     await dataStore.refreshTransactions()
+    notify(`${group.transactions.length} transactions supprimées.`)
+    await load()
+  } catch (error) {
+    alertApiError('Erreur lors de la suppression', error)
+    await dataStore.refreshTransactions().catch(() => {})
     await load()
   } finally {
     removingGroupKey.value = null
@@ -349,56 +389,29 @@ async function removeReimbursementGroup(group) {
  */
 async function removeSingle(transaction, group) {
   removingId.value = transaction.id
+  let deleted = false
   try {
     await TransactionsAPI.remove(transaction.id)
-    await suggestPatternUpdate(transaction, group)
-    await dataStore.refreshTransactions()
-    await load()
+    deleted = true
+    notify('Transaction supprimée.')
+    try {
+      await suggestPatternUpdate(transaction, group)
+    } catch (error) {
+      alertApiError('Transaction supprimée, mais le motif du tiers n’a pas pu être mis à jour', error)
+    }
+  } catch (error) {
+    alertApiError('Erreur lors de la suppression', error)
   } finally {
+    if (deleted) {
+      try {
+        await dataStore.refreshTransactions()
+        await load()
+      } catch (error) {
+        alertApiError('Transaction supprimée, mais le rafraîchissement a échoué', error)
+      }
+    }
     removingId.value = null
   }
-}
-
-/** Echappe les caracteres speciaux regex, sauf l'etoile (gardee comme joker). */
-function escapeRegexChars(s) {
-  return s.replace(/[.+?^${}()|[\]\\]/g, String.raw`\$&`)
-}
-
-/** Convertit un seul motif "joker" (avec *) en expression reguliere JS equivalente (miroir de ServiceTiers#wildcardToRegex). */
-function wildcardToRegex(wildcardPattern) {
-  return wildcardPattern
-    .split('*')
-    .map(part => (part ? escapeRegexChars(part) : ''))
-    .join('.*')
-}
-
-/** Miroir de ServiceTiers#normalizeWhitespace. */
-function normalizeWhitespace(s) {
-  return s == null ? s : s.trim().replace(/\s+/g, ' ')
-}
-
-/**
- * Teste si le champ "pattern" (un ou plusieurs motifs separes par ";")
- * correspond deja au texte donne — miroir cote frontend de
- * ServiceTiers#matchesPatternField, pour eviter de proposer d'ajouter un
- * libelle deja reconnu par le motif existant (ex : motif "SOCARES" reconnaissant
- * deja "SOCARES 10.06.2026").
- */
-function matchesPatternField(patternField, text) {
-  if (!patternField || !patternField.trim() || !text || !text.trim()) return false
-  const normalizedText = normalizeWhitespace(text)
-  for (const rawPart of patternField.split(';')) {
-    const part = normalizeWhitespace(rawPart)
-    if (!part) continue
-    const wildcarded = part.includes('*') ? part : `*${part}*`
-    try {
-      const regex = new RegExp(wildcardToRegex(wildcarded), 'i')
-      if (regex.test(normalizedText)) return true
-    } catch {
-      // motif invalide : ignore, comme cote backend
-    }
-  }
-  return false
 }
 
 /**
@@ -408,12 +421,12 @@ function matchesPatternField(patternField, text) {
  * le libelle de la transaction supprimee (ex : prelevement mensuel dont la
  * reference bancaire change chaque mois), il sera directement reconnu comme
  * ce tiers au lieu de recreer le meme doublon. Si le motif actuel reconnait
- * deja ce libelle (voir matchesPatternField), rien n'est propose : ce serait
+ * deja ce libelle (voir matchesPatternField dans services/payee.js), rien n'est propose : ce serait
  * une entree redondante (ex : motif "SOCARES" reconnaissant deja "SOCARES
- * 10.06.2026"). Sinon, le prompt affiche le motif actuel du tiers, modifiable
+ * 10.06.2026"). Sinon, la fenêtre de saisie affiche le motif actuel du tiers, modifiable
  * directement (ex : pour le raccourcir avant d'ajouter la nouvelle entree) ;
  * le libelle de la transaction supprimee est ensuite ajoute a la fin du
- * motif ainsi edite. Annuler le prompt ne modifie rien.
+ * motif ainsi edite. Annuler la saisie ne modifie rien.
  */
 async function suggestPatternUpdate(deletedTransaction, group) {
   const kept = group?.transactions.find(t => t.id !== deletedTransaction.id && t.payeeId)
@@ -424,11 +437,12 @@ async function suggestPatternUpdate(deletedTransaction, group) {
   const newEntry = (deletedTransaction.payee || '').trim()
   if (!newEntry || matchesPatternField(payee.pattern, newEntry)) return
 
-  const editedPattern = window.prompt(
-    `Motif du tiers "${payee.name}" — modifie-le si besoin (le libellé de la transaction supprimée sera ajouté à la fin) :`,
-    payee.pattern || ''
+  const editedPattern = await askText(
+    `Motif du tiers « ${payee.name} ». Le libellé de la transaction supprimée sera ajouté à la fin.`,
+    payee.pattern || '',
+    { title: 'Mettre à jour le motif du tiers', placeholder: 'Motif de reconnaissance' }
   )
-  if (editedPattern === null) return // prompt annulé
+  if (editedPattern === null) return // saisie annulée
 
   const newPattern = [editedPattern.trim(), newEntry].filter(Boolean).join(';')
   if (!newPattern) return
@@ -567,7 +581,7 @@ onMounted(load)
 
 .duplicate-row-status {
   font-size: 11px;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: .04em;
   padding: 2px 8px;
   border-radius: 999px;

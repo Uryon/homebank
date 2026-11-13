@@ -24,33 +24,90 @@ const state = reactive({
     categories: false,
     payees: false,
     transactions: false
-  }
+  },
+  /**
+   * Dernier chargement complet en échec (serveur arrêté, réseau coupé...) :
+   * affiché par App.vue sous forme de bandeau avec « Réessayer », pour ne pas
+   * laisser les pages afficher des états vides trompeurs (« aucun compte »).
+   */
+  loadFailed: false
 })
+
+/** Met à jour loadFailed selon l'issue d'un chargement complet, sans changer son résultat. */
+function trackLoad(promise) {
+  return promise.then(
+    result => {
+      state.loadFailed = false
+      return result
+    },
+    error => {
+      state.loadFailed = true
+      throw error
+    }
+  )
+}
 
 let prefetchPromise = null
 
+/**
+ * « Dernier lancé gagne », par ressource. Deux chargements d'une même
+ * ressource peuvent se croiser (ex : revalidation de fond refreshAll au
+ * montage d'une page, puis refreshTransactions juste après une suppression) :
+ * sans ce garde-fou, la réponse la plus ANCIENNE arrivée en dernier écrasait
+ * l'état frais (une transaction supprimée réapparaissait). Une réponse
+ * dépassée n'est jamais appliquée, et son appelant attend la plus récente,
+ * pour que l'état soit à jour quand sa promesse se résout.
+ */
+const latestLoad = {}
+
+function loadLatest(key, fetcher, apply) {
+  const entry = { promise: null }
+  latestLoad[key] = entry
+  const superseded = () => latestLoad[key] !== entry
+  entry.promise = fetcher().then(
+    data => {
+      if (superseded()) return latestLoad[key].promise
+      apply(data)
+    },
+    error => {
+      // Une requête dépassée qui échoue n'a plus d'importance : seule
+      // l'issue de la plus récente compte.
+      if (superseded()) return latestLoad[key].promise
+      throw error
+    }
+  )
+  return entry.promise
+}
+
 /** Comptes et soldes toujours rechargés ensemble : la sidebar (App.vue) et
  * la page Comptes affichent les deux côte à côte. */
-async function loadAccounts() {
-  const [accounts, balances] = await Promise.all([AccountsAPI.list(), AccountsAPI.balances()])
-  state.accounts = accounts
-  state.balances = balances
-  state.loaded.accounts = true
+function loadAccounts() {
+  return loadLatest('accounts', () => Promise.all([AccountsAPI.list(), AccountsAPI.balances()]), ([accounts, balances]) => {
+    state.accounts = accounts
+    state.balances = balances
+    state.loaded.accounts = true
+  })
 }
 
-async function loadCategories() {
-  state.categories = await CategoriesAPI.list()
-  state.loaded.categories = true
+function loadCategories() {
+  return loadLatest('categories', () => CategoriesAPI.list(), categories => {
+    state.categories = categories
+    state.loaded.categories = true
+  })
 }
 
-async function loadPayees() {
-  state.payees = await PayeesAPI.list()
-  state.loaded.payees = true
+function loadPayees() {
+  return loadLatest('payees', () => PayeesAPI.list(), payees => {
+    state.payees = payees
+    state.loaded.payees = true
+  })
 }
 
-async function loadTransactions() {
-  state.transactions = await TransactionsAPI.list()
-  state.loaded.transactions = true
+function loadTransactions() {
+  return loadLatest('transactions', () => TransactionsAPI.list(), transactions => {
+    state.transactions = transactions
+    state.loaded.transactions = true
+  })
 }
 
 /**
@@ -73,12 +130,12 @@ async function loadTransactionsAndBalances() {
  */
 function prefetch() {
   if (!prefetchPromise) {
-    prefetchPromise = Promise.all([
+    prefetchPromise = trackLoad(Promise.all([
       loadAccounts(),
       loadCategories(),
       loadPayees(),
       loadTransactions()
-    ]).catch(e => {
+    ])).catch(e => {
       // Sans ce reset, un premier prefetch en echec (backend pas encore
       // demarre, reseau coupe...) laisserait prefetchPromise memoise sur une
       // promesse rejetee pour toujours : ensureLoaded() la renverrait telle
@@ -103,12 +160,12 @@ function ensureLoaded() {
 
 /** Revalide tout le cache en arriere-plan (sans bloquer l'affichage courant). */
 function refreshAll() {
-  return Promise.all([
+  return trackLoad(Promise.all([
     loadAccounts(),
     loadCategories(),
     loadPayees(),
     loadTransactions()
-  ])
+  ]))
 }
 
 export const dataStore = {

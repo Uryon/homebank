@@ -7,10 +7,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.util.Optional;
-
 public interface DepotTiers extends JpaRepository<Tiers, Long> {
-    Optional<Tiers> findByNameIgnoreCase(String name);
 
     /**
      * Reaffecte en masse la categorie par defaut des tiers qui pointaient

@@ -28,3 +28,49 @@ export function findPayeeByName(payeeIndex, name, amount) {
   }
   return candidates.find(p => p.amount == null) || candidates[0]
 }
+
+/**
+ * Découpe le motif de reconnaissance d'un tiers en ses segments (séparés par
+ * ";", voir ServiceTiers#matchesPatternField côté backend), espaces multiples
+ * réduits comme au moment de la comparaison, segments vides ignorés.
+ */
+export function splitPatternSegments(pattern) {
+  if (!pattern) return []
+  return pattern
+    .split(';')
+    .map(segment => segment.trim().replace(/\s+/g, ' '))
+    .filter(Boolean)
+}
+
+/** Échappe les caractères spéciaux d'une expression régulière, sauf l'étoile (gardée comme joker). */
+function escapeRegexChars(text) {
+  return text.replace(/[.+?^${}()|[\]\\]/g, String.raw`\$&`)
+}
+
+/** Motif « joker » (avec *) converti en expression régulière (miroir de ServiceTiers#wildcardToRegex). */
+function wildcardToRegex(wildcardPattern) {
+  return wildcardPattern
+    .split('*')
+    .map(part => (part ? escapeRegexChars(part) : ''))
+    .join('.*')
+}
+
+/**
+ * Le motif d'un tiers (un ou plusieurs segments séparés par « ; ») reconnaît-il
+ * ce libellé ? Miroir de ServiceTiers#matchesPatternField côté backend : un
+ * segment sans étoile est cherché n'importe où dans le libellé (« contient »),
+ * sans tenir compte de la casse ni des espaces multiples ; un segment avec
+ * étoile est un motif avancé (ex : « Carrefour*Paris »).
+ */
+export function matchesPatternField(patternField, text) {
+  if (!text || !text.trim()) return false
+  const normalizedText = text.trim().replace(/\s+/g, ' ')
+  return splitPatternSegments(patternField).some(segment => {
+    const wildcarded = segment.includes('*') ? segment : `*${segment}*`
+    try {
+      return new RegExp(wildcardToRegex(wildcarded), 'i').test(normalizedText)
+    } catch {
+      return false // motif invalide : ignoré, comme côté backend
+    }
+  })
+}

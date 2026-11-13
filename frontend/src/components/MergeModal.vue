@@ -1,6 +1,6 @@
 <template>
   <div class="modal-overlay" @click.self="$emit('cancel')">
-    <div class="modal">
+    <div v-dialog="() => $emit('cancel')" class="modal" role="dialog" aria-modal="true">
       <h2>{{ title }}</h2>
       <p v-if="description" class="merge-description">{{ description }}</p>
 

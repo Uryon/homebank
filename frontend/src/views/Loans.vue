@@ -1,11 +1,11 @@
 <template>
-  <div>
+  <div class="loans-page">
     <div class="page-header">
       <div>
         <h1>Prêts</h1>
         <div class="subtitle">Suivi du capital restant dû et de l'échéancier d'amortissement</div>
       </div>
-      <button class="btn" @click="openCreate">+ Nouveau prêt</button>
+      <button class="btn" @click="openCreate"><Icon name="plus" size="sm" /> Nouveau prêt</button>
     </div>
 
     <div v-if="loans.length" class="card-grid loan-grid">
@@ -16,33 +16,36 @@
         :class="{ active: selectedId === l.id }"
         @click="select(l.id)"
       >
-        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-          <div>
+        <div class="loan-head">
+          <div class="loan-title">
             <div class="stat-label">{{ l.name }}</div>
-            <div class="stat-value amount">{{ formatAmount(l.currentRemainingBalance) }}</div>
-            <div class="text-muted" style="font-size: 12px;">capital restant dû</div>
+            <div class="stat-value"><Money :value="Number(l.currentRemainingBalance)" /></div>
+            <div class="loan-sub">capital restant dû</div>
           </div>
-          <div @click.stop>
-            <button class="btn secondary" style="padding: 6px 10px;" @click="openEdit(l)">✎</button>
-            <button class="btn danger" style="padding: 6px 10px;" @click="remove(l)">✕</button>
+          <div class="hover-actions" @click.stop>
+            <button class="icon-btn" title="Modifier le prêt" :aria-label="'Modifier ' + l.name" @click="openEdit(l)"><Icon name="edit" /></button>
+            <button class="icon-btn danger" title="Supprimer le prêt" :aria-label="'Supprimer ' + l.name" @click="remove(l)"><Icon name="trash" /></button>
           </div>
         </div>
 
-        <div class="loan-owned">
-          <span class="amount positive">{{ formatAmount(ownedAmount(l)) }}</span>
-          <span class="text-muted"> vous appartiennent déjà ({{ ownedPercent(l) }}% du capital)</span>
+        <div class="loan-progress-head">
+          <span>Remboursé</span>
+          <strong>{{ ownedPercent(l) }} %</strong>
         </div>
-
-        <div class="loan-progress">
+        <div class="loan-progress" role="progressbar" :aria-valuenow="ownedPercent(l)" aria-valuemin="0" aria-valuemax="100" :aria-label="'Capital remboursé : ' + ownedPercent(l) + ' %'">
           <div class="loan-progress-bar" :style="{ width: progressPercent(l) + '%' }"></div>
         </div>
-
-        <div class="loan-meta">
-          <div><span class="text-muted">Mensualité</span><br />{{ formatAmount(totalMonthly(l)) }}</div>
-          <div><span class="text-muted">Taux</span><br />{{ l.annualRate }} %</div>
-          <div><span class="text-muted">Fin prévue</span><br />{{ formatDate(l.payoffDate) }}</div>
-          <div><span class="text-muted">Intérêts totaux</span><br />{{ formatAmount(l.totalInterest) }}</div>
+        <div class="loan-owned">
+          <span class="amount positive">{{ formatAmount(ownedAmount(l)) }}</span>
+          <span class="text-muted"> vous appartiennent déjà</span>
         </div>
+
+        <dl class="loan-meta">
+          <div><dt>Mensualité</dt><dd>{{ formatAmount(totalMonthly(l)) }}</dd></div>
+          <div><dt>Taux</dt><dd>{{ formatRate(l.annualRate) }}</dd></div>
+          <div><dt>Fin prévue</dt><dd>{{ formatDate(l.payoffDate) }}</dd></div>
+          <div><dt>Intérêts totaux</dt><dd>{{ formatAmount(l.totalInterest) }}</dd></div>
+        </dl>
       </div>
     </div>
 
@@ -53,7 +56,7 @@
     <!-- Detail du pret selectionne : graphique + echeancier -->
     <div v-if="selectedLoan" class="card" style="margin-top: 20px;">
       <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 8px;">
-        <div class="stat-label" style="margin-bottom: 0;">
+        <div class="card-title" style="margin-bottom: 0;">
           Évolution du capital restant dû — {{ selectedLoan.name }}
         </div>
         <div style="font-size: 13px;">
@@ -65,7 +68,7 @@
     </div>
 
     <div v-if="selectedLoan" class="card" style="margin-top: 20px;">
-      <div class="stat-label" style="margin-bottom: 16px;">Tableau d'amortissement</div>
+      <div class="card-title" style="margin-bottom: 16px;">Tableau d'amortissement</div>
       <div class="table-scroll loan-schedule-scroll" ref="scheduleScroll">
         <table class="plain-table loan-schedule-table">
           <thead>
@@ -103,7 +106,7 @@
 
     <!-- Modal creation/edition -->
     <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
-      <div class="modal">
+      <div v-dialog="() => (showModal = false)" class="modal" role="dialog" aria-modal="true">
         <h2>{{ editing ? 'Modifier le prêt' : 'Nouveau prêt' }}</h2>
         <div class="form-grid">
           <div class="form-field" style="grid-column: span 2;">
@@ -149,11 +152,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick, watch } from 'vue'
+import { notify, askConfirm } from '../services/feedback'
+import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
 import { LoansAPI } from '../services/api'
-import { formatAmount } from '../services/format'
+import { formatAmount, formatRate, toLocalIsoDate } from '../services/format'
+import { alertApiError } from '../services/errors'
+import { areaGradient, axisOptions, readChartColors, tooltipOptions } from '../services/chartTheme'
+import { effectiveTheme } from '../services/theme'
 import AmountInput from '../components/AmountInput.vue'
+import Icon from '../components/Icon.vue'
+import Money from '../components/Money.vue'
 
 const loans = ref([])
 const selectedId = ref(null)
@@ -166,7 +175,24 @@ const form = ref(emptyForm())
 const balanceChart = ref(null)
 const scheduleScroll = ref(null)
 let balanceChartInstance = null
+
+// Instance Chart.js liberee en quittant la page (sinon conservee par le
+// registre de Chart.js, avec son observateur de redimensionnement, a chaque visite).
+onBeforeUnmount(() => {
+  balanceChartInstance?.destroy()
+  balanceChartInstance = null
+})
 let currentRowNode = null
+
+const tickFormatter = new Intl.NumberFormat('fr-FR')
+
+// Couleurs du canvas lues au dessin (voir services/chartTheme.js) : on
+// redessine au changement de thème, système compris.
+watch(effectiveTheme, async () => {
+  if (!schedule.value.length) return
+  await nextTick()
+  renderChart()
+})
 
 function emptyForm() {
   return {
@@ -174,7 +200,7 @@ function emptyForm() {
     principal: 0,
     annualRate: 0,
     termMonths: 240,
-    startDate: new Date().toISOString().slice(0, 10),
+    startDate: toLocalIsoDate(),
     monthlyPayment: 0,
     monthlyInsurance: null,
     notes: ''
@@ -243,13 +269,29 @@ function setRowRef(row, el) {
 }
 
 function scrollToCurrentRow() {
-  if (currentRowNode) {
-    currentRowNode.scrollIntoView({ block: 'center' })
+  // Défilement limité au conteneur du tableau : scrollIntoView() faisait aussi
+  // défiler toute la page, et masquait les cartes de prêts en haut.
+  const container = scheduleScroll.value
+  if (currentRowNode && container) {
+    container.scrollTop = currentRowNode.offsetTop - container.clientHeight / 2 + currentRowNode.clientHeight / 2
   }
 }
 
 function select(id) {
   selectedId.value = id
+}
+
+/** Libellé de l'axe pour l'échéance d'index donné : l'année si elle ouvre une année retenue, sinon rien. */
+function yearTickLabel(index) {
+  const rows = schedule.value
+  const year = Number(rows[index]?.date?.slice(0, 4))
+  if (!year) return ''
+  const previousYear = index > 0 ? Number(rows[index - 1].date.slice(0, 4)) : null
+  if (previousYear === year) return ''
+  const firstYear = Number(rows[0].date.slice(0, 4))
+  const lastYear = Number(rows[rows.length - 1].date.slice(0, 4))
+  const step = Math.max(1, Math.ceil((lastYear - firstYear + 1) / 12))
+  return (year - firstYear) % step === 0 ? String(year) : ''
 }
 
 /**
@@ -259,6 +301,7 @@ function select(id) {
  */
 function renderChart() {
   if (!balanceChart.value) return
+  const colors = readChartColors()
   const presentIndex = schedule.value.findIndex(r => !r.paid)
   const splitIndex = presentIndex === -1 ? schedule.value.length - 1 : presentIndex
 
@@ -274,24 +317,26 @@ function renderChart() {
         {
           label: 'Remboursé',
           data: pastData,
-          borderColor: '#1F9D6C',
-          backgroundColor: 'rgba(31, 157, 108, 0.10)',
+          borderColor: colors.positive,
+          backgroundColor: areaGradient(colors.positive, 0.22),
           fill: true,
           tension: 0.2,
           pointRadius: 0,
-          borderWidth: 2,
+          borderWidth: 2.5,
+          pointHoverRadius: 5,
           spanGaps: false
         },
         {
           label: 'Restant à rembourser',
           data: futureData,
-          borderColor: '#3B6FE0',
-          backgroundColor: 'rgba(59, 111, 224, 0.06)',
+          borderColor: colors.accent,
+          backgroundColor: areaGradient(colors.accent, 0.14),
           borderDash: [6, 5],
           fill: true,
           tension: 0.2,
           pointRadius: 0,
-          borderWidth: 2,
+          borderWidth: 2.5,
+          pointHoverRadius: 5,
           spanGaps: false
         }
       ]
@@ -301,7 +346,9 @@ function renderChart() {
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
-        tooltip: {
+        tooltip: tooltipOptions(colors, {
+          boxPadding: 4,
+          usePointStyle: true,
           callbacks: {
             label: (ctx) => `${ctx.dataset.label} : ${formatAmount(ctx.parsed.y)}`,
             // Meme stat que l'encart "vous appartiennent aujourd'hui" en
@@ -316,11 +363,13 @@ function renderChart() {
               return `Vous appartient à cette échéance : ${formatAmount(owned)}`
             }
           }
-        }
+        })
       },
       scales: {
-        x: { grid: { color: '#E2E6EE' }, ticks: { color: '#67707C', maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
-        y: { grid: { color: '#E2E6EE' }, ticks: { color: '#67707C' } }
+        // Axe : seulement les années (date complète dans l'infobulle), à la
+        // première échéance de chaque année retenue — au plus ~12 repères.
+        x: axisOptions(colors, { ticks: { maxRotation: 0, autoSkip: false, callback: (_value, index) => yearTickLabel(index) } }),
+        y: axisOptions(colors, { withGrid: true, ticks: { callback: (v) => tickFormatter.format(v) } })
       }
     }
   })
@@ -349,42 +398,77 @@ function openEdit(loan) {
 
 async function save() {
   if (!form.value.name.trim()) {
-    alert('Le nom du prêt est obligatoire.')
+    notify('Le nom du prêt est obligatoire.', 'warning')
     return
   }
   if (!form.value.principal || !form.value.termMonths || !form.value.monthlyPayment) {
-    alert('Capital, durée et mensualité sont obligatoires.')
+    notify('Capital, durée et mensualité sont obligatoires.', 'warning')
     return
   }
-  if (editing.value) {
-    await LoansAPI.update(editing.value.id, form.value)
-  } else {
-    const created = await LoansAPI.create(form.value)
-    selectedId.value = created.id
+  try {
+    if (editing.value) {
+      await LoansAPI.update(editing.value.id, form.value)
+    } else {
+      const created = await LoansAPI.create(form.value)
+      selectedId.value = created.id
+    }
+    showModal.value = false
+    notify(editing.value ? 'Prêt modifié.' : 'Prêt créé.', 'success')
+    await loadLoans()
+    // Si le pret modifie est celui actuellement affiche, on rafraichit aussi
+    // son echeancier (les parametres ont pu changer : taux, mensualite...).
+    if (selectedId.value) await loadSchedule(selectedId.value)
+  } catch (e) {
+    alertApiError('Erreur lors de l’enregistrement du prêt', e)
   }
-  showModal.value = false
-  await loadLoans()
-  // Si le pret modifie est celui actuellement affiche, on rafraichit aussi
-  // son echeancier (les parametres ont pu changer : taux, mensualite...).
-  if (selectedId.value) await loadSchedule(selectedId.value)
 }
 
 async function remove(loan) {
-  if (!confirm(`Supprimer le prêt "${loan.name}" ?`)) return
-  await LoansAPI.remove(loan.id)
-  if (selectedId.value === loan.id) selectedId.value = null
-  await loadLoans()
+  if (!(await askConfirm(`Supprimer le prêt "${loan.name}" ?`))) return
+  try {
+    await LoansAPI.remove(loan.id)
+    notify('Prêt supprimé.', 'success')
+    if (selectedId.value === loan.id) selectedId.value = null
+    await loadLoans()
+  } catch (e) {
+    alertApiError('Erreur lors de la suppression du prêt', e)
+  }
 }
 
-watch(selectedId, (id) => {
-  if (id) loadSchedule(id)
-  else schedule.value = []
+watch(selectedId, async (id) => {
+  if (!id) {
+    schedule.value = []
+    return
+  }
+  try {
+    await loadSchedule(id)
+  } catch (e) {
+    schedule.value = []
+    alertApiError('Impossible de charger le tableau d’amortissement', e)
+  }
 })
 
-onMounted(loadLoans)
+onMounted(async () => {
+  try {
+    await loadLoans()
+  } catch (e) {
+    alertApiError('Impossible de charger les prêts', e)
+  }
+})
 </script>
 
 <style scoped>
+.loans-page .page-header { margin-bottom: 22px; }
+.loans-page .loan-card { background: var(--ink-900); border: 1px solid var(--line); box-shadow: var(--shadow-card); padding: 20px; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+.loans-page .loan-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.loans-page .loan-card.active { border-color: var(--azure); box-shadow: 0 0 0 3px var(--azure-dim); }
+.loans-page .loan-card .stat-value { font-size: 25px; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.loans-page .loan-meta { padding-top: 13px; border-top: 1px solid var(--line); }
+.loans-page .loan-progress-bar { border-radius: 999px; }
+.loans-page > .card { border: 1px solid var(--line); box-shadow: var(--shadow-card); }
+.loans-page .loan-schedule-table thead th { background: var(--surface-sunken); color: var(--text-muted); font-size: 12.5px; font-weight: 600; text-transform: none; }
+.loans-page .loan-schedule-table tbody td { padding-top: 11px; padding-bottom: 11px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.loans-page .row-current { background: var(--azure-dim); box-shadow: inset 3px 0 0 var(--azure); }
 .loan-grid {
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
 }
@@ -395,16 +479,21 @@ onMounted(loadLoans)
 .loan-card.active {
   border-color: var(--azure);
 }
-.loan-owned {
-  font-size: 13px;
-  margin: 6px 0 10px;
-}
+.loan-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.loan-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+.loan-progress-head { display: flex; justify-content: space-between; margin-top: 18px; font-size: 13px; color: var(--text-muted); }
+.loan-progress-head strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.loan-owned { font-size: 13px; margin: 0 0 14px; }
+.loan-meta dt { font-size: 12.5px; color: var(--text-muted); }
+.loan-meta dd { margin: 2px 0 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.loan-meta { margin: 0; }
+.card-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-primary); }
 .loan-progress {
   height: 6px;
   border-radius: 999px;
-  background: var(--ink-800);
+  background: var(--ink-700);
   overflow: hidden;
-  margin: 14px 0;
+  margin: 8px 0 10px;
 }
 .loan-progress-bar {
   height: 100%;
@@ -417,6 +506,7 @@ onMounted(loadLoans)
   font-size: 13px;
 }
 .loan-schedule-scroll {
+  position: relative;
   max-height: 420px;
   overflow-y: auto;
 }

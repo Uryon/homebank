@@ -218,6 +218,16 @@ public class TestDataSeeder implements CommandLineRunner {
         lastImport.setDateHeure(LocalDateTime.now(ZoneId.systemDefault()).minusHours(3));
         lastImportRepository.save(lastImport);
 
+        // --- Compte archive (voir ServiceCompte#ensureNotArchived) : ancien
+        // compte clos, solde a zero, dont l'historique reste consultable mais
+        // qui n'accepte plus de nouvelle transaction et n'apparait plus dans
+        // la sidebar ni dans les listes de saisie.
+        Compte ancienCompte = account("Ancien compte joint", TypeCompte.CHECKING, new BigDecimal("45.00"));
+        transaction(new TransactionCore(ancienCompte, today.withDayOfMonth(1).minusMonths(6).plusDays(11), new BigDecimal("-45.00")),
+                "Le Bistrot", "Dîner", restaurant, ModePaiement.CARD, true, false);
+        ancienCompte.setArchived(true);
+        accountRepository.save(ancienCompte);
+
         log.info("Données de démonstration chargées : {} comptes, {} catégories, {} tiers, {} transactions, {} prêt(s).",
                 accountRepository.count(), categoryRepository.count(), payeeRepository.count(),
                 transactionRepository.count(), loanRepository.count());

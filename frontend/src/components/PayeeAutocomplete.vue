@@ -13,7 +13,7 @@
       @keydown.down.prevent="moveHighlight(1)"
       @keydown.up.prevent="moveHighlight(-1)"
       @keydown.enter.prevent="selectHighlighted"
-      @keydown.esc="closeDropdown"
+      @keydown.esc="onEscape"
       @blur="closeDropdown"
     />
 
@@ -133,6 +133,17 @@ function closeDropdown() {
   highlightedIndex.value = -1
 }
 
+/**
+ * Échap ferme d'abord la liste visible, sans remonter au parent (sinon elle
+ * annulait aussi l'édition de la ligne ou fermait la fenêtre). Liste déjà
+ * fermée : Échap remonte normalement.
+ */
+function onEscape(event) {
+  if (!open.value || !visibleOptions.value.length) return
+  event.stopPropagation()
+  closeDropdown()
+}
+
 function handleInput() {
   emit('update:modelValue', query.value)
   open.value = true
@@ -186,7 +197,7 @@ defineExpose({ focus: () => inputEl.value?.focus() })
   background: var(--ink-900);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 20px rgba(23, 32, 46, 0.14);
+  box-shadow: var(--shadow-popover);
 }
 .payee-autocomplete-option {
   padding: 8px 12px;

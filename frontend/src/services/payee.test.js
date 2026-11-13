@@ -1,5 +1,20 @@
 import { describe, it, expect } from 'vitest'
-import { findPayeeByName } from './payee'
+import { findPayeeByName, matchesPatternField, splitPatternSegments } from './payee'
+
+describe('splitPatternSegments', () => {
+  it('découpe un motif multiple en segments', () => {
+    expect(splitPatternSegments('MCX DISTRI;Carrefour')).toEqual(['MCX DISTRI', 'Carrefour'])
+  })
+
+  it('réduit les espaces multiples et ignore les segments vides', () => {
+    expect(splitPatternSegments('  SumUp   Clavet ; ;KFC ')).toEqual(['SumUp Clavet', 'KFC'])
+  })
+
+  it('renvoie une liste vide pour un motif absent', () => {
+    expect(splitPatternSegments(null)).toEqual([])
+    expect(splitPatternSegments('')).toEqual([])
+  })
+})
 
 /** Construit une Map nom-normalise -> tableau de tiers, comme payeeByNormalizedName/payeeIndex. */
 function payeeIndex(payees) {
@@ -76,5 +91,35 @@ describe('findPayeeByName', () => {
 
     expect(findPayeeByName(index, 'Bouygues', null)).toBe(generique)
     expect(findPayeeByName(index, 'Bouygues', '')).toBe(generique)
+  })
+})
+
+describe('matchesPatternField', () => {
+  it('reconnaît un segment n’importe où dans le libellé, sans tenir compte de la casse', () => {
+    expect(matchesPatternField('SOCARES', 'Prlv socares 10.06.2026')).toBe(true)
+  })
+
+  it('accepte plusieurs segments séparés par « ; » (OU)', () => {
+    expect(matchesPatternField('FREE MOBILE;FREE TELECOM', 'PRLV FREE TELECOM 42')).toBe(true)
+    expect(matchesPatternField('FREE MOBILE;FREE TELECOM', 'ORANGE')).toBe(false)
+  })
+
+  it('ignore les espaces multiples, dans le motif comme dans le libellé', () => {
+    expect(matchesPatternField('SGC  TOURCOING', 'CB SGC   TOURCOING 12/03')).toBe(true)
+  })
+
+  it('traite l’étoile comme un joker, et seulement elle', () => {
+    expect(matchesPatternField('Carrefour*Paris', 'CARREFOUR MARKET PARIS 15')).toBe(true)
+    expect(matchesPatternField('Carrefour*Paris', 'CARREFOUR LILLE')).toBe(false)
+    // Le point est un caractère ordinaire, pas « n’importe quel caractère ».
+    expect(matchesPatternField('A.B', 'AXB')).toBe(false)
+    expect(matchesPatternField('A.B (X)', 'paiement A.B (X)')).toBe(true)
+  })
+
+  it('ne reconnaît rien avec un motif ou un libellé vide', () => {
+    expect(matchesPatternField('', 'Carrefour')).toBe(false)
+    expect(matchesPatternField(' ; ', 'Carrefour')).toBe(false)
+    expect(matchesPatternField(null, 'Carrefour')).toBe(false)
+    expect(matchesPatternField('Carrefour', '  ')).toBe(false)
   })
 })

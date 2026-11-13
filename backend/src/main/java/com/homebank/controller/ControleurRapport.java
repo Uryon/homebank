@@ -1,5 +1,10 @@
 package com.homebank.controller;
 
+import com.homebank.dto.AnalyseMensuelleDTO;
+import com.homebank.dto.DepenseParCategorieDTO;
+import com.homebank.dto.EpargneMensuelleDTO;
+import com.homebank.dto.PrevisionSoldeDTO;
+import com.homebank.dto.SynthesePeriodiqueDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.service.ServiceRapport;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -7,7 +12,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/reports")
@@ -20,7 +24,7 @@ public class ControleurRapport {
     }
 
     @GetMapping("/expenses-by-category")
-    public List<Map<String, Object>> expensesByCategory(
+    public List<DepenseParCategorieDTO> expensesByCategory(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
             @RequestParam(required = false) Long accountId) {
@@ -33,7 +37,7 @@ public class ControleurRapport {
      * dernier mois calendaire déjà terminé (comportement historique).
      */
     @GetMapping("/monthly-category-analysis")
-    public Map<String, Object> monthlyCategoryAnalysis(
+    public AnalyseMensuelleDTO monthlyCategoryAnalysis(
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate referenceMonth) {
         return reportService.monthlyCategoryAnalysis(accountId, referenceMonth);
@@ -41,7 +45,7 @@ public class ControleurRapport {
 
     /** Epargne mensuelle (revenus - depenses) sur les N derniers mois termines, jusqu'a referenceMonth inclus (omis = dernier mois calendaire deja termine). */
     @GetMapping("/monthly-savings")
-    public List<Map<String, Object>> monthlySavings(
+    public List<EpargneMensuelleDTO> monthlySavings(
             @RequestParam(required = false, defaultValue = "12") int months,
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate referenceMonth) {
@@ -55,7 +59,7 @@ public class ControleurRapport {
      * appliquee a la partie previsionnelle, voir ServiceRapport#balanceForecast).
      */
     @GetMapping("/balance-forecast")
-    public Map<String, Object> balanceForecast(
+    public PrevisionSoldeDTO balanceForecast(
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate referenceMonth) {
         return reportService.balanceForecast(accountId, referenceMonth);
@@ -63,7 +67,7 @@ public class ControleurRapport {
 
     /** Total des transactions marquees "depense periodique". */
     @GetMapping("/periodic-expenses")
-    public Map<String, Object> periodicExpenses() {
+    public SynthesePeriodiqueDTO periodicExpenses() {
         return reportService.periodicExpensesSummary();
     }
 

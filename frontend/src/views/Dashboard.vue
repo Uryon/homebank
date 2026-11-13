@@ -36,33 +36,49 @@
     </div>
 
     <div class="card-grid">
-      <div class="card">
+      <div class="card kpi">
         <div class="stat-label">Solde total</div>
-        <div class="stat-value" :class="totalBalance >= 0 ? 'positive amount' : 'negative amount'">
-          {{ formatAmount(totalBalance) }}
+        <div class="stat-value amount" :class="totalBalanceClass">
+          <Money :value="totalBalance" />
+        </div>
+        <div class="kpi-foot">
+          <span v-if="balanceDelta" class="kpi-delta" :class="balanceDelta.tone">{{ balanceDelta.text }}</span>
+          <Sparkline :values="balanceSeries" color="#E2A76B" />
         </div>
       </div>
-      <div class="card">
+      <div class="card kpi">
         <div class="stat-label">
           Revenus ({{ monthLabel }})
           <span v-if="summary.forecast" class="forecast-badge" title="Mois pas encore terminé : montant prévisionnel (moyenne des mois précédents)">Prévu</span>
         </div>
-        <div class="stat-value amount positive" :class="{ 'forecast-cell': summary.forecast }">{{ formatAmount(summary.income) }}</div>
+        <div class="stat-value amount positive" :class="{ 'forecast-cell': summary.forecast }"><Money :value="Number(summary.income)" /></div>
+        <div class="kpi-foot">
+          <span v-if="incomeDelta" class="kpi-delta" :class="incomeDelta.tone">{{ incomeDelta.text }}</span>
+          <Sparkline :values="kpiSeries.income" :color="sparkColor(incomeDelta)" />
+        </div>
       </div>
-      <div class="card">
+      <div class="card kpi">
         <div class="stat-label">
           Dépenses ({{ monthLabel }})
           <span v-if="summary.forecast" class="forecast-badge" title="Mois pas encore terminé : montant prévisionnel (moyenne des mois précédents)">Prévu</span>
         </div>
-        <div class="stat-value amount negative" :class="{ 'forecast-cell': summary.forecast }">{{ formatAmount(summary.expenses) }}</div>
+        <div class="stat-value amount negative" :class="{ 'forecast-cell': summary.forecast }"><Money :value="Number(summary.expenses)" /></div>
+        <div class="kpi-foot">
+          <span v-if="expensesDelta" class="kpi-delta" :class="expensesDelta.tone">{{ expensesDelta.text }}</span>
+          <Sparkline :values="kpiSeries.expenses" :color="sparkColor(expensesDelta)" />
+        </div>
       </div>
-      <div class="card">
+      <div class="card kpi">
         <div class="stat-label">
           Net ({{ monthLabel }})
           <span v-if="summary.forecast" class="forecast-badge" title="Mois pas encore terminé : montant prévisionnel (moyenne des mois précédents)">Prévu</span>
         </div>
         <div class="stat-value amount" :class="[summary.net >= 0 ? 'positive' : 'negative', { 'forecast-cell': summary.forecast }]">
-          {{ formatAmount(summary.net) }}
+          <Money :value="Number(summary.net)" />
+        </div>
+        <div class="kpi-foot">
+          <span v-if="netDelta" class="kpi-delta" :class="netDelta.tone">{{ netDelta.text }}</span>
+          <Sparkline :values="kpiSeries.net" :color="sparkColor(netDelta)" />
         </div>
       </div>
     </div>
@@ -70,23 +86,23 @@
     <!-- Liste des comptes : reservee a l'export PDF (masquee a l'ecran, ou la
          sidebar l'affiche deja — la sidebar est justement retiree du PDF, voir
          style.css). Compacte : 3 colonnes, une ligne par compte. -->
-    <div v-if="sortedAccounts.length" class="card accounts-print-card">
+    <div v-if="printedAccounts.length" class="card accounts-print-card">
       <div class="accounts-print-header">
         <span class="stat-label">Comptes</span>
-        <span class="accounts-print-count">{{ sortedAccounts.length }} {{ sortedAccounts.length > 1 ? 'comptes' : 'compte' }}</span>
+        <span class="accounts-print-count">{{ printedAccountsCountLabel }}</span>
       </div>
       <ul class="accounts-print-list">
-        <li v-for="a in sortedAccounts" :key="a.id" class="accounts-print-item">
-          <span class="accounts-print-dot" :class="a.type.toLowerCase()"></span>
-          <span class="accounts-print-name">{{ a.name }}</span>
-          <span class="accounts-print-balance amount" :class="(balances[a.id] ?? 0) >= 0 ? 'positive' : 'negative'">
-            {{ formatAmount(balances[a.id] ?? 0) }}
+        <li v-for="entry in printedAccounts" :key="entry.account.id" class="accounts-print-item">
+          <span class="accounts-print-dot" :class="entry.typeClass"></span>
+          <span class="accounts-print-name">{{ entry.account.name }}</span>
+          <span class="accounts-print-balance amount" :class="entry.balanceClass">
+            {{ entry.formattedBalance }}
           </span>
         </li>
       </ul>
     </div>
 
-    <div class="card forecast-card" style="margin-bottom: 20px;">
+    <div class="card forecast-card chart-card" style="margin-bottom: 20px;">
       <div class="chart-header">
         <div class="stat-label" style="margin-bottom: 0;">
           Évolution du solde — historique, présent &amp; prévisionnel
@@ -118,8 +134,8 @@
     </div>
 
     <div class="top-row-grid">
-      <div class="card compact-card savings-card">
-        <div class="stat-label" style="margin-bottom: 8px;">Épargne mensuelle (12 derniers mois)</div>
+      <div class="card compact-card savings-card chart-card">
+        <div class="card-title" style="margin-bottom: 8px;">Épargne mensuelle (12 derniers mois)</div>
         <div class="savings-chart-wrap">
           <canvas ref="savingsChart"></canvas>
         </div>
@@ -128,7 +144,7 @@
 
       <div class="periodic-grid">
         <div class="card compact-card">
-          <div class="stat-label" style="margin-bottom: 10px;">Dépenses périodiques</div>
+          <div class="card-title" style="margin-bottom: 10px;">Dépenses périodiques</div>
           <div v-if="periodicExpenses.expenses.items.length">
             <div class="periodic-table-wrap">
               <table class="plain-table">
@@ -164,7 +180,7 @@
         </div>
 
         <div class="card compact-card">
-          <div class="stat-label" style="margin-bottom: 10px;">Revenus périodiques</div>
+          <div class="card-title" style="margin-bottom: 10px;">Revenus périodiques</div>
           <div v-if="periodicExpenses.revenues.items.length">
             <div class="periodic-table-wrap">
               <table class="plain-table">
@@ -200,8 +216,8 @@
       </div>
     </div>
 
-    <div class="card compact-card" style="margin-bottom: 28px;">
-      <div class="stat-label" style="margin-bottom: 4px;">Où va mon argent ?</div>
+    <div class="card compact-card where-money-card" style="margin-bottom: 28px;">
+      <div class="card-title" style="margin-bottom: 4px;">Où va mon argent ?</div>
       <div style="color: var(--text-muted); font-size: 12px; margin-bottom: 12px;">
         Répartition des dépenses sur les 12 derniers mois (les virements entre comptes ne sont pas comptés).
       </div>
@@ -233,14 +249,14 @@
                     @mouseleave="onCellLeave">
                   {{ formatAmount(row.total) }}
                 </td>
-                <td class="num where-pct">{{ row.percentage }}%</td>
+                <td class="num where-pct">{{ formatShare(row.percentage) }}</td>
               </tr>
             </tbody>
             <tfoot>
               <tr>
                 <td>Total</td>
                 <td class="num amount negative">{{ formatAmount(whereMoneyTotal) }}</td>
-                <td class="num where-pct">100%</td>
+                <td class="num where-pct">{{ formatShare(100) }}</td>
               </tr>
             </tfoot>
           </table>
@@ -250,13 +266,13 @@
     </div>
 
     <div class="card monthly-analysis-card monthly-summary-card">
-      <div class="stat-label" style="margin-bottom: 4px;">Résumé mensuel — 12 derniers mois</div>
+      <div class="card-title" style="margin-bottom: 4px;">Résumé mensuel — 12 derniers mois</div>
       <div class="monthly-analysis-subtitle">
         Revenus, dépenses et solde par mois. Les 12 derniers mois entièrement terminés sont affichés<span v-if="hasForecastMonths">, complétés par un prévisionnel <em>(en italique)</em> sur les mois pas encore terminés</span>.
       </div>
 
       <div v-if="monthlyAnalysis" class="monthly-analysis-wrap">
-        <table class="monthly-analysis-table">
+        <table v-grid-nav class="monthly-analysis-table" aria-describedby="grid-nav-hint">
           <thead>
             <tr>
               <th class="category-sticky">Catégorie</th>
@@ -336,13 +352,13 @@
     </div>
 
     <div class="card monthly-analysis-card">
-      <div class="stat-label" style="margin-bottom: 4px;">Dépenses par catégorie — 12 derniers mois</div>
+      <div class="card-title" style="margin-bottom: 4px;">Dépenses par catégorie — 12 derniers mois</div>
       <div class="monthly-analysis-subtitle">
         Évolution mensuelle par catégorie et sous-catégorie. Les 12 derniers mois entièrement terminés sont affichés<span v-if="hasForecastMonths">, complétés par un prévisionnel <em>(en italique)</em> sur les mois pas encore terminés</span>.
       </div>
 
       <div v-if="monthlyAnalysis" class="monthly-analysis-wrap">
-        <table class="monthly-analysis-table">
+        <table v-grid-nav class="monthly-analysis-table" aria-describedby="grid-nav-hint">
           <thead>
             <tr>
               <th class="category-sticky">Catégorie</th>
@@ -438,13 +454,13 @@
     </div>
 
     <div class="card monthly-analysis-card">
-      <div class="stat-label" style="margin-bottom: 4px;">Revenus par catégorie — 12 derniers mois</div>
+      <div class="card-title" style="margin-bottom: 4px;">Revenus par catégorie — 12 derniers mois</div>
       <div class="monthly-analysis-subtitle">
         Évolution mensuelle par catégorie et sous-catégorie. Les 12 derniers mois entièrement terminés sont affichés<span v-if="hasForecastMonths">, complétés par un prévisionnel <em>(en italique)</em> sur les mois pas encore terminés</span>.
       </div>
 
       <div v-if="monthlyAnalysis" class="monthly-analysis-wrap">
-        <table class="monthly-analysis-table">
+        <table v-grid-nav class="monthly-analysis-table" aria-describedby="grid-nav-hint">
           <thead>
             <tr>
               <th class="category-sticky">Catégorie</th>
@@ -539,6 +555,10 @@
       <div v-else class="empty-state">Chargement de l'analyse mensuelle…</div>
     </div>
 
+    <p id="grid-nav-hint" class="sr-only">
+      Flèches pour passer d'un montant à l'autre ; le détail des transactions s'affiche pour le montant sélectionné, Échap pour le fermer.
+    </p>
+
     <CellTransactionsPopover
       :visible="hover.visible"
       :loading="hover.loading"
@@ -554,13 +574,28 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, nextTick } from 'vue'
-import { AccountsAPI, ReportsAPI, LoansAPI, ExportAPI } from '../services/api'
+import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch } from 'vue'
+import { effectiveTheme } from '../services/theme'
+import { areaGradient, axisOptions, readChartColors, tooltipOptions } from '../services/chartTheme'
+import { ReportsAPI, LoansAPI, ExportAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { formatAmount } from '../services/format'
+import { accountBalanceRows, accountCountLabel, amountToneClass, computeNetWorth, sortAccountsForDisplay } from '../services/accounts'
 import { alertApiError } from '../services/errors'
 import CellTransactionsPopover from '../components/CellTransactionsPopover.vue'
 import Chart from 'chart.js/auto'
+import Money from '../components/Money.vue'
+import Sparkline from '../components/Sparkline.vue'
+import {
+  analysisGroup,
+  anomalyClass,
+  balanceChangeOverPeriod,
+  buildLoanOwnedSeries,
+  last12MonthsRange,
+  mergeRowsByPayee,
+  monthDelta,
+  monthRange
+} from '../services/dashboardAnalysis'
 
 // Categories issues du cache partage (voir App.vue / dataStore.js), uniquement
 // pour resoudre l'icone (emoji) a afficher devant chaque nom de categorie
@@ -575,8 +610,38 @@ function iconPrefix(categoryId) {
   return icon ? `${icon} ` : ''
 }
 
-const accounts = ref([])
-const balances = ref({})
+// --- Chiffres clés : séries pour les courbes miniatures + variations ---
+const balanceSeries = ref([])
+const kpiSeries = computed(() => {
+  const rows = monthlyAnalysis.value?.summary || []
+  return {
+    income: rows.map(m => Number(m.income)),
+    expenses: rows.map(m => Number(m.expenses)),
+    net: rows.map(m => Number(m.net))
+  }
+})
+const shareFormatter = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 1 })
+
+/** Part en pourcentage reçue du backend (ex : 24.6) affichée à la française : « 24,6 % ». */
+function formatShare(percentage) {
+  return shareFormatter.format(Number(percentage || 0) / 100)
+}
+
+/** La courbe prend la couleur de la variation (bonne nouvelle = vert, mauvaise = rouge), pas celle de la nature du chiffre : une baisse des dépenses doit se lire comme positive. */
+function sparkColor(delta) {
+  if (!delta) return 'var(--text-faint)'
+  return delta.tone === 'good' ? 'var(--chart-positive)' : 'var(--chart-negative)'
+}
+const incomeDelta = computed(() => monthDelta(kpiSeries.value.income, true))
+const expensesDelta = computed(() => monthDelta(kpiSeries.value.expenses, false))
+const netDelta = computed(() => monthDelta(kpiSeries.value.net, true))
+const balanceDelta = computed(() => balanceChangeOverPeriod(balanceSeries.value, '12 mois'))
+
+// Comptes et soldes lus dans le cache partagé (même source que le
+// « Patrimoine net » de la barre latérale, rafraîchi après chaque
+// modification) plutôt que rechargés à chaque visite du tableau de bord.
+const accounts = computed(() => dataStore.state.accounts)
+const balances = computed(() => dataStore.state.balances)
 const summary = ref({ income: 0, expenses: 0, net: 0 })
 const monthLabel = ref('')
 const periodicExpenses = ref({ expenses: { items: [], total: 0 }, revenues: { items: [], total: 0 } })
@@ -614,6 +679,20 @@ async function exportDashboard() {
 const chartDisplayMode = ref('combined')
 let lastForecastPoints = []
 let lastLoanOwnedSeries = null
+let lastSavingsPoints = []
+
+/**
+ * Les couleurs des graphiques sont lues dans les variables CSS au moment du
+ * dessin (voir services/chartTheme.js) : on redessine donc les graphiques
+ * déjà affichés au changement de thème, y compris quand le système bascule.
+ */
+watch(effectiveTheme, async () => {
+  if (!lastForecastPoints.length) return
+  await nextTick()
+  renderForecastChart(lastForecastPoints, lastLoanOwnedSeries)
+  renderSavingsChart(lastSavingsPoints)
+  renderWhereMoneyChart(whereMoneyData.value)
+})
 
 function toggleChartMode() {
   chartDisplayMode.value = chartDisplayMode.value === 'combined' ? 'separate' : 'combined'
@@ -650,35 +729,6 @@ function positionFromEvent(event) {
   const rect = event.currentTarget.getBoundingClientRect()
   const x = Math.max(8, Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - 12))
   return { x, y: rect.bottom + 6 }
-}
-
-/**
- * Fusionne les lignes qui partagent le meme tiers en une seule (montant
- * additionne, date la plus recente conservee) : sert surtout a recombiner
- * les tranches d'une transaction annualisee (voir ServiceRapport#attributedTransactions),
- * qui remontent sinon comme autant de lignes distinctes (une par mois de la
- * fenetre de 12 mois couverte par la cellule survolee, meme id de
- * transaction a chaque fois) pour ce qui est en realite UNE seule depense/
- * revenu. Les lignes sans tiers ne sont jamais fusionnees entre elles
- * (souvent des virements ou cas ponctuels sans rapport les uns aux autres).
- */
-function mergeRowsByPayee(rows) {
-  const merged = new Map()
-  const withoutPayee = []
-  for (const row of rows) {
-    if (!row.payee) {
-      withoutPayee.push(row)
-      continue
-    }
-    const existing = merged.get(row.payee)
-    if (existing) {
-      existing.amount += Number(row.amount)
-      if (row.date > existing.date) existing.date = row.date
-    } else {
-      merged.set(row.payee, { ...row, amount: Number(row.amount) })
-    }
-  }
-  return [...merged.values(), ...withoutPayee]
 }
 
 /**
@@ -746,14 +796,6 @@ function onCellLeave() {
   scheduleHide()
 }
 
-/** Decoupe une cle de mois "YYYY-MM-01" en plage [debut, fin] de ce mois (calcul en local, sans passer par Date(string) qui parse en UTC). */
-function monthRange(monthKey) {
-  const [year, month] = monthKey.split('-').map(Number)
-  const lastDay = new Date(year, month, 0)
-  const to = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`
-  return { from: monthKey, to }
-}
-
 function fetchCellTransactions(from, to, flow, filters = {}) {
   return ReportsAPI.cellTransactions({ from, to, flow: flow || undefined, ...filters })
 }
@@ -789,18 +831,19 @@ function periodicGroupRows(group, sign) {
   return Promise.resolve(group.items.map(item => periodicItemRow(item, sign)))
 }
 
-const PALETTE = ['#1F9D6C', '#D64545', '#3B6FE0', '#C98A1B', '#8B6FE0', '#2CA8C9', '#D6559A', '#6FAF2C']
+// Palette catégorielle (8 teintes distinguables, y compris pour les daltoniens),
+// volontairement sans vert/rouge « sémantiques » : une catégorie n'est ni un gain ni une perte.
+const PALETTE = ['#3E63DD', '#F76B15', '#12A594', '#D6409F', '#8E4EC6', '#00A2C7', '#E5A400', '#7B8794']
+const SMALL_TICK_FONT = { family: 'Inter, sans-serif', size: 10 }
+const fmtTick = new Intl.NumberFormat('fr-FR')
 
-const totalBalance = computed(() =>
-    Object.values(balances.value).reduce((sum, v) => sum + Number(v), 0)
-)
-
-// Meme tri que la sidebar (App.vue) : comptes courants en tete, le reste dans
-// l'ordre recu de l'API. Tous les comptes (archives compris), comme la sidebar
-// et le "Solde total" : la liste somme ainsi exactement au total affiche.
-const sortedAccounts = computed(() =>
-    [...accounts.value].sort((a, b) => (a.type === 'CHECKING' ? 0 : 1) - (b.type === 'CHECKING' ? 0 : 1))
-)
+// Mêmes calculs partagés que la sidebar (services/accounts.js). Tous les
+// comptes, archivés compris (en fin de liste) : la liste imprimée somme ainsi
+// exactement au « Solde total » affiché.
+const totalBalance = computed(() => computeNetWorth(accounts.value, balances.value))
+const totalBalanceClass = computed(() => amountToneClass(totalBalance.value))
+const printedAccounts = computed(() => accountBalanceRows(sortAccountsForDisplay(accounts.value), balances.value))
+const printedAccountsCountLabel = computed(() => accountCountLabel(printedAccounts.value.length))
 
 // Instance creee une seule fois, comme amountFormatter dans services/format.js :
 // construire un Intl.NumberFormat a chaque appel est couteux.
@@ -850,92 +893,13 @@ function goToCurrentMonth() {
   loadMonthlyReports()
 }
 
-/** 12 mois pleins se terminant a monthStart inclus, utilise par "Où va mon argent ?" (aligne sur le meme mois que le reste du tableau de bord, plutot qu'une fenetre glissante figee sur aujourd'hui). */
-function last12MonthsRange(monthStart) {
-  const from = new Date(monthStart.getFullYear(), monthStart.getMonth() - 11, 1)
-  const to = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0)
-  return { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) }
-}
-
 const whereMoneyTotal = computed(() =>
   whereMoneyData.value.reduce((sum, row) => sum + Number(row.total || 0), 0)
 )
 
-/**
- * Regroupe les lignes plates (categorie/sous-categorie) renvoyees par
- * monthlyCategoryAnalysis en groupes racine + enfants, avec des totaux/
- * moyennes recalcules par groupe (une racine sans transaction directe
- * affiche quand meme le total de ses sous-categories).
- */
-/** Tri alphabetique francais par `name`, partage par analysisGroup ci-dessous (groupes et sous-categories). */
-function byNameFr(a, b) {
-  return String(a.name).localeCompare(String(b.name), 'fr')
-}
-
-/** Cle de regroupement d'une ligne "categorie/mois" (voir analysisGroup) : par categorie racine, elle-meme ou celle de son parent. */
-function rootGroupKey(row) {
-  return row.parentId != null ? `parent-${row.parentId}` : `category-${row.categoryId ?? 'uncategorized'}`
-}
-
-function zeroValuesFor(months) {
-  return Object.fromEntries(months.map(m => [m.key, 0]))
-}
-
-/** Cumule les valeurs mensuelles (et total/moyenne) de source dans target — utilise pour agreger une racine ou ses sous-categories dans son groupe (voir analysisGroup). */
-function addRowValues(target, source, months) {
-  for (const month of months) {
-    target.values[month.key] = Number(target.values[month.key] || 0) + Number(source.values[month.key] || 0)
-  }
-  target.total = Object.values(target.values).reduce((sum, value) => sum + Number(value || 0), 0)
-  target.average = months.length ? target.total / months.length : 0
-}
-
-/** Nouveau groupe vierge (valeurs a zero) pour la categorie racine de row (voir analysisGroup). */
-function newAnalysisGroup(row, months) {
-  return {
-    key: rootGroupKey(row),
-    name: row.parentId != null ? row.parentName : row.name,
-    // Categorie racine (elle-meme, ou celle dont ce groupe reunit les
-    // sous-categories) pour retrouver au survol les transactions de tout
-    // le groupe via rootCategoryId (voir groupCategoryFilter/ServiceRapport#cellTransactions).
-    categoryId: row.parentId != null ? row.parentId : row.categoryId,
-    uncategorized: row.parentId == null && row.categoryId == null,
-    values: zeroValuesFor(months),
-    total: 0,
-    average: 0,
-    children: []
-  }
-}
-
-function analysisGroup(rows) {
-  const months = monthlyAnalysis.value?.months || []
-  const groups = new Map()
-
-  for (const row of rows || []) {
-    const rootKey = rootGroupKey(row)
-    if (!groups.has(rootKey)) groups.set(rootKey, newAnalysisGroup(row, months))
-    const group = groups.get(rootKey)
-
-    if (row.parentId != null) {
-      group.children.push(row)
-    } else {
-      // Les transactions directement affectées à la catégorie racine sont
-      // intégrées au total du groupe.
-      addRowValues(group, row, months)
-    }
-  }
-
-  // Un parent qui n'a que des sous-catégories doit quand même afficher leur total.
-  for (const group of groups.values()) {
-    for (const child of group.children) addRowValues(group, child, months)
-    group.children.sort(byNameFr)
-  }
-
-  return Array.from(groups.values()).sort(byNameFr)
-}
-
-const incomeGroups = computed(() => analysisGroup(monthlyAnalysis.value?.income || []))
-const expenseGroups = computed(() => analysisGroup(monthlyAnalysis.value?.expenses || []))
+const analysisMonths = computed(() => monthlyAnalysis.value?.months || [])
+const incomeGroups = computed(() => analysisGroup(monthlyAnalysis.value?.income || [], analysisMonths.value))
+const expenseGroups = computed(() => analysisGroup(monthlyAnalysis.value?.expenses || [], analysisMonths.value))
 
 const monthLabelByKey = computed(() =>
   new Map((monthlyAnalysis.value?.months || []).map(m => [m.key, m.label]))
@@ -946,50 +910,6 @@ function monthLabelFor(key) {
 
 /** Vrai si la fenêtre de 12 mois affichée contient au moins un mois prévisionnel (voir monthlyAnalysis.months[].forecast) : en navigant vers le futur avec les flèches, pas seulement en vue par défaut. */
 const hasForecastMonths = computed(() => (monthlyAnalysis.value?.months || []).some(m => m.forecast))
-
-/**
- * Ecart (en ecarts-types) au-dela duquel une case mensuelle est signalee
- * comme anomalie par rapport a la moyenne de sa ligne. 1.5 remontait beaucoup
- * trop de mois (environ 1 valeur sur 7 depasse deja ce seuil dans une
- * distribution normale) ; 2.5 ne retient que les ecarts vraiment marques.
- */
-const ANOMALY_STDDEV_THRESHOLD = 2.5
-
-/** En dessous de ce nombre de mois avec une valeur non nulle, l'ecart-type n'est pas assez fiable pour signaler une anomalie. */
-const ANOMALY_MIN_NONZERO_MONTHS = 4
-
-/** Moyenne et ecart-type (population) d'un tableau de valeurs numeriques. */
-function meanStdDev(values) {
-  const nums = values.map(Number)
-  const mean = nums.reduce((sum, v) => sum + v, 0) / (nums.length || 1)
-  const variance = nums.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (nums.length || 1)
-  return { mean, stdDev: Math.sqrt(variance) }
-}
-
-/**
- * Signale (classe "monthly-anomaly") une case dont la valeur s'ecarte de plus
- * de ANOMALY_STDDEV_THRESHOLD ecarts-types de la moyenne des `rowValues`
- * (les valeurs des 12 mois de la meme ligne) — met en evidence les mois
- * atypiques (depense inhabituelle, revenu exceptionnel...) au premier coup
- * d'œil.
- *
- * Les mois a 0 (categorie pas utilisee ce mois-la) sont exclus du calcul de
- * la moyenne/ecart-type : sinon, sur une categorie utilisee occasionnellement,
- * les nombreux mois a 0 tirent la moyenne vers le bas et n'importe quel mois
- * avec une depense normale ressort comme "anomalie" — alors que ces mois a 0
- * sont deja mis en evidence separement (classe "zero-value"). Une valeur
- * elle-meme nulle n'est jamais signalee. Aucune case signalee si la ligne est
- * quasi constante (stdDev nul) ou si trop peu de mois ont une valeur pour
- * qu'un ecart-type soit fiable (voir ANOMALY_MIN_NONZERO_MONTHS).
- */
-function anomalyClass(value, rowValues) {
-  if (!Number(value)) return {}
-  const nonZero = rowValues.map(Number).filter(Boolean)
-  if (nonZero.length < ANOMALY_MIN_NONZERO_MONTHS) return {}
-  const { mean, stdDev } = meanStdDev(nonZero)
-  if (!stdDev) return {}
-  return { 'monthly-anomaly': Math.abs(Number(value) - mean) / stdDev > ANOMALY_STDDEV_THRESHOLD }
-}
 
 /** Valeurs mensuelles des lignes Revenus/Depenses/Solde du tableau "Resume mensuel", pour anomalyClass. */
 const summaryRowValues = computed(() => {
@@ -1009,17 +929,27 @@ function isMonthlyGroupCollapsed(type, key) {
 }
 
 async function loadDashboard() {
-  accounts.value = await AccountsAPI.list()
-  balances.value = await AccountsAPI.balances()
-
   // "Dépenses périodiques" ne depend pas du mois navigue (voir plus haut :
   // toujours la derniere occurrence connue, dans l'esprit "abonnement actif
   // ou non aujourd'hui"), donc charge une seule fois ici plutot que dans
-  // loadMonthlyReports.
-  periodicExpenses.value = await ReportsAPI.periodicExpenses()
+  // loadMonthlyReports. Appels independants : lances en parallele.
+  try {
+    const [periodic] = await Promise.all([
+      ReportsAPI.periodicExpenses(),
+      dataStore.ensureLoaded()
+    ])
+    periodicExpenses.value = periodic
+  } catch (e) {
+    alertApiError('Erreur lors du chargement du tableau de bord', e)
+  }
 
   await loadMonthlyReports()
 }
+
+// Jeton du dernier chargement mensuel lance : en cliquant plusieurs fois
+// vite sur les fleches, une reponse plus ancienne arrivee en dernier
+// affichait sinon les chiffres d'un autre mois que celui du libelle.
+let monthlyReportsToken = 0
 
 /**
  * Recharge tout ce qui depend du mois navigue (viewedMonthStart, voir les
@@ -1030,6 +960,7 @@ async function loadDashboard() {
  * decale ensemble sur le meme mois.
  */
 async function loadMonthlyReports() {
+  const token = ++monthlyReportsToken
   monthLabel.value = monthLabelOf(viewedMonthStart.value)
   // "YYYY-MM-01" : meme mois que les cartes du haut, transmis aux rapports
   // en fenetre glissante de 12 mois pour qu'ils se terminent sur ce mois.
@@ -1040,13 +971,21 @@ async function loadMonthlyReports() {
     const schedules = await Promise.all(loansList.map(l => LoansAPI.schedule(l.id)))
     return { loansList, schedules }
   })
-  const [forecast, savings, whereMoney, monthly, { loansList, schedules }] = await Promise.all([
-    ReportsAPI.balanceForecast({ referenceMonth }),
-    ReportsAPI.monthlySavings({ months: 12, referenceMonth }),
-    ReportsAPI.expensesByCategory(whereMoneyRange.value),
-    ReportsAPI.monthlyCategoryAnalysis({ referenceMonth }),
-    loansPromise
-  ])
+  let reports
+  try {
+    reports = await Promise.all([
+      ReportsAPI.balanceForecast({ referenceMonth }),
+      ReportsAPI.monthlySavings({ months: 12, referenceMonth }),
+      ReportsAPI.expensesByCategory(whereMoneyRange.value),
+      ReportsAPI.monthlyCategoryAnalysis({ referenceMonth }),
+      loansPromise
+    ])
+  } catch (e) {
+    if (token === monthlyReportsToken) alertApiError('Erreur lors du chargement des rapports', e)
+    return
+  }
+  if (token !== monthlyReportsToken) return
+  const [forecast, savings, whereMoney, monthly, { loansList, schedules }] = reports
   // Les 3 cartes du haut reprennent le dernier mois de monthlyAnalysis.summary
   // (toujours exactement le mois affiche, voir referenceMonth ci-dessus) plutot
   // qu'un appel separe a /reports/summary : ce mois-la est deja previsionnel
@@ -1057,50 +996,17 @@ async function loadMonthlyReports() {
   monthlyAnalysis.value = monthly
   hasLoans.value = loansList.length > 0
   monthlyTrend.value = Number(forecast.monthlyTrend)
+  balanceSeries.value = forecast.points.filter(p => p.type !== 'previsionnel').map(p => Number(p.balance))
 
   await nextTick()
+  if (token !== monthlyReportsToken) return
   renderForecastChart(forecast.points, buildLoanOwnedSeries(forecast.points, loansList, schedules))
   renderSavingsChart(savings)
   renderWhereMoneyChart(whereMoneyData.value)
 }
 
 /**
- * Capital des prets deja rembourse (= vous appartient), mois par mois, aligne
- * sur les points du graphique "Evolution du solde" (12 mois historiques +
- * 12 mois previsionnels). Contrairement au solde, cette serie n'a rien
- * d'incertain : l'echeancier d'un pret a taux fixe est connu a l'avance, donc
- * pas de distinction historique/previsionnel necessaire ici, juste une somme
- * sur tous les prets pour chaque mois. Retourne null si l'utilisateur n'a
- * aucun pret, pour ne pas ajouter une ligne a plat inutile au graphique.
- */
-function buildLoanOwnedSeries(points, loansList, schedules) {
-  if (!loansList.length) return null
-
-  const perLoan = loansList.map((loan, i) => {
-    const rows = schedules[i]?.rows || []
-    const byMonth = new Map(rows.map(r => [r.date.slice(0, 7), Number(r.remainingBalance)]))
-    return {
-      principal: Number(loan.principal || 0),
-      byMonth,
-      firstMonth: rows.length ? rows[0].date.slice(0, 7) : null,
-      lastMonth: rows.length ? rows[rows.length - 1].date.slice(0, 7) : null
-    }
-  })
-
-  return points.map(p => {
-    const monthKey = p.date.slice(0, 7)
-    let owned = 0
-    for (const loan of perLoan) {
-      if (!loan.firstMonth || monthKey < loan.firstMonth) continue // pret pas encore commence
-      if (monthKey > loan.lastMonth) { owned += loan.principal; continue } // deja solde
-      owned += loan.principal - (loan.byMonth.get(monthKey) ?? 0)
-    }
-    return owned
-  })
-}
-
-/**
- * Couleur commune a toutes les portions "previsionnel" des courbes du
+ * Couleur commune (--chart-forecast) a toutes les portions "previsionnel" des courbes du
  * tableau de bord : gris neutre, plutot qu'une teinte plus claire de la
  * couleur "reelle" de chaque serie (essaye d'abord, voir historique du
  * fichier) — a l'echelle fine d'une ligne de graphique, un simple
@@ -1113,16 +1019,7 @@ function buildLoanOwnedSeries(points, loansList, schedules) {
  * distinguables par leur trajectoire, et surtout par le trait plein de
  * meme couleur juste avant, dont ils prolongent directement la courbe.
  */
-const FORECAST_COLOR = '#9AA3B5'
 
-/** Couleur hexadecimale -> rgba() avec une opacite donnee, pour les remplissages sous les courbes. */
-function hexToRgba(hex, alpha) {
-  const n = Number.parseInt(hex.slice(1), 16)
-  const r = (n >> 16) & 0xff
-  const g = (n >> 8) & 0xff
-  const b = n & 0xff
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`
-}
 
 /**
  * Construit, pour une serie de valeurs, la paire de datasets Chart.js
@@ -1138,8 +1035,7 @@ function hexToRgba(hex, alpha) {
  * (voir plugins.legend.labels.filter plus bas) : une seule entree par serie
  * logique, pas une par dataset Chart.js.
  */
-function pastFutureDatasets(label, data, junctionIndex, color) {
-  const futureColor = FORECAST_COLOR
+function pastFutureDatasets(label, data, junctionIndex, color, futureColor) {
   const pastData = data.map((v, i) => (i <= junctionIndex ? v : null))
   const futureData = data.map((v, i) => (i >= junctionIndex ? v : null))
   const pointRadiusAtJunction = (ctx) => (ctx.dataIndex === junctionIndex ? 4 : 0)
@@ -1149,7 +1045,7 @@ function pastFutureDatasets(label, data, junctionIndex, color) {
       label,
       data: pastData,
       borderColor: color,
-      backgroundColor: hexToRgba(color, 0.10),
+      backgroundColor: areaGradient(color, 0.2),
       fill: true,
       tension: 0.25,
       pointRadius: pointRadiusAtJunction,
@@ -1162,7 +1058,7 @@ function pastFutureDatasets(label, data, junctionIndex, color) {
       isForecastVariant: true,
       data: futureData,
       borderColor: futureColor,
-      backgroundColor: hexToRgba(futureColor, 0.10),
+      backgroundColor: areaGradient(futureColor, 0.14),
       borderDash: [6, 5],
       fill: true,
       tension: 0.25,
@@ -1196,17 +1092,19 @@ function renderForecastChart(points, loanOwnedSeries) {
   const junctionIndex = firstForecastIndex === -1 ? points.length - 1 : firstForecastIndex - 1
 
   const showSeparate = !!loanOwnedSeries && chartDisplayMode.value === 'separate'
+  const colors = readChartColors()
 
   const datasets = showSeparate
     ? [
-        ...pastFutureDatasets('Solde', points.map(p => Number(p.balance)), junctionIndex, '#5B4FCF'),
-        ...pastFutureDatasets('Capital des prêts', loanOwnedSeries.map(Number), junctionIndex, '#C98A1B')
+        ...pastFutureDatasets('Solde', points.map(p => Number(p.balance)), junctionIndex, colors.accent, colors.forecast),
+        ...pastFutureDatasets('Capital des prêts', loanOwnedSeries.map(Number), junctionIndex, colors.secondary, colors.forecast)
       ]
     : pastFutureDatasets(
         'Solde',
         points.map((p, i) => Number(p.balance) + (loanOwnedSeries ? Number(loanOwnedSeries[i]) : 0)),
         junctionIndex,
-        '#5B4FCF'
+        colors.accent,
+        colors.forecast
       )
 
   const tooltipLabel = showSeparate
@@ -1242,10 +1140,18 @@ function renderForecastChart(points, loanOwnedSeries) {
           // des prets), pas une par dataset Chart.js : le dataset
           // "previsionnel" (voir pastFutureDatasets) est exclu.
           labels: {
+            usePointStyle: true,
+            pointStyle: 'circle',
+            boxWidth: 8,
+            boxHeight: 8,
+            padding: 18,
+            color: colors.legend,
+            font: { family: 'Inter, sans-serif', size: 11, weight: '600' },
             filter: (legendItem, data) => !data.datasets[legendItem.datasetIndex]?.isForecastVariant
           }
         },
-        tooltip: {
+        tooltip: tooltipOptions(colors, {
+          displayColors: true,
           // Au point de jonction, le dataset "previsionnel" porte
           // volontairement la meme valeur que le dataset "reel" (voir
           // pastFutureDatasets, pour que les deux segments se rejoignent
@@ -1257,11 +1163,11 @@ function renderForecastChart(points, loanOwnedSeries) {
           callbacks: {
             label: tooltipLabel
           }
-        }
+        })
       },
       scales: {
-        x: { grid: { color: '#E2E6EE' }, ticks: { color: '#67707C', maxRotation: 0, autoSkip: true } },
-        y: { grid: { color: '#E2E6EE' }, ticks: { color: '#67707C' } }
+        x: axisOptions(colors, { ticks: { maxRotation: 0, autoSkip: true, font: SMALL_TICK_FONT } }),
+        y: axisOptions(colors, { withGrid: true, ticks: { padding: 10, callback: (v) => fmtTick.format(v) } })
       }
     }
   })
@@ -1269,12 +1175,14 @@ function renderForecastChart(points, loanOwnedSeries) {
 
 /**
  * Barres épargne mensuelle : vert si positif (on a épargné), rouge si négatif
- * (on a puisé dans le solde) — gris (FORECAST_COLOR, même teinte que le
+ * (on a puisé dans le solde) — gris (--chart-forecast, même teinte que le
  * prévisionnel du graphique de solde et des tableaux) pour un mois pas
  * encore terminé (p.forecast, voir ServiceRapport#monthlySavings), peu
  * importe son signe : ce n'est jamais une vraie valeur constatée.
  */
 function renderSavingsChart(points) {
+  lastSavingsPoints = points
+  const colors = readChartColors()
   if (savingsChartInstance) savingsChartInstance.destroy()
   savingsChartInstance = new Chart(savingsChart.value, {
     type: 'bar',
@@ -1283,7 +1191,7 @@ function renderSavingsChart(points) {
       datasets: [{
         label: 'Épargne',
         data: points.map(p => p.savings),
-        backgroundColor: points.map(p => (p.forecast ? FORECAST_COLOR : (Number(p.savings) >= 0 ? '#1F9D6C' : '#D64545'))),
+        backgroundColor: points.map(p => (p.forecast ? colors.forecast : (Number(p.savings) >= 0 ? colors.positive : colors.negative))),
         borderRadius: 4,
         maxBarThickness: 34
       }]
@@ -1296,15 +1204,17 @@ function renderSavingsChart(points) {
       maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        tooltip: {
+        tooltip: tooltipOptions(colors, {
+          padding: 11,
+          displayColors: false,
           callbacks: {
             label: (ctx) => formatAmount(ctx.parsed.y) + (points[ctx.dataIndex].forecast ? ' (prévisionnel)' : '')
           }
-        }
+        })
       },
       scales: {
-        x: { grid: { display: false }, ticks: { color: '#67707C', maxRotation: 0, autoSkip: true } },
-        y: { grid: { color: '#E2E6EE' }, ticks: { color: '#67707C' } }
+        x: axisOptions(colors, { ticks: { maxRotation: 0, autoSkip: true, font: SMALL_TICK_FONT } }),
+        y: axisOptions(colors, { withGrid: true, ticks: { padding: 9, font: SMALL_TICK_FONT } })
       }
     }
   })
@@ -1319,6 +1229,7 @@ function renderSavingsChart(points) {
 function renderWhereMoneyChart(data) {
   if (whereMoneyChart) whereMoneyChart.destroy()
   if (!whereMoneyCanvas.value || !data.length) return
+  const colors = readChartColors()
   whereMoneyChart = new Chart(whereMoneyCanvas.value, {
     type: 'doughnut',
     data: {
@@ -1326,33 +1237,126 @@ function renderWhereMoneyChart(data) {
       datasets: [{
         data: data.map(d => d.total),
         backgroundColor: data.map((_, i) => PALETTE[i % PALETTE.length]),
-        borderColor: '#FFFFFF',
-        borderWidth: 2
+        // Séparation entre les parts = couleur de la carte (claire ou sombre selon le thème)
+        borderColor: colors.surface,
+        borderWidth: 3,
+        hoverOffset: 5,
+        spacing: 2
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: true,
-      cutout: '72%',
+      cutout: '74%',
       plugins: {
         legend: { display: false },
-        tooltip: {
+        tooltip: tooltipOptions(colors, {
+          padding: 11,
+          displayColors: true,
           callbacks: {
             label: (ctx) => {
               const row = data[ctx.dataIndex]
-              return ` ${row.category} : ${formatAmount(row.total)} (${row.percentage}%)`
+              return ` ${row.category} : ${formatAmount(row.total)} (${formatShare(row.percentage)})`
             }
           }
-        }
+        })
       }
     }
   })
 }
 
 onMounted(loadDashboard)
+
+/**
+ * Nettoyage en quittant le tableau de bord : sans lui, chaque visite laissait
+ * 3 instances Chart.js vivantes (registre interne + observateurs de
+ * redimensionnement sur des canvas detaches), les minuteurs du popover
+ * pouvaient se declencher apres coup, et un chargement encore en vol tentait
+ * de dessiner sur des canvas qui n'existent plus.
+ */
+onBeforeUnmount(() => {
+  monthlyReportsToken++
+  requestToken++
+  clearTimeout(showTimer)
+  clearTimeout(hideTimer)
+  for (const chart of [forecastChartInstance, savingsChartInstance, whereMoneyChart]) chart?.destroy()
+  forecastChartInstance = null
+  savingsChartInstance = null
+  whereMoneyChart = null
+})
 </script>
 
 <style scoped>
+/* --- Chiffres clés : variation + courbe miniature --- */
+.kpi { display: flex; flex-direction: column; }
+.kpi-foot {
+  margin-top: auto;
+  padding-top: 14px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+}
+.kpi-delta { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.kpi-delta.good { color: var(--mint); }
+.kpi-delta.bad { color: var(--coral); }
+/* Carte sombre (solde total) : teintes claires lisibles sur fond marine. */
+.kpi:first-child .kpi-delta.good { color: var(--hero-positive); }
+.kpi:first-child .kpi-delta.bad { color: var(--hero-negative); }
+
+.card-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-primary); }
+.chart-note {
+  line-height: 1.65;
+  max-width: 1050px;
+}
+.savings-card .stat-label,
+.where-money-card > .stat-label {
+  font-size: 13px;
+  letter-spacing: -.01em;
+}
+.where-money-card {
+  padding: 20px 22px;
+}
+.where-money-layout {
+  gap: 32px;
+}
+.donut-wrap {
+  width: 176px;
+  height: 176px;
+}
+.where-money-layout {
+  grid-template-columns: 176px minmax(0, 1fr);
+}
+.donut-center-value {
+  font-size: 17px;
+  letter-spacing: -.035em;
+}
+.donut-center-label {
+  margin-top: 3px;
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: none;
+}
+.where-table {
+  font-size: 12.5px;
+}
+.where-table th {
+  padding: 0 8px 9px;
+  font-size: 10px;
+}
+.where-table tfoot td {
+  padding-top: 12px;
+}
+.monthly-analysis-table .category-sticky {
+  font-weight: 600;
+}
+@media (max-width: 640px) {
+  .forecast-card { padding: 16px; }
+  .where-money-card { padding: 16px; }
+  .where-money-layout { grid-template-columns: 1fr; gap: 16px; }
+  .donut-wrap { width: 164px; height: 164px; }
+}
+
 .chart-note {
   margin: 12px 0 0;
   font-size: 12px;
@@ -1394,7 +1398,7 @@ onMounted(loadDashboard)
   transition: background 0.2s ease;
 }
 .chart-mode-toggle.is-separate .toggle-track {
-  background: #5B4FCF;
+  background: var(--violet);
 }
 .toggle-thumb {
   position: absolute;
@@ -1403,7 +1407,7 @@ onMounted(loadDashboard)
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--ink-900);
   box-shadow: var(--shadow-sm);
   transition: transform 0.2s ease;
 }
@@ -1652,7 +1656,7 @@ onMounted(loadDashboard)
   text-align: left;
   padding: 0 0 6px;
   font-size: 10px;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: .06em;
   color: var(--text-faint);
   font-weight: 700;
@@ -1707,7 +1711,9 @@ onMounted(loadDashboard)
 
 .monthly-analysis-table th,
 .monthly-analysis-table td {
-  padding: 8px 8px;
+  /* 6px lateraux (et non 8) : 15 colonnes, les 12 mois + categorie +
+     moyenne + total tiennent sans defilement sur un ecran large. */
+  padding: 8px 6px;
   border-bottom: 1px solid var(--line);
   white-space: nowrap;
 }
@@ -1719,7 +1725,7 @@ onMounted(loadDashboard)
   background: var(--ink-900);
   color: var(--text-faint);
   font-size: 10px;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: .05em;
   /* Ligne de separation nette entre l'entete fige et le contenu qui defile
      dessous (le simple border-bottom des cellules ne suffit pas a se voir
@@ -1746,22 +1752,30 @@ onMounted(loadDashboard)
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+/* Cellule atteinte au clavier (flèches, voir directives/gridNav.js) */
+.monthly-analysis-table td.num:focus-visible {
+  outline: 2px solid var(--azure);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
 
 /* Montants a 0 dans les tableaux "Revenus/Depenses par categorie" : moins
-   visibles (opacite reduite) plutot qu'affiches avec le meme contraste
+   visibles (texte attenue) plutot qu'affiches avec le meme contraste
    qu'une vraie valeur, pour que l'œil aille naturellement vers les
-   categories qui ont effectivement bouge ce mois-la. */
+   categories qui ont effectivement bouge ce mois-la. Attenuation par la
+   couleur du texte et non par opacity : l'opacite rendait aussi le FOND
+   translucide, et la colonne "Total" fixee a droite laissait alors voir les
+   montants qui defilent dessous. */
 .monthly-analysis-table .num.zero-value {
-  color: var(--text-faint);
-  opacity: 0.45;
+  color: color-mix(in srgb, var(--text-faint) 45%, transparent);
 }
 
 /*
  * Mois pas encore termine (a partir du mois calendaire en cours) : rempli
  * cote backend avec le previsionnel (moyenne des mois passes de la meme
  * ligne, voir ServiceRapport#completeAnalysisRow) plutot qu'un 0 trompeur.
- * Italique + meme teinte que la portion previsionnelle du graphique de solde
- * (FORECAST_COLOR ci-dessous) pour que ce ne soit jamais confondu avec une
+ * Italique + teinte attenuee (--text-muted, proche du gris previsionnel du graphique)
+ * pour que ce ne soit jamais confondu avec une
  * vraie valeur constatee, sans pour autant la faire disparaitre comme
  * .zero-value (c'est une estimation utile, pas une absence de donnee) — d'ou
  * la regle placee apres .zero-value pour la primer en cas de cumul (un
@@ -1769,16 +1783,15 @@ onMounted(loadDashboard)
  */
 .monthly-analysis-table .num.forecast-cell,
 .monthly-analysis-table th.forecast-cell {
-  color: #9AA3B5;
+  color: var(--text-muted);
   font-style: italic;
-  opacity: 1;
 }
 
 /* Cartes Revenus/Depenses/Net du haut : meme traitement (italique, meme
    teinte que le previsionnel du graphique/tableau) quand summary.forecast
    est vrai (voir loadMonthlyReports). */
 .stat-value.forecast-cell {
-  color: #9AA3B5;
+  color: var(--text-muted);
   font-style: italic;
 }
 
@@ -1794,7 +1807,7 @@ onMounted(loadDashboard)
   color: var(--text-muted);
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
+  text-transform: none;
   letter-spacing: .04em;
   vertical-align: middle;
 }
@@ -1835,22 +1848,32 @@ onMounted(loadDashboard)
   border-left: 2px solid var(--line);
 }
 /*
- * "Total" (derniere colonne) reste visible en permanence pendant le
- * defilement horizontal, meme avec 12 mois affiches entre la categorie et
- * lui : c'etait le principal reproche de lisibilite sur ces tableaux (il
- * fallait defiler jusqu'au bout pour comparer le total de plusieurs lignes).
+ * "Moyenne" et "Total" (deux dernieres colonnes) restent visibles en
+ * permanence pendant le defilement horizontal, meme avec 12 mois affiches
+ * entre la categorie et eux : c'etait le principal reproche de lisibilite sur
+ * ces tableaux (il fallait defiler jusqu'au bout pour comparer les lignes).
+ * Les deux sont figees ensemble : avec "Total" seul fige, le tableau etant
+ * plus large que sa carte, "Moyenne" passait dessous et son "€" etait masque
+ * des l'affichage. Largeur fixe de "Total" = decalage de "Moyenne".
  * Meme principe que la colonne Actions de l'onglet Transactions.
  */
-.monthly-analysis-table td.summary-col:last-child {
-  position: sticky;
-  right: 0;
-  box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
+.monthly-analysis-table {
+  --summary-total-width: 100px;
 }
-.monthly-analysis-table th.summary-col:last-child {
+.monthly-analysis-table .summary-col:last-child {
+  width: var(--summary-total-width);
+  min-width: var(--summary-total-width);
   position: sticky;
   right: 0;
+}
+.monthly-analysis-table .summary-col:nth-last-child(2) {
+  position: sticky;
+  right: var(--summary-total-width);
+  box-shadow: var(--sticky-edge-shadow);
+}
+.monthly-analysis-table th.summary-col:last-child,
+.monthly-analysis-table th.summary-col:nth-last-child(2) {
   z-index: 7;
-  box-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
 }
 
 .monthly-analysis-table tbody tr.category-row td {
@@ -1935,6 +1958,17 @@ onMounted(loadDashboard)
    (meme specificite, media print inclus) : une regle @media print definie
    plus haut dans ce fichier serait ecrasee par la regle non conditionnelle
    qui la suit, puisque toutes deux s'appliquent pendant l'impression. */
+
+/* Sur mobile, la navigation est déjà collée en haut de l'écran : un sélecteur
+   de mois en position fixe la recouvrirait. Il rejoint le flux de l'en-tête. */
+@media (max-width: 760px) {
+  .month-nav {
+    position: static;
+    width: fit-content;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+}
 
 /* Le position:fixed de .month-nav se repete sur chaque page imprimee et
    chevauche l'entete — on le desactive pour qu'il rejoigne le flux normal
@@ -2112,6 +2146,35 @@ onMounted(loadDashboard)
     font-weight: 600;
     white-space: nowrap;
   }
+}
+
+
+/* Ajustements finaux après les règles historiques du composant. */
+.chart-card {
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-card);
+}
+.forecast-card { padding: 22px 24px 18px; }
+.forecast-card > canvas { max-height: 310px; }
+.chart-note { line-height: 1.65; max-width: 1050px; }
+.where-money-card { padding: 20px 22px; }
+.where-money-layout { grid-template-columns: 176px minmax(0, 1fr); gap: 32px; }
+.donut-wrap { width: 176px; height: 176px; }
+.donut-center-value { font-size: 17px; letter-spacing: -.035em; }
+.donut-center-label { margin-top: 3px; font-size: 11px; text-transform: none; }
+.where-table { font-size: 12.5px; }
+.where-table th { padding: 0 8px 9px; }
+.where-table td { padding: 8px; border-bottom-color: var(--grid-line); }
+.where-table tbody tr:hover td { background: var(--row-hover); }
+.monthly-analysis-wrap { border-color: var(--line); box-shadow: var(--shadow-sm); }
+.monthly-analysis-table { font-variant-numeric: tabular-nums; }
+.monthly-analysis-table thead th { padding-top: 11px; padding-bottom: 11px; background: var(--surface-sunken); color: var(--text-muted); }
+.monthly-analysis-table tbody tr:hover td { background-color: var(--row-hover); }
+.monthly-analysis-table .category-sticky { font-weight: 600; }
+@media (max-width: 640px) {
+  .forecast-card, .where-money-card { padding: 16px; }
+  .where-money-layout { grid-template-columns: 1fr; gap: 16px; }
+  .donut-wrap { width: 164px; height: 164px; }
 }
 
 </style>

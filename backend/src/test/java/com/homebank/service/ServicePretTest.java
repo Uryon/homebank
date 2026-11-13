@@ -13,11 +13,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -159,11 +162,10 @@ class ServicePretTest {
     @Test
     void computeSchedule_calculeInteretsEtCapitalRembourseSurLaPremiereEcheance() {
         // 1000.00 a 12%/an -> 1% par mois -> interets du 1er mois = 10.00
-        Pret loan = pret("1000.00", "12.000", 1, LocalDate.of(2026, 1, 1), "100.00");
+        Pret loan = pret("1000.00", "12.000", 12, LocalDate.of(2026, 1, 1), "100.00");
 
         List<LigneAmortissementDTO> schedule = service.computeSchedule(loan);
 
-        assertThat(schedule).hasSize(1);
         LigneAmortissementDTO row = schedule.get(0);
         assertThat(row.getInterest()).isEqualByComparingTo("10.00");
         assertThat(row.getPrincipal()).isEqualByComparingTo("90.00");
@@ -186,6 +188,47 @@ class ServicePretTest {
         assertThat(derniere.getPayment()).isEqualByComparingTo("100.00");
         assertThat(derniere.getPrincipal()).isEqualByComparingTo("100.00");
         assertThat(derniere.getRemainingBalance()).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void computeSchedule_soldeLeCapitalRestantALaDerniereEcheancePrevue() {
+        // Taux 0% : 1000.00 en 4 mois par mensualites de 249.00 (au lieu de
+        // 250.00) laissait 4.00 de capital restant du a la fin du pret.
+        Pret loan = pret("1000.00", "0.000", 4, LocalDate.of(2026, 1, 1), "249.00");
+
+        List<LigneAmortissementDTO> schedule = service.computeSchedule(loan);
+
+        assertThat(schedule).hasSize(4);
+        LigneAmortissementDTO derniere = schedule.get(3);
+        assertThat(derniere.getPayment()).isEqualByComparingTo("253.00");
+        assertThat(derniere.getRemainingBalance()).isEqualByComparingTo("0.00");
+    }
+
+    @Test
+    void create_leveIllegalArgumentException_siLaMensualiteEstTropFaiblePourLaDuree() {
+        // 200000.00 a 3.25% sur 240 mois demande ~1134.40/mois : 600.00 couvre
+        // les interets du 1er mois mais laisserait une enorme derniere echeance.
+        PretDTO payload = validPayload().monthlyPayment(new BigDecimal("600.00")).build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Mensualite necessaire : 1134.");
+    }
+
+    @Test
+    void create_leveIllegalArgumentException_siAssuranceNegative() {
+        PretDTO payload = validPayload().monthlyInsurance(new BigDecimal("-5.00")).build();
+
+        assertThatThrownBy(() -> service.create(payload)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void annuityPayment_calculeLaMensualiteConstante() {
+        assertThat(ServicePret.annuityPayment(new BigDecimal("1000.00"), BigDecimal.ZERO, 4))
+                .isEqualByComparingTo("250.00");
+        // 10000 a 12%/an (1%/mois) sur 12 mois : mensualite de reference 888.49
+        assertThat(ServicePret.annuityPayment(new BigDecimal("10000.00"), new BigDecimal("0.01"), 12))
+                .isEqualByComparingTo("888.49");
     }
 
     @Test
@@ -263,5 +306,23 @@ class ServicePretTest {
     @Test
     void payoffDate_renvoieNullSiLEcheancierEstVide() {
         assertThat(service.payoffDate(List.of())).isNull();
+    }
+
+    @Test
+    void delete_pretExistant_estSupprime() {
+        Pret loan = new Pret();
+        when(loanRepository.findById(1L)).thenReturn(Optional.of(loan));
+
+        service.delete(1L);
+
+        verify(loanRepository).delete(loan);
+    }
+
+    @Test
+    void delete_pretInexistant_renvoieIntrouvableAuLieuDeReussirEnSilence() {
+        when(loanRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.delete(99L)).isInstanceOf(NoSuchElementException.class);
+        verify(loanRepository, never()).delete(any(Pret.class));
     }
 }

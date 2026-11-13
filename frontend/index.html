@@ -8,6 +8,13 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet">
+    <!-- Applique le thème choisi avant le premier affichage (évite un flash clair) ; voir src/services/theme.js -->
+    <script>
+        try {
+            var theme = localStorage.getItem('homebank-theme');
+            if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
+        } catch (e) { /* stockage indisponible : on suit le système */ }
+    </script>
 </head>
 <body>
     <div id="app"></div>

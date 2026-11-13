@@ -193,7 +193,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleDocumentMo
   background: var(--ink-900);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 20px rgba(23, 32, 46, 0.14);
+  box-shadow: var(--shadow-popover);
   padding: 12px;
 }
 
@@ -263,7 +263,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleDocumentMo
 .myf-month-btn.active {
   background: var(--azure);
   border-color: var(--azure);
-  color: #FFFFFF;
+  color: var(--on-accent);
 }
 
 .myf-reset {

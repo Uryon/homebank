@@ -36,7 +36,7 @@
     </div>
 
     <div v-else class="empty-state">
-      🎉 Aucune suggestion pour l'instant — HomeBank recherche les tiers dont le montant se répète
+      Aucune suggestion pour l'instant — HomeBank recherche les tiers dont le montant se répète
       (à ±10% près) sur au moins 3 transactions non encore marquées périodiques.
     </div>
   </div>
@@ -54,6 +54,7 @@ import { ref, onMounted } from 'vue'
 import { TransactionsAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { formatAmount, formatDate } from '../services/format'
+import { alertApiError } from '../services/errors'
 import TransactionsSubNav from './TransactionsSubNav.vue'
 
 const suggestions = ref([])
@@ -65,7 +66,11 @@ function groupKey(group) {
 }
 
 async function load() {
-  suggestions.value = await TransactionsAPI.periodicSuggestions()
+  try {
+    suggestions.value = await TransactionsAPI.periodicSuggestions()
+  } catch (e) {
+    alertApiError('Erreur lors du chargement des suggestions', e)
+  }
 }
 
 async function ignoreGroup(group) {
@@ -73,6 +78,8 @@ async function ignoreGroup(group) {
   try {
     await TransactionsAPI.ignorePeriodicSuggestion(group.transactions.map(t => t.id))
     await load()
+  } catch (e) {
+    alertApiError("Erreur lors de l'ignorance de la suggestion", e)
   } finally {
     ignoring.value = null
   }
@@ -84,6 +91,8 @@ async function markPeriodic(group) {
     await Promise.all(group.transactions.map(t => TransactionsAPI.togglePeriodicExpense(t.id)))
     await dataStore.refreshTransactions()
     await load()
+  } catch (e) {
+    alertApiError('Erreur lors du marquage en dépense périodique', e)
   } finally {
     marking.value = null
   }

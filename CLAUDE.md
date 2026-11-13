@@ -18,9 +18,14 @@ Backend Spring Boot exposant une API REST consommée par un frontend Vue 3 (SPA)
   et éviter de casser un comportement voisin.
 
 ## Règles métier importantes
-- Ne jamais casser la création de tiers/catégories à la volée : le frontend
-  doit toujours autoriser la saisie en texte libre, résolue côté backend
+- Ne jamais casser la création de tiers à la volée : le frontend doit
+  toujours autoriser la saisie en texte libre du tiers, résolue côté backend
   (création si non existant plutôt que rejet).
+- Catégories : à la saisie d'une transaction ou d'un tiers, seule une
+  catégorie existante peut être choisie (`CategoryAutocomplete` rejette le
+  texte libre, choix volontaire). Les nouvelles catégories se créent depuis
+  l'écran Catégories. Exception : l'import CSV/QIF crée les catégories
+  inconnues (`ServiceCategorie.findOrCreateByName`).
 
 ## Frontend Vue — qualité et perf
 - Composition API partout, pas d'Options API.

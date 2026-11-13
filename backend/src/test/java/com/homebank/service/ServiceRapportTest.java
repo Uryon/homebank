@@ -1,5 +1,15 @@
 package com.homebank.service;
 
+import com.homebank.dto.AnalyseMensuelleDTO;
+import com.homebank.dto.DepenseParCategorieDTO;
+import com.homebank.dto.EpargneMensuelleDTO;
+import com.homebank.dto.LigneAnalyseDTO;
+import com.homebank.dto.MoisAnalyseDTO;
+import com.homebank.dto.PointSoldeDTO;
+import com.homebank.dto.PrevisionSoldeDTO;
+import com.homebank.dto.ResumeMoisAnalyseDTO;
+import com.homebank.dto.ResumePeriodeDTO;
+import com.homebank.dto.SynthesePeriodiqueDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.mapper.MappeurTransaction;
 import com.homebank.model.Categorie;
@@ -18,11 +28,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -70,6 +82,19 @@ class ServiceRapportTest {
         return c;
     }
 
+    /**
+     * Simule findByDateBetween comme la vraie requete (transactions dont la
+     * date est dans [from, to]) plutot que mois par mois : le service peut
+     * ainsi charger un mois ou toute une periode d'un coup.
+     */
+    private void stubTransactionsBetween(Transaction... all) {
+        when(transactionRepository.findByDateBetween(any(), any())).thenAnswer(inv -> {
+            LocalDate from = inv.getArgument(0);
+            LocalDate to = inv.getArgument(1);
+            return Arrays.stream(all).filter(t -> !t.getDate().isBefore(from) && !t.getDate().isAfter(to)).toList();
+        });
+    }
+
     private static Transaction transaction(Long id, Compte account, LocalDate date, String amount, Categorie category) {
         Transaction t = new Transaction();
         t.setId(id);
@@ -96,11 +121,11 @@ class ServiceRapportTest {
         when(transactionRepository.findByDateBetween(any(), any()))
                 .thenReturn(List.of(depenseValide, virement, future, exceptionnelle));
 
-        List<Map<String, Object>> result = service.expensesByCategory(
+        List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), null);
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0)).containsEntry("total", new BigDecimal("50.00"));
+        assertThat(result.get(0).total()).isEqualTo(new BigDecimal("50.00"));
     }
 
     @Test
@@ -110,7 +135,7 @@ class ServiceRapportTest {
         Transaction revenu = transaction(1L, account, LocalDate.of(2026, 1, 5), "2000.00", salaire);
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(revenu));
 
-        List<Map<String, Object>> result = service.expensesByCategory(
+        List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
         assertThat(result).isEmpty();
@@ -124,13 +149,12 @@ class ServiceRapportTest {
         Transaction t = transaction(1L, account, LocalDate.of(2026, 1, 5), "-25.00", restaurant);
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(t));
 
-        List<Map<String, Object>> result = service.expensesByCategory(
+        List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
-        assertThat(result.get(0))
-                .containsEntry("category", "Alimentation : Restaurant")
-                .containsEntry("categoryId", 2L)
-                .containsEntry("uncategorized", false);
+        assertThat(result.get(0).category()).isEqualTo("Alimentation : Restaurant");
+        assertThat(result.get(0).categoryId()).isEqualTo(2L);
+        assertThat(result.get(0).uncategorized()).isFalse();
     }
 
     @Test
@@ -139,13 +163,12 @@ class ServiceRapportTest {
         Transaction t = transaction(1L, account, LocalDate.of(2026, 1, 5), "-25.00", null);
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(t));
 
-        List<Map<String, Object>> result = service.expensesByCategory(
+        List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
-        assertThat(result.get(0))
-                .containsEntry("category", "Non categorise")
-                .containsEntry("uncategorized", true);
-        assertThat(result.get(0).get("categoryId")).isNull();
+        assertThat(result.get(0).category()).isEqualTo("Non catégorisé");
+        assertThat(result.get(0).uncategorized()).isTrue();
+        assertThat(result.get(0).categoryId()).isNull();
     }
 
     @Test
@@ -157,16 +180,14 @@ class ServiceRapportTest {
         Transaction t2 = transaction(2L, account, LocalDate.of(2026, 1, 6), "-40.00", loisirs);
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(t1, t2));
 
-        List<Map<String, Object>> result = service.expensesByCategory(
+        List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
         assertThat(result).hasSize(2);
-        assertThat(result.get(0))
-                .containsEntry("category", "Courses")
-                .containsEntry("percentage", new BigDecimal("60.0"));
-        assertThat(result.get(1))
-                .containsEntry("category", "Loisirs")
-                .containsEntry("percentage", new BigDecimal("40.0"));
+        assertThat(result.get(0).category()).isEqualTo("Courses");
+        assertThat(result.get(0).percentage()).isEqualTo(new BigDecimal("60.0"));
+        assertThat(result.get(1).category()).isEqualTo("Loisirs");
+        assertThat(result.get(1).percentage()).isEqualTo(new BigDecimal("40.0"));
     }
 
     // --- attributedTransactions : lissage des categories "annuelles" sur 12 mois ---
@@ -181,11 +202,11 @@ class ServiceRapportTest {
 
         // Fenetre de 3 mois (nov 2025 a jan 2026) a l'interieur de la fenetre glissante
         // de 12 mois demarree en oct 2025 : chaque mois compte pour 1/12 du montant.
-        List<Map<String, Object>> result = service.expensesByCategory(
+        List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2025, 11, 1), LocalDate.of(2026, 1, 31), null);
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0)).containsEntry("total", new BigDecimal("300.00")); // 3 * (1200/12)
+        assertThat(result.get(0).total()).isEqualTo(new BigDecimal("300.00")); // 3 * (1200/12)
     }
 
     @Test
@@ -198,10 +219,20 @@ class ServiceRapportTest {
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(annuelle));
         when(transactionRepository.findByCategory_AnnualizedTrue()).thenReturn(List.of(annuelle));
 
-        List<Map<String, Object>> result = service.expensesByCategory(
+        List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2025, 10, 1), LocalDate.of(2025, 10, 31), null);
 
-        assertThat(result.get(0)).containsEntry("total", new BigDecimal("100.00")); // 1200/12, jamais 1200
+        assertThat(result.get(0).total()).isEqualTo(new BigDecimal("100.00")); // 1200/12, jamais 1200
+    }
+
+    @Test
+    void annualizedShare_lesDouzePartsRedonnentExactementLeMontant() {
+        BigDecimal total = BigDecimal.ZERO;
+        for (int i = 0; i < 12; i++) total = total.add(ServiceRapport.annualizedShare(new BigDecimal("-100.00"), i));
+
+        assertThat(total).isEqualByComparingTo("-100.00");
+        assertThat(ServiceRapport.annualizedShare(new BigDecimal("-100.00"), 0)).isEqualByComparingTo("-8.33");
+        assertThat(ServiceRapport.annualizedShare(new BigDecimal("-100.00"), 11)).isEqualByComparingTo("-8.37");
     }
 
     @Test
@@ -213,7 +244,7 @@ class ServiceRapportTest {
         when(transactionRepository.findByAccountIdAndDateBetween(any(), any(), any())).thenReturn(List.of());
         when(transactionRepository.findByCategory_AnnualizedTrue()).thenReturn(List.of(annuelle));
 
-        List<Map<String, Object>> result = service.expensesByCategory(
+        List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2025, 11, 1), LocalDate.of(2025, 11, 30), compte2.getId());
 
         assertThat(result).isEmpty();
@@ -230,12 +261,11 @@ class ServiceRapportTest {
         virement.setPaymentMode(ModePaiement.TRANSFER);
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(revenu, depense, virement));
 
-        Map<String, Object> result = service.summary(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
+        ResumePeriodeDTO result = service.summary(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
-        assertThat(result)
-                .containsEntry("income", new BigDecimal("2000.00"))
-                .containsEntry("expenses", new BigDecimal("500.00"))
-                .containsEntry("net", new BigDecimal("1500.00"));
+        assertThat(result.income()).isEqualTo(new BigDecimal("2000.00"));
+        assertThat(result.expenses()).isEqualTo(new BigDecimal("500.00"));
+        assertThat(result.net()).isEqualTo(new BigDecimal("1500.00"));
     }
 
     // --- cellTransactions : le detail doit correspondre exactement aux agregats ---
@@ -329,23 +359,15 @@ class ServiceRapportTest {
         LocalDate referenceMonth = LocalDate.of(2026, 3, 15);
         Transaction fevrier = transaction(1L, account, LocalDate.of(2026, 2, 10), "1000.00", null);
         Transaction mars = transaction(2L, account, LocalDate.of(2026, 3, 10), "-200.00", null);
-        // Stub generique : le mois interroge determine la reponse.
-        when(transactionRepository.findByDateBetween(any(), any())).thenAnswer(inv -> {
-            LocalDate from = inv.getArgument(0);
-            if (from.equals(LocalDate.of(2026, 2, 1))) return List.of(fevrier);
-            if (from.equals(LocalDate.of(2026, 3, 1))) return List.of(mars);
-            return List.of();
-        });
+        stubTransactionsBetween(fevrier, mars);
 
-        List<Map<String, Object>> result = service.monthlySavings(2, null, referenceMonth);
+        List<EpargneMensuelleDTO> result = service.monthlySavings(2, null, referenceMonth);
 
         assertThat(result).hasSize(2);
-        assertThat(result.get(0))
-                .containsEntry("date", "2026-02-01")
-                .containsEntry("savings", new BigDecimal("1000.00"));
-        assertThat(result.get(1))
-                .containsEntry("date", "2026-03-01")
-                .containsEntry("savings", new BigDecimal("-200.00"));
+        assertThat(result.get(0).date()).isEqualTo("2026-02-01");
+        assertThat(result.get(0).savings()).isEqualTo(new BigDecimal("1000.00"));
+        assertThat(result.get(1).date()).isEqualTo("2026-03-01");
+        assertThat(result.get(1).savings()).isEqualTo(new BigDecimal("-200.00"));
     }
 
     /**
@@ -363,29 +385,21 @@ class ServiceRapportTest {
         Compte account = compte(1L, "0");
         Transaction moisMoins2 = transaction(1L, account, currentMonthStart.minusMonths(2).plusDays(5), "1000.00", null);
         Transaction moisMoins1 = transaction(2L, account, currentMonthStart.minusMonths(1).plusDays(5), "-200.00", null);
-        when(transactionRepository.findByDateBetween(any(), any())).thenAnswer(inv -> {
-            LocalDate from = inv.getArgument(0);
-            if (from.equals(currentMonthStart.minusMonths(2))) return List.of(moisMoins2);
-            if (from.equals(currentMonthStart.minusMonths(1))) return List.of(moisMoins1);
-            return List.of();
-        });
+        stubTransactionsBetween(moisMoins2, moisMoins1);
 
-        List<Map<String, Object>> result = service.monthlySavings(3, null, currentMonthStart);
+        List<EpargneMensuelleDTO> result = service.monthlySavings(3, null, currentMonthStart);
 
         assertThat(result).hasSize(3);
-        assertThat(result.get(0))
-                .containsEntry("date", currentMonthStart.minusMonths(2).toString())
-                .containsEntry("savings", new BigDecimal("1000.00"))
-                .containsEntry("forecast", false);
-        assertThat(result.get(1))
-                .containsEntry("date", currentMonthStart.minusMonths(1).toString())
-                .containsEntry("savings", new BigDecimal("-200.00"))
-                .containsEntry("forecast", false);
+        assertThat(result.get(0).date()).isEqualTo(currentMonthStart.minusMonths(2).toString());
+        assertThat(result.get(0).savings()).isEqualTo(new BigDecimal("1000.00"));
+        assertThat(result.get(0).forecast()).isFalse();
+        assertThat(result.get(1).date()).isEqualTo(currentMonthStart.minusMonths(1).toString());
+        assertThat(result.get(1).savings()).isEqualTo(new BigDecimal("-200.00"));
+        assertThat(result.get(1).forecast()).isFalse();
         // Moyenne sur les 12 VRAIS derniers mois (dont les 2 ci-dessus, le reste a 0) : (1000 - 200) / 12 = 66.67.
-        assertThat(result.get(2))
-                .containsEntry("date", currentMonthStart.toString())
-                .containsEntry("savings", new BigDecimal("66.67"))
-                .containsEntry("forecast", true);
+        assertThat(result.get(2).date()).isEqualTo(currentMonthStart.toString());
+        assertThat(result.get(2).savings()).isEqualTo(new BigDecimal("66.67"));
+        assertThat(result.get(2).forecast()).isTrue();
     }
 
     /**
@@ -399,18 +413,14 @@ class ServiceRapportTest {
         LocalDate currentMonthStart = LocalDate.now().withDayOfMonth(1);
         Compte account = compte(1L, "0");
         Transaction moisMoins1 = transaction(1L, account, currentMonthStart.minusMonths(1).plusDays(5), "2400.00", null);
-        when(transactionRepository.findByDateBetween(any(), any())).thenAnswer(inv -> {
-            LocalDate from = inv.getArgument(0);
-            return from.equals(currentMonthStart.minusMonths(1)) ? List.of(moisMoins1) : List.of();
-        });
+        stubTransactionsBetween(moisMoins1);
 
-        List<Map<String, Object>> result = service.monthlySavings(1, null, currentMonthStart.plusMonths(15));
+        List<EpargneMensuelleDTO> result = service.monthlySavings(1, null, currentMonthStart.plusMonths(15));
 
         // Moyenne sur les 12 VRAIS derniers mois (une seule transaction a 2400) : 2400 / 12 = 200.00.
         assertThat(result).hasSize(1);
-        assertThat(result.get(0))
-                .containsEntry("savings", new BigDecimal("200.00"))
-                .containsEntry("forecast", true);
+        assertThat(result.get(0).savings()).isEqualTo(new BigDecimal("200.00"));
+        assertThat(result.get(0).forecast()).isTrue();
     }
 
     // --- periodicExpensesSummary ---
@@ -444,21 +454,13 @@ class ServiceRapportTest {
         when(transactionRepository.findByPeriodicExpenseTrueOrderByDateDescIdDesc())
                 .thenReturn(List.of(recenteOccurrence, ancienneOccurrence, salaire));
 
-        Map<String, Object> result = service.periodicExpensesSummary();
+        SynthesePeriodiqueDTO result = service.periodicExpensesSummary();
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> expenses = (Map<String, Object>) result.get("expenses");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> expenseItems = (List<Map<String, Object>>) expenses.get("items");
-        assertThat(expenseItems).hasSize(1); // une seule ligne pour Netflix, la plus recente
-        assertThat(expenseItems.get(0)).containsEntry("transactionId", 2L);
+        assertThat(result.expenses().items()).hasSize(1); // une seule ligne pour Netflix, la plus recente
+        assertThat(result.expenses().items().get(0).transactionId()).isEqualTo(2L);
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> revenues = (Map<String, Object>) result.get("revenues");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> revenueItems = (List<Map<String, Object>>) revenues.get("items");
-        assertThat(revenueItems).hasSize(1);
-        assertThat(revenueItems.get(0)).containsEntry("transactionId", 3L);
+        assertThat(result.revenues().items()).hasSize(1);
+        assertThat(result.revenues().items().get(0).transactionId()).isEqualTo(3L);
     }
 
     @Test
@@ -490,11 +492,9 @@ class ServiceRapportTest {
         when(transactionRepository.findByPeriodicExpenseTrueOrderByDateDescIdDesc())
                 .thenReturn(List.of(future, exceptionnelle, tropAncienne));
 
-        Map<String, Object> result = service.periodicExpensesSummary();
+        SynthesePeriodiqueDTO result = service.periodicExpensesSummary();
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> expenses = (Map<String, Object>) result.get("expenses");
-        assertThat(expenses).containsEntry("total", BigDecimal.ZERO);
+        assertThat(result.expenses().total()).isEqualTo(BigDecimal.ZERO);
     }
 
     // --- balanceForecast ---
@@ -506,11 +506,9 @@ class ServiceRapportTest {
         when(transactionRepository.sumAmountByAccountIdAsOf(eq(1L), any())).thenReturn(BigDecimal.ZERO);
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of());
 
-        Map<String, Object> result = service.balanceForecast(null, null);
+        PrevisionSoldeDTO result = service.balanceForecast(null, null);
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> points = (List<Map<String, Object>>) result.get("points");
-        assertThat(points).hasSize(24);
+        assertThat(result.points()).hasSize(24);
     }
 
     @Test
@@ -523,9 +521,9 @@ class ServiceRapportTest {
         // au calcul base sur le "net" ci-dessous).
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of());
 
-        Map<String, Object> result = service.balanceForecast(null, null);
+        PrevisionSoldeDTO result = service.balanceForecast(null, null);
 
-        assertThat(result).containsEntry("monthlyTrend", BigDecimal.ZERO.setScale(2, java.math.RoundingMode.HALF_UP));
+        assertThat(result.monthlyTrend()).isEqualTo(BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP));
     }
 
     @Test
@@ -541,15 +539,45 @@ class ServiceRapportTest {
         Transaction exceptionnelle = transaction(3L, account, lastMonthStart.plusDays(3), "3000.00", null);
         exceptionnelle.setExceptional(true);
 
-        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of());
-        when(transactionRepository.findByDateBetween(eq(lastMonthStart), any()))
-                .thenReturn(List.of(normale, virement, exceptionnelle));
+        stubTransactionsBetween(normale, virement, exceptionnelle);
 
-        Map<String, Object> result = service.balanceForecast(null, null);
+        PrevisionSoldeDTO result = service.balanceForecast(null, null);
 
         // Seule la transaction normale (100.00) compte sur ce mois -> moyenne sur 12 mois = 100/12.
-        assertThat(result).containsEntry("monthlyTrend",
-                new BigDecimal("100.00").divide(BigDecimal.valueOf(12), 2, java.math.RoundingMode.HALF_UP));
+        assertThat(result.monthlyTrend())
+                .isEqualTo(new BigDecimal("100.00").divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP));
+    }
+
+    /**
+     * Soldes historiques de fin de mois = solde a la veille de la fenetre
+     * (solde initial + transactions anterieures) + cumul des mouvements de
+     * chaque mois, virements compris (solde reel, pas le "net" des rapports).
+     */
+    @Test
+    void balanceForecast_soldesHistoriques_cumulentLesMouvementsDeChaqueMois() {
+        Compte account = compte(1L, "1000.00");
+        LocalDate windowStart = LocalDate.now().withDayOfMonth(1).minusMonths(12);
+        when(accountRepository.findAll()).thenReturn(List.of(account));
+        when(transactionRepository.sumAmountByAccountIdAsOf(1L, windowStart.minusDays(1))).thenReturn(new BigDecimal("200.00"));
+        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of());
+        when(transactionRepository.sumAmountGroupedByDate(any(), any())).thenReturn(List.of(
+                new Object[]{windowStart.plusMonths(1).plusDays(3), new BigDecimal("50.00")},
+                new Object[]{windowStart.plusMonths(1).plusDays(9), new BigDecimal("-20.00")},
+                new Object[]{windowStart.plusMonths(5), new BigDecimal("100.00")}));
+
+        PrevisionSoldeDTO result = service.balanceForecast(null, null);
+
+        List<PointSoldeDTO> points = result.points();
+        assertThat(points.get(0).balance()).isEqualTo(new BigDecimal("1200.00"));
+        assertThat(points.get(0).type()).isEqualTo(PointSoldeDTO.HISTORIQUE);
+        assertThat(points.get(1).balance()).isEqualTo(new BigDecimal("1230.00"));
+        assertThat(points.get(4).balance()).isEqualTo(new BigDecimal("1230.00"));
+        assertThat(points.get(5).balance()).isEqualTo(new BigDecimal("1330.00"));
+        assertThat(points.get(11).balance()).isEqualTo(new BigDecimal("1330.00"));
+        assertThat(points.get(11).type()).isEqualTo(PointSoldeDTO.HISTORIQUE);
+        // Previsionnel : aucune transaction "nette" sur 12 mois -> tendance nulle, le solde reste stable.
+        assertThat(points.get(12).balance()).isEqualTo(new BigDecimal("1330.00"));
+        assertThat(points.get(12).type()).isEqualTo(PointSoldeDTO.PREVISIONNEL);
     }
 
     @Test
@@ -562,6 +590,17 @@ class ServiceRapportTest {
         service.balanceForecast(5L, null);
 
         verify(accountRepository, never()).findAll();
+        verify(transactionRepository, never()).sumAmountGroupedByDate(any(), any());
+    }
+
+    /** Compte supprimé entre-temps : message explicite, pas le "No value present" par défaut d'Optional. */
+    @Test
+    void balanceForecast_compteInexistant_messageExplicite() {
+        when(accountRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.balanceForecast(99L, null))
+                .isInstanceOf(NoSuchElementException.class)
+                .hasMessage("Compte introuvable : 99");
     }
 
     // --- monthlyCategoryAnalysis ---
@@ -578,60 +617,37 @@ class ServiceRapportTest {
         when(transactionRepository.findByDateBetween(any(), any()))
                 .thenReturn(List.of(depenseRacine, depenseEnfant, revenu));
 
-        Map<String, Object> result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
+        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> months = (List<Map<String, Object>>) result.get("months");
-        assertThat(months).hasSize(12);
+        assertThat(result.months()).hasSize(12);
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> expenseRows = (List<Map<String, Object>>) result.get("expenses");
+        List<LigneAnalyseDTO> expenseRows = result.expenses();
         assertThat(expenseRows).hasSize(2);
-        Map<String, Object> ligneAlimentation = expenseRows.stream()
-                .filter(r -> "Alimentation".equals(r.get("name"))).findFirst().orElseThrow();
-        Map<String, Object> ligneRestaurant = expenseRows.stream()
-                .filter(r -> "Restaurant".equals(r.get("name"))).findFirst().orElseThrow();
-        assertThat(ligneAlimentation.get("parentId")).isNull();
-        assertThat(ligneRestaurant).containsEntry("parentId", 1L);
-        @SuppressWarnings("unchecked")
-        Map<String, BigDecimal> valuesAlimentation = (Map<String, BigDecimal>) ligneAlimentation.get("values");
-        @SuppressWarnings("unchecked")
-        Map<String, BigDecimal> valuesRestaurant = (Map<String, BigDecimal>) ligneRestaurant.get("values");
-        assertThat(valuesAlimentation.get("2025-06-01")).isEqualByComparingTo("40.00");
-        assertThat(valuesRestaurant.get("2025-06-01")).isEqualByComparingTo("25.00");
+        LigneAnalyseDTO ligneAlimentation = ligneNommee(expenseRows, "Alimentation");
+        LigneAnalyseDTO ligneRestaurant = ligneNommee(expenseRows, "Restaurant");
+        assertThat(ligneAlimentation.parentId()).isNull();
+        assertThat(ligneRestaurant.parentId()).isEqualTo(1L);
+        assertThat(ligneAlimentation.values().get("2025-06-01")).isEqualByComparingTo("40.00");
+        assertThat(ligneRestaurant.values().get("2025-06-01")).isEqualByComparingTo("25.00");
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> incomeRows = (List<Map<String, Object>>) result.get("income");
-        assertThat(incomeRows).hasSize(1);
-        assertThat(incomeRows.get(0)).containsEntry("name", "Salaire");
+        assertThat(result.income()).hasSize(1);
+        assertThat(result.income().get(0).name()).isEqualTo("Salaire");
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> expenseTotal = (Map<String, Object>) result.get("expenseTotal");
-        @SuppressWarnings("unchecked")
-        Map<String, BigDecimal> expenseTotalValues = (Map<String, BigDecimal>) expenseTotal.get("values");
-        assertThat(expenseTotalValues.get("2025-06-01")).isEqualByComparingTo("65.00"); // 40 + 25
+        assertThat(result.expenseTotal().values().get("2025-06-01")).isEqualByComparingTo("65.00"); // 40 + 25
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> summary = (List<Map<String, Object>>) result.get("summary");
-        Map<String, Object> juin = summary.stream()
-                .filter(m -> "2025-06-01".equals(m.get("key"))).findFirst().orElseThrow();
-        assertThat(juin)
-                .containsEntry("expenses", new BigDecimal("65.00"))
-                .containsEntry("net", new BigDecimal("-65.00"));
+        ResumeMoisAnalyseDTO juin = resumeDuMois(result, "2025-06-01");
+        assertThat(juin.expenses()).isEqualTo(new BigDecimal("65.00"));
+        assertThat(juin.net()).isEqualTo(new BigDecimal("-65.00"));
     }
 
     @Test
     void monthlyCategoryAnalysis_sansTransactions_renvoie12MoisVidesSansLignesNiErreur() {
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of());
 
-        Map<String, Object> result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
+        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> months = (List<Map<String, Object>>) result.get("months");
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> expenseRows = (List<Map<String, Object>>) result.get("expenses");
-        assertThat(months).hasSize(12);
-        assertThat(expenseRows).isEmpty();
+        assertThat(result.months()).hasSize(12);
+        assertThat(result.expenses()).isEmpty();
     }
 
     /**
@@ -653,38 +669,25 @@ class ServiceRapportTest {
         Transaction revenu2 = transaction(2L, account, currentMonthStart.minusMonths(2).plusDays(4), "3000.00", salaire);
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(revenu1, revenu2));
 
-        Map<String, Object> result = service.monthlyCategoryAnalysis(null, currentMonthStart);
+        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, currentMonthStart);
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> months = (List<Map<String, Object>>) result.get("months");
-        assertThat(months).hasSize(12);
-        assertThat(months.get(11)).containsEntry("key", currentMonthStart.toString()).containsEntry("forecast", true);
-        assertThat(months.get(10)).containsEntry("forecast", false);
+        assertThat(result.months()).hasSize(12);
+        assertThat(result.months().get(11).key()).isEqualTo(currentMonthStart.toString());
+        assertThat(result.months().get(11).forecast()).isTrue();
+        assertThat(result.months().get(10).forecast()).isFalse();
 
         // Moyenne sur les 12 VRAIS derniers mois (dont 2 a 1000/3000, le reste a 0) : 4000 / 12.
         BigDecimal expectedAverage = new BigDecimal("4000.00").divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> incomeRows = (List<Map<String, Object>>) result.get("income");
-        Map<String, Object> ligneSalaire = incomeRows.stream()
-                .filter(r -> "Salaire".equals(r.get("name"))).findFirst().orElseThrow();
-        @SuppressWarnings("unchecked")
-        Map<String, BigDecimal> valuesSalaire = (Map<String, BigDecimal>) ligneSalaire.get("values");
-        assertThat(valuesSalaire.get(currentMonthStart.toString())).isEqualByComparingTo(expectedAverage);
+        LigneAnalyseDTO ligneSalaire = ligneNommee(result.income(), "Salaire");
+        assertThat(ligneSalaire.values().get(currentMonthStart.toString())).isEqualByComparingTo(expectedAverage);
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> incomeTotal = (Map<String, Object>) result.get("incomeTotal");
-        @SuppressWarnings("unchecked")
-        Map<String, BigDecimal> incomeTotalValues = (Map<String, BigDecimal>) incomeTotal.get("values");
-        assertThat(incomeTotalValues.get(currentMonthStart.toString())).isEqualByComparingTo(expectedAverage);
+        assertThat(result.incomeTotal().values().get(currentMonthStart.toString())).isEqualByComparingTo(expectedAverage);
 
         // Le resume mensuel (Revenus/Depenses/Solde) reprend lui aussi le previsionnel, pas 0.
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> summary = (List<Map<String, Object>>) result.get("summary");
-        Map<String, Object> moisCourant = summary.stream()
-                .filter(m -> currentMonthStart.toString().equals(m.get("key"))).findFirst().orElseThrow();
-        assertThat((BigDecimal) moisCourant.get("income")).isEqualByComparingTo(expectedAverage);
-        assertThat(moisCourant).containsEntry("forecast", true);
+        ResumeMoisAnalyseDTO moisCourant = resumeDuMois(result, currentMonthStart.toString());
+        assertThat(moisCourant.income()).isEqualByComparingTo(expectedAverage);
+        assertThat(moisCourant.forecast()).isTrue();
     }
 
     /**
@@ -717,28 +720,27 @@ class ServiceRapportTest {
         // 15 mois dans le futur : la fenetre de 12 mois affichee ([+4 ; +15])
         // ne touche plus du tout les 12 vrais derniers mois ([-12 ; -1]).
         LocalDate loinDansLeFutur = currentMonthStart.plusMonths(15);
-        Map<String, Object> result = service.monthlyCategoryAnalysis(null, loinDansLeFutur);
+        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, loinDansLeFutur);
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> months = (List<Map<String, Object>>) result.get("months");
-        assertThat(months).allMatch(m -> Boolean.TRUE.equals(m.get("forecast")));
+        assertThat(result.months()).allMatch(MoisAnalyseDTO::forecast);
 
         // Moyenne sur les 12 VRAIS derniers mois (une seule transaction a 2400) : 2400 / 12 = 200.00.
         BigDecimal expectedAverage = new BigDecimal("2400.00").divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
         assertThat(expectedAverage).isEqualByComparingTo("200.00");
 
-        @SuppressWarnings("unchecked")
-        List<Map<String, Object>> incomeRows = (List<Map<String, Object>>) result.get("income");
-        Map<String, Object> ligneSalaire = incomeRows.stream()
-                .filter(r -> "Salaire".equals(r.get("name"))).findFirst().orElseThrow();
-        @SuppressWarnings("unchecked")
-        Map<String, BigDecimal> valuesSalaire = (Map<String, BigDecimal>) ligneSalaire.get("values");
-        assertThat(valuesSalaire.values()).allSatisfy(v -> assertThat(v).isEqualByComparingTo(expectedAverage));
+        LigneAnalyseDTO ligneSalaire = ligneNommee(result.income(), "Salaire");
+        assertThat(ligneSalaire.values().values()).allSatisfy(v -> assertThat(v).isEqualByComparingTo(expectedAverage));
 
-        @SuppressWarnings("unchecked")
-        Map<String, Object> incomeTotal = (Map<String, Object>) result.get("incomeTotal");
-        @SuppressWarnings("unchecked")
-        Map<String, BigDecimal> incomeTotalValues = (Map<String, BigDecimal>) incomeTotal.get("values");
-        assertThat(incomeTotalValues.values()).allSatisfy(v -> assertThat(v).isEqualByComparingTo(expectedAverage));
+        assertThat(result.incomeTotal().values().values()).allSatisfy(v -> assertThat(v).isEqualByComparingTo(expectedAverage));
+    }
+
+    /** Ligne du tableau d'analyse portant ce nom de categorie (echoue si absente). */
+    private static LigneAnalyseDTO ligneNommee(List<LigneAnalyseDTO> rows, String name) {
+        return rows.stream().filter(r -> name.equals(r.name())).findFirst().orElseThrow();
+    }
+
+    /** Resume (revenus/depenses/net) du mois de cle monthKey (echoue si absent). */
+    private static ResumeMoisAnalyseDTO resumeDuMois(AnalyseMensuelleDTO analyse, String monthKey) {
+        return analyse.summary().stream().filter(m -> monthKey.equals(m.key())).findFirst().orElseThrow();
     }
 }

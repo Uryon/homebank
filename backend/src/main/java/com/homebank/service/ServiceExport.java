@@ -6,6 +6,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.concurrent.TimeUnit;
 
@@ -23,12 +26,12 @@ import java.util.concurrent.TimeUnit;
 public class ServiceExport {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceExport.class);
-    private static final long DELAI_MAX_SECONDES = 30;
 
     private final String dossierSortie;
     private final String urlTableauDeBord;
     private final String cheminScript;
     private final String cheminNode;
+    private final long delaiMaxSecondes;
     private final ServiceDernierImport dernierImportService;
 
     public ServiceExport(
@@ -40,11 +43,13 @@ public class ServiceExport {
             // EXPORT_CHEMIN_NODE si on veut eliminer toute dependance au PATH
             // (voir le hotspot Sonar "PATH variable" sur cet appel).
             @Value("${export.chemin-node:node}") String cheminNode,
+            @Value("${export.delai-max-secondes:30}") long delaiMaxSecondes,
             ServiceDernierImport dernierImportService) {
         this.dossierSortie = dossierSortie;
         this.urlTableauDeBord = urlTableauDeBord;
         this.cheminScript = cheminScript;
         this.cheminNode = cheminNode;
+        this.delaiMaxSecondes = delaiMaxSecondes;
         this.dernierImportService = dernierImportService;
     }
 
@@ -68,18 +73,27 @@ public class ServiceExport {
         ProcessBuilder pb = new ProcessBuilder(
                 cheminNode, cheminScript, dossierSortie, urlTableauDeBord, argDateDernierImport)
                 .redirectErrorStream(true);
+        Path journal = null;
         try {
-            Process process = pb.start();
-            String sortie = new String(process.getInputStream().readAllBytes());
-            boolean termine = process.waitFor(DELAI_MAX_SECONDES, TimeUnit.SECONDS);
+            // Sortie du script redirigee vers un fichier, jamais lue en direct :
+            // lire le flux du processus bloque jusqu'a ce qu'il se termine, ce
+            // qui rendait le delai maximal inoperant (un script Node fige
+            // bloquait la requete indefiniment).
+            journal = Files.createTempFile("homebank-export-", ".log");
+            Process process = pb.redirectOutput(journal.toFile()).start();
+            boolean termine = process.waitFor(delaiMaxSecondes, TimeUnit.SECONDS);
             if (!termine) {
+                // Le navigateur lance par Playwright est un processus enfant de
+                // Node : sans ca, il survivrait a l'arret force du script.
+                process.descendants().forEach(ProcessHandle::destroyForcibly);
                 process.destroyForcibly();
-                throw new IllegalStateException("Export PDF : delai depasse (" + DELAI_MAX_SECONDES + "s)");
+                throw new IllegalStateException("Export PDF : delai depasse (" + delaiMaxSecondes + "s)");
             }
+            String sortie = new String(Files.readAllBytes(journal), StandardCharsets.UTF_8).trim();
             if (process.exitValue() != 0) {
-                throw new IllegalStateException("Export PDF echoue : " + sortie.trim());
+                throw new IllegalStateException("Export PDF echoue : " + sortie);
             }
-            log.info("Export PDF du tableau de bord termine : {}", sortie.trim());
+            log.info("Export PDF du tableau de bord termine : {}", sortie);
         } catch (IOException e) {
             throw new IllegalStateException(
                     "Impossible de lancer l'export PDF (node installe et dans le PATH ? "
@@ -87,6 +101,17 @@ public class ServiceExport {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Export PDF interrompu", e);
+        } finally {
+            supprimerJournal(journal);
+        }
+    }
+
+    private static void supprimerJournal(Path journal) {
+        if (journal == null) return;
+        try {
+            Files.deleteIfExists(journal);
+        } catch (IOException e) {
+            log.warn("Fichier temporaire d'export non supprime : {}", journal, e);
         }
     }
 }

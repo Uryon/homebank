@@ -19,6 +19,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -26,12 +28,14 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -63,6 +67,45 @@ public class ServiceTransaction {
         this.transactionMapper = transactionMapper;
     }
 
+    /**
+     * Point d'entree unique de GET /api/transactions : choisit le filtre a
+     * appliquer selon les parametres fournis, et refuse (400) une combinaison
+     * incoherente plutot que de l'ignorer en silence et renvoyer toutes les
+     * transactions (ex : "from" sans "to", ou un operateur sans montant).
+     */
+    public List<TransactionDTO> search(Long accountId, LocalDate from, LocalDate to,
+                                       String amountOperator, BigDecimal amountValue) {
+        boolean hasAmountFilter = validateAmountFilter(amountOperator, amountValue);
+        boolean hasPeriod = validatePeriod(from, to);
+        if (hasAmountFilter && hasPeriod) {
+            throw new IllegalArgumentException("La recherche par montant ne peut pas être combinée à une période.");
+        }
+        if (hasAmountFilter) {
+            return findByAmountFilter(accountId, amountOperator, amountValue);
+        }
+        if (hasPeriod) {
+            return accountId != null ? findByAccountAndPeriod(accountId, from, to) : findByPeriod(from, to);
+        }
+        return accountId != null ? findByAccount(accountId) : findAll();
+    }
+
+    private static boolean validateAmountFilter(String amountOperator, BigDecimal amountValue) {
+        if ((amountOperator == null) != (amountValue == null)) {
+            throw new IllegalArgumentException("La recherche par montant attend à la fois un opérateur et un montant.");
+        }
+        return amountOperator != null;
+    }
+
+    private static boolean validatePeriod(LocalDate from, LocalDate to) {
+        if ((from == null) != (to == null)) {
+            throw new IllegalArgumentException("Une période attend à la fois une date de début et une date de fin.");
+        }
+        if (from != null && from.isAfter(to)) {
+            throw new IllegalArgumentException("Période invalide : la date de début est postérieure à la date de fin.");
+        }
+        return from != null;
+    }
+
     public List<TransactionDTO> findAll() {
         return transactionRepository.findAllByOrderByDateDescIdDesc()
                 .stream()
@@ -81,6 +124,14 @@ public class ServiceTransaction {
     public List<TransactionDTO> findByPeriod(LocalDate from, LocalDate to) {
         return transactionRepository
                 .findByDateBetween(from, to)
+                .stream()
+                .map(transactionMapper::toDTO)
+                .toList();
+    }
+
+    public List<TransactionDTO> findByAccountAndPeriod(Long accountId, LocalDate from, LocalDate to) {
+        return transactionRepository
+                .findByAccountIdAndDateBetween(accountId, from, to)
                 .stream()
                 .map(transactionMapper::toDTO)
                 .toList();
@@ -118,6 +169,10 @@ public class ServiceTransaction {
                         ));
     }
 
+    // Transactionnel : applyPayload peut creer un tiers a la volee (voir
+    // ServiceTiers#resolveOrCreate) ; il ne doit pas survivre seul si
+    // l'enregistrement de la transaction echoue ensuite.
+    @Transactional
     public TransactionDTO create(TransactionDTO payload) {
         Transaction transaction = new Transaction();
         applyPayload(transaction, payload);
@@ -125,6 +180,10 @@ public class ServiceTransaction {
         return transactionMapper.toDTO(saved);
     }
 
+    // Transactionnel : applyPayload peut creer un tiers a la volee, qui ne doit
+    // pas survivre seul si l'enregistrement echoue. Le nettoyage de l'ancien
+    // tiers n'a lieu qu'apres le commit (voir prunePayeesAfterCommit).
+    @Transactional
     public TransactionDTO update(Long id, TransactionDTO payload) {
         Transaction existing = findEntityById(id);
 
@@ -142,13 +201,8 @@ public class ServiceTransaction {
         applyPayload(existing, payload);
         Transaction saved = transactionRepository.save(existing);
 
-        // Nettoyage de l'ancien tiers "best effort" : ne doit jamais faire
-        // echouer la sauvegarde de la transaction elle-meme (deja actee a ce
-        // stade), meme en cas de probleme inattendu sur ce nettoyage annexe.
-        try {
-            payeeService.cleanupIfPayeeChanged(previousPayee, saved.getPayee());
-        } catch (Exception e) {
-            log.warn("Echec du nettoyage de l'ancien tiers apres modification de la transaction {} : {}", id, e.getMessage(), e);
+        if (previousPayee != null && !previousPayee.equals(saved.getPayee())) {
+            prunePayeesAfterCommit(List.of(previousPayee));
         }
 
         return transactionMapper.toDTO(saved);
@@ -249,7 +303,7 @@ public class ServiceTransaction {
         List<Transaction> saved = transactionRepository.saveAll(transactions);
         log.info("Modification en masse de {} transaction(s)", saved.size());
 
-        cleanupOrphanPayees(orphanCandidates);
+        prunePayeesAfterCommit(orphanCandidates);
 
         return saved.stream().map(transactionMapper::toDTO).toList();
     }
@@ -298,7 +352,7 @@ public class ServiceTransaction {
         t.setPaymentMode(requested);
     }
 
-    /** Resout/cree le nouveau tiers depuis le texte fourni et l'affecte a la transaction ; releve l'ancien tiers s'il change (voir cleanupOrphanPayees). */
+    /** Resout/cree le nouveau tiers depuis le texte fourni et l'affecte a la transaction ; releve l'ancien tiers s'il change (voir prunePayeesAfterCommit). */
     private void applyBulkPayee(Transaction t, String payeeText, List<Tiers> orphanCandidates) {
         Tiers previousPayee = t.getPayee();
         Tiers resolvedPayee = (payeeText != null && !payeeText.isBlank())
@@ -310,13 +364,43 @@ public class ServiceTransaction {
         }
     }
 
-    /** Nettoyage "best effort" des anciens tiers devenus orphelins apres une modification en masse : ne doit jamais faire echouer la mise a jour elle-meme (deja actee). */
-    private void cleanupOrphanPayees(List<Tiers> orphanCandidates) {
-        for (Tiers previousPayee : orphanCandidates) {
+    /**
+     * Nettoyage "best effort" des anciens tiers devenus orphelins (voir
+     * ServiceTiers#deleteIfOrphan), reporte APRES le commit de la transaction
+     * en cours. L'executer dedans etait trompeur : une exception, meme
+     * rattrapee, marquait toute la transaction rollback-only (la suppression
+     * ou modification echouait alors au commit avec une 500), et le DELETE du
+     * tiers n'etait de toute facon envoye en base qu'au commit, hors du
+     * try/catch. Sans transaction active, le nettoyage est fait tout de suite.
+     */
+    private void prunePayeesAfterCommit(Collection<Tiers> previousPayees) {
+        List<Long> payeeIds = previousPayees.stream()
+                .filter(Objects::nonNull)
+                .map(Tiers::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (payeeIds.isEmpty()) return;
+
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            prunePayees(payeeIds);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                prunePayees(payeeIds);
+            }
+        });
+    }
+
+    /** Un tiers a la fois, chacun dans sa propre transaction : l'echec de l'un n'empeche pas le nettoyage des autres. */
+    private void prunePayees(List<Long> payeeIds) {
+        for (Long payeeId : payeeIds) {
             try {
-                payeeService.cleanupIfPayeeChanged(previousPayee, null);
-            } catch (Exception e) {
-                log.warn("Echec du nettoyage d'un ancien tiers apres modification en masse : {}", e.getMessage(), e);
+                payeeService.deleteIfOrphan(payeeId);
+            } catch (RuntimeException e) {
+                log.warn("Echec du nettoyage du tiers {} devenu orphelin : {}", payeeId, e.getMessage(), e);
             }
         }
     }
@@ -341,10 +425,8 @@ public class ServiceTransaction {
         transactions.forEach(this::recordDeletion);
         transactionRepository.deleteAll(transactions);
 
-        try {
-            payeeService.cleanupIfPayeeChanged(previousPayee, null);
-        } catch (Exception e) {
-            log.warn("Echec du nettoyage de l'ancien tiers apres suppression de la transaction {} : {}", id, e.getMessage(), e);
+        if (previousPayee != null) {
+            prunePayeesAfterCommit(List.of(previousPayee));
         }
     }
 
@@ -449,7 +531,7 @@ public class ServiceTransaction {
         }
         transactionRepository.deleteAll(transactions);
 
-        cleanupOrphanPayees(orphanCandidates);
+        prunePayeesAfterCommit(orphanCandidates);
         log.info("Suppression en masse de {} transaction(s) (empreinte de suppression : {})", transactions.size(), recordTombstone);
 
         return transactions.size();
@@ -479,10 +561,24 @@ public class ServiceTransaction {
         return transactionRepository.validateAllPending();
     }
 
-    /** Bascule le statut valide/en attente d'une seule transaction. */
+    /**
+     * Bascule le statut valide/en attente d'une transaction.
+     * Pour un virement, le statut est toujours applique aux deux cotes :
+     * ils constituent une seule operation financiere et ne doivent pas
+     * pouvoir etre rapproches independamment.
+     */
+    @Transactional
     public TransactionDTO toggleValidated(Long id) {
         Transaction t = findEntityById(id);
-        t.setValidated(!t.isValidated());
+        boolean validated = !t.isValidated();
+        t.setValidated(validated);
+
+        Transaction pair = t.getTransferTransaction();
+        if (pair != null) {
+            pair.setValidated(validated);
+            transactionRepository.save(pair);
+        }
+
         return transactionMapper.toDTO(transactionRepository.save(t));
     }
 
@@ -736,7 +832,7 @@ public class ServiceTransaction {
 
         Stream<GroupeDoublonDTO> probable = looseGroups.values().stream()
                 .filter(group -> group.size() > 1)
-                .filter(group -> !samePayeeForAll(group)) // sinon deja remonte parmi les "certains" ci-dessus
+                .filter(group -> !samePayeeForAll(group) || mixesImportedAndManual(group))
                 .map(group -> buildDuplicateGroup(group, false, false));
 
         Stream<GroupeDoublonDTO> reimbursements = findReimbursementGroups(all).stream();
@@ -834,6 +930,26 @@ public class ServiceTransaction {
     }
 
     /**
+     * Groupe "large" d'un meme tiers melangeant une transaction importee (avec
+     * identifiant bancaire) et une saisie manuelle (sans) : typiquement une
+     * ligne de releve ressaisie a la main apres coup. Les cles "certaines" de
+     * ces deux transactions different (identifiant externe d'un cote, compte/
+     * date/montant/tiers de l'autre, voir duplicateGroupKey), le doublon
+     * n'apparaissait donc nulle part. Un groupe d'un meme tiers sans ce
+     * melange est soit deja "certain" (aucun identifiant : meme cle), soit
+     * distingue explicitement par la banque (identifiants differents).
+     */
+    private static boolean mixesImportedAndManual(List<Transaction> group) {
+        boolean anyImported = group.stream().anyMatch(ServiceTransaction::hasExternalId);
+        boolean anyManual = group.stream().anyMatch(t -> !hasExternalId(t));
+        return anyImported && anyManual;
+    }
+
+    private static boolean hasExternalId(Transaction t) {
+        return t.getExternalId() != null && !t.getExternalId().isBlank();
+    }
+
+    /**
      * Marque les transactions passees comme n'etant pas des doublons : elles
      * seront exclues de findDuplicateGroups (voir Transaction#duplicateIgnored),
      * ce qui fait disparaitre de l'onglet "Doublons" tout groupe dont l'une des
@@ -883,6 +999,15 @@ public class ServiceTransaction {
 
         Compte from = accountService.findById(request.getFromAccountId());
         Compte to = accountService.findById(request.getToAccountId());
+        ServiceCompte.ensureNotArchived(from);
+        ServiceCompte.ensureNotArchived(to);
+        String fromCurrency = from.getCurrency();
+        String toCurrency = to.getCurrency();
+        if (fromCurrency == null || toCurrency == null || !fromCurrency.equalsIgnoreCase(toCurrency)) {
+            throw new IllegalArgumentException(
+                    "Les virements entre comptes de devises différentes ne sont pas pris en charge"
+            );
+        }
         LocalDate date = request.getDate() != null ? request.getDate() : LocalDate.now(ZoneId.systemDefault());
         BigDecimal amount = request.getAmount().abs();
 
@@ -918,8 +1043,24 @@ public class ServiceTransaction {
                     "Le compte est obligatoire"
             );
         }
+        // Verifies avant toute resolution/creation de tiers (qui utilise le
+        // montant) : sans quoi l'erreur ne remontait qu'a l'insertion SQL.
+        if (payload.getDate() == null) {
+            throw new IllegalArgumentException("La date est obligatoire");
+        }
+        if (payload.getAmount() == null) {
+            throw new IllegalArgumentException("Le montant est obligatoire");
+        }
 
         Compte account = accountService.findById(payload.getAccountId());
+        // Modifier une transaction deja presente sur un compte archive reste
+        // permis ; seule l'arrivee d'une transaction (creation, ou
+        // deplacement depuis un autre compte) y est refusee.
+        boolean staysOnSameAccount = transaction.getAccount() != null
+                && transaction.getAccount().getId().equals(account.getId());
+        if (!staysOnSameAccount) {
+            ServiceCompte.ensureNotArchived(account);
+        }
         transaction.setAccount(account);
 
         transaction.setDate(payload.getDate());

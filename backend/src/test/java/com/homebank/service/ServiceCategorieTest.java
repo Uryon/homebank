@@ -151,7 +151,62 @@ class ServiceCategorieTest {
         service.delete(1L);
 
         verify(payeeRepository).clearCategory(category);
-        verify(categoryRepository).deleteById(1L);
+        verify(categoryRepository).delete(category);
+    }
+
+    @Test
+    void delete_detacheAussiLesTiersDesSousCategoriesSupprimeesEnCascade() {
+        Categorie root = categorie(1L, "Loisirs", TypeCategorie.EXPENSE, null);
+        Categorie child = categorie(2L, "Cinema", TypeCategorie.EXPENSE, root);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(root));
+        when(categoryRepository.findByParent(root)).thenReturn(List.of(child));
+
+        service.delete(1L);
+
+        verify(payeeRepository).clearCategory(root);
+        verify(payeeRepository).clearCategory(child);
+        verify(categoryRepository).delete(root);
+    }
+
+    @Test
+    void delete_categorieUtiliseeParUneSousCategorie_estRefuseeSansRienModifier() {
+        Categorie root = categorie(1L, "Loisirs", TypeCategorie.EXPENSE, null);
+        Categorie child = categorie(2L, "Cinema", TypeCategorie.EXPENSE, root);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(root));
+        when(categoryRepository.findByParent(root)).thenReturn(List.of(child));
+        when(transactionRepository.countByCategoryIn(List.of(root, child))).thenReturn(7L);
+
+        assertThatThrownBy(() -> service.delete(1L))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("sous-catégories")
+                .hasMessageContaining("7 transaction(s)")
+                .hasMessageContaining("Fusionnez");
+        verifyNoInteractions(payeeRepository);
+        verify(categoryRepository, never()).delete(any(Categorie.class));
+    }
+
+    // --- validation ---
+
+    @Test
+    void merge_refuseUneDemandeSansCibleOuSansSources() {
+        assertThatThrownBy(() -> service.merge(List.of(1L), null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.merge(null, 1L)).isInstanceOf(IllegalArgumentException.class);
+        verify(categoryRepository, never()).delete(any(Categorie.class));
+    }
+
+    @Test
+    void create_refuseUnNomVide() {
+        CategorieDTO payload = CategorieDTO.builder().name("  ").type(TypeCategorie.EXPENSE).build();
+
+        assertThatThrownBy(() -> service.create(payload)).isInstanceOf(IllegalArgumentException.class);
+        verify(categoryRepository, never()).save(any(Categorie.class));
+    }
+
+    @Test
+    void create_refuseUneRacineSansType() {
+        CategorieDTO payload = CategorieDTO.builder().name("Divers").build();
+
+        assertThatThrownBy(() -> service.create(payload)).isInstanceOf(IllegalArgumentException.class);
     }
 
     // --- merge ---

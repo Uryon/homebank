@@ -15,6 +15,25 @@ export function formatAmount(value) {
   return amountFormatter.format(value || 0)
 }
 
+const rateFormatter = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 3 })
+
+/** Taux en pourcentage déjà exprimé en % (ex : 1.52) affiché à la française : « 1,52 % ». */
+export function formatRate(rate) {
+  return `${rateFormatter.format(Number(rate || 0))} %`
+}
+
+/**
+ * Date "AAAA-MM-JJ" dans le fuseau LOCAL (par defaut : aujourd'hui).
+ * Jamais via toISOString(), qui convertit en UTC : en France, minuit local
+ * devient la veille a 22h/23h UTC, ce qui decalait d'un jour la date du jour
+ * (entre minuit et 1h/2h du matin) et les bornes de mois des rapports.
+ */
+export function toLocalIsoDate(date = new Date()) {
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
 export function formatDate(iso) {
   if (!iso) return ''
   const [y, m, d] = iso.split('-')
