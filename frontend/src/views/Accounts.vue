@@ -64,6 +64,14 @@
           <td>{{ a.currency }}</td>
           <td>
             <div class="hover-actions">
+              <button class="icon-btn" title="Rapprocher avec un relevé bancaire" :aria-label="'Rapprocher ' + a.name" @click="reconciling = a"><Icon name="check" /></button>
+              <button
+                v-if="!a.archived"
+                class="icon-btn"
+                title="Actualiser le solde (valeur réelle du compte)"
+                :aria-label="'Actualiser le solde de ' + a.name"
+                @click="adjusting = a"
+              ><Icon name="refresh" /></button>
               <button class="icon-btn" title="Modifier le compte" :aria-label="'Modifier ' + a.name" @click="openEdit(a)"><Icon name="edit" /></button>
               <button
                 class="icon-btn"
@@ -94,6 +102,21 @@
       @close="showModal = false"
       @saved="onSaved"
       @deleted="onDeleted"
+    />
+
+    <ReconciliationModal
+      v-if="reconciling"
+      :account="reconciling"
+      @close="reconciling = null"
+      @validated="onReconciled"
+    />
+
+    <BalanceAdjustmentModal
+      v-if="adjusting"
+      :account="adjusting"
+      :current-balance="adjustingBalance"
+      @close="adjusting = null"
+      @saved="onBalanceAdjusted"
     />
 
     <!-- Modal : virement entre comptes -->
@@ -157,6 +180,8 @@ import { dataStore } from '../services/dataStore'
 import { alertApiError } from '../services/errors'
 import AmountInput from '../components/AmountInput.vue'
 import AccountModal from '../components/AccountModal.vue'
+import ReconciliationModal from '../components/ReconciliationModal.vue'
+import BalanceAdjustmentModal from '../components/BalanceAdjustmentModal.vue'
 import Icon from '../components/Icon.vue'
 import Money from '../components/Money.vue'
 import { accountBalanceRows, accountCountLabel, accountTypeLabel, activeAccounts, amountToneClass, computeAllocation, computeNetWorth, sortAccountsForDisplay } from '../services/accounts'
@@ -225,6 +250,25 @@ async function onSaved() {
 async function onDeleted() {
   showModal.value = false
   await dataStore.refreshAccounts()
+}
+
+/** Compte en cours de rapprochement avec un relevé bancaire (voir ReconciliationModal). */
+const reconciling = ref(null)
+
+async function onReconciled() {
+  reconciling.value = null
+  // Statuts « validé » modifiés côté serveur : rafraîchit le cache partagé des transactions.
+  await dataStore.refreshTransactions()
+}
+
+/** Compte dont on actualise le solde (voir BalanceAdjustmentModal). */
+const adjusting = ref(null)
+const adjustingBalance = computed(() => Number(balances.value[adjusting.value?.id] ?? 0))
+
+async function onBalanceAdjusted() {
+  adjusting.value = null
+  // Nouvelle transaction « Ajustement de solde » : rafraîchit transactions et soldes.
+  await dataStore.refreshTransactions()
 }
 
 /** Archivage/désarchivage direct depuis la ligne du tableau, sans passer par la modale. */

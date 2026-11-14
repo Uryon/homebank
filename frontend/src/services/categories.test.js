@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { flattenCategories } from './categories'
+import { flattenCategories, needsCategory } from './categories'
 
 describe('flattenCategories', () => {
   it('une racine sans enfant reste selectable', () => {
@@ -46,5 +46,17 @@ describe('flattenCategories', () => {
 
   it('renvoie une liste vide pour une liste de categories vide', () => {
     expect(flattenCategories([])).toEqual([])
+  })
+})
+
+describe('needsCategory', () => {
+  it('attend une catégorie pour une dépense ou un revenu sans catégorie', () => {
+    expect(needsCategory({ categoryId: null })).toBe(true)
+    expect(needsCategory({ categoryId: 4 })).toBe(false)
+  })
+
+  it("n'attend pas de catégorie pour un virement interne ni un ajustement de solde", () => {
+    expect(needsCategory({ categoryId: null, transferTransactionId: 12 })).toBe(false)
+    expect(needsCategory({ categoryId: null, balanceAdjustment: true })).toBe(false)
   })
 })

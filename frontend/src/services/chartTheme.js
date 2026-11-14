@@ -30,7 +30,7 @@ const CSS_VARIABLES = {
   tooltipBg: '--chart-tooltip-bg'
 }
 
-export const CHART_FONT_FAMILY = 'Inter, sans-serif'
+const CHART_FONT_FAMILY = 'Inter, sans-serif'
 
 /** Couleurs du thème courant ; valeurs du thème clair si une variable manque (tests, CSS non chargé). */
 export function readChartColors(root = globalThis.document?.documentElement) {

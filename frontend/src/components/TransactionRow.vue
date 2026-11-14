@@ -89,18 +89,19 @@
       </td>
       <td>{{ accountName(transaction.accountId) }}</td>
       <!-- Texte complet au survol s'il est tronqué : infobulle globale (OverflowTooltip.vue) -->
-      <td class="col-payee">{{ transaction.payee }}</td>
+      <td class="col-payee" :title="bankLabelTitle">{{ transaction.payee }}</td>
       <td class="col-cat">
         <span v-if="categoryInfo" class="cat-chip" :style="{ '--h': categoryInfo.hue }" :data-tooltip="categoryInfo.path">
           <span class="cat-mark" aria-hidden="true">{{ categoryInfo.icon }}</span>
           <span v-if="categoryInfo.parent" class="cat-parent">{{ categoryInfo.parent }} ›</span>
           <span class="cat-name">{{ categoryInfo.name }}</span>
         </span>
-        <span v-else class="cat-none">Sans catégorie</span>
+        <span v-else-if="awaitsCategory" class="cat-none">Sans catégorie</span>
+        <span v-else class="cat-none" title="Virement entre comptes ou ajustement de solde : ni dépense ni revenu, pas de catégorie">—</span>
       </td>
       <td class="text-muted">{{ displayMemo(transaction.memo) }}</td>
-      <td class="num amount negative"><Money v-if="transaction.amount < 0" :value="transaction.amount" /></td>
-      <td class="num amount positive"><Money v-if="transaction.amount > 0" :value="transaction.amount" /></td>
+      <td class="num amount negative"><Money v-if="transaction.amount < 0" :value="transaction.amount" :currency="accountCurrency" /></td>
+      <td class="num amount positive"><Money v-if="transaction.amount > 0" :value="transaction.amount" :currency="accountCurrency" /></td>
       <td class="num" @click.stop>
         <label :for="'tx-periodic-' + transaction.id" class="sr-only">Dépense périodique récurrente</label>
         <input
@@ -161,6 +162,7 @@ import Money from './Money.vue'
 import { formatAmount, formatDate, displayMemo } from '../services/format'
 import { findPayeeByName } from '../services/payee'
 import { accountOptionLabel } from '../services/accounts'
+import { needsCategory } from '../services/categories'
 
 const props = defineProps({
   transaction: { type: Object, required: true },
@@ -217,7 +219,6 @@ function buildEditForm(t) {
     categoryId: t.categoryId ?? null,
     paymentMode: t.paymentMode || 'NONE',
     memo: displayMemo(t.memo),
-    tags: t.tags || '',
     transferTransactionId: t.transferTransactionId ?? null,
     periodicExpense: !!t.periodicExpense,
     exceptional: !!t.exceptional,
@@ -287,6 +288,18 @@ function accountName(id) {
   return props.accountsById.get(id)?.name || '—'
 }
 
+/** « Sans catégorie » seulement si une catégorie est attendue (pas pour un virement interne ou un ajustement). */
+const awaitsCategory = computed(() => needsCategory(props.transaction))
+
+/** Devise du compte de la transaction : le montant s'affiche dans la monnaie réelle du compte. */
+const accountCurrency = computed(() => props.accountsById.get(props.transaction.accountId)?.currency)
+
+/** Info-bulle du tiers : libellé exact du relevé pour une transaction importée (utile quand le tiers a été renommé). */
+const bankLabelTitle = computed(() => {
+  const label = props.transaction.bankLabel
+  return label && label !== props.transaction.payee ? `Libellé bancaire : ${label}` : undefined
+})
+
 /**
  * Données d'affichage de la pastille de catégorie. La teinte (0-360) est
  * dérivée de la catégorie RACINE : une catégorie et ses sous-catégories
@@ -315,7 +328,7 @@ function isFuture(iso) {
 /** Libellé de la ligne pour les lecteurs d'écran quand elle reçoit le focus clavier. */
 const rowLabel = computed(() => {
   const t = props.transaction
-  const parts = [formatDate(t.date), t.payee || 'sans tiers', formatAmount(t.amount), categoryInfo.value?.path || 'sans catégorie']
+  const parts = [formatDate(t.date), t.payee || 'sans tiers', formatAmount(t.amount, accountCurrency.value), categoryInfo.value?.path || 'sans catégorie']
   return `${parts.join(', ')} — Entrée pour modifier`
 })
 
@@ -348,7 +361,6 @@ function confirmEdit() {
     categoryId: editForm.value.categoryId,
     paymentMode: editForm.value.paymentMode,
     memo: editForm.value.memo,
-    tags: editForm.value.tags,
     transferTransactionId: editForm.value.transferTransactionId,
     periodicExpense: editForm.value.periodicExpense,
     exceptional: editForm.value.exceptional,

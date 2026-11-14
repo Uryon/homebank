@@ -4,6 +4,9 @@
       <div>
         <h1>Import CSV/QIF</h1>
         <div class="subtitle">Importez vos relevés au format HomeBank (CSV) ou Quicken (QIF)</div>
+        <div v-if="lastImportText" class="last-import" role="status">
+          <Icon name="calendar" size="sm" /> Dernier import : {{ lastImportText }}
+        </div>
       </div>
     </div>
 
@@ -105,6 +108,23 @@
           Catégoriser ({{ uncategorizedCount }})
         </RouterLink>
       </div>
+      <!-- Lignes du relevé non reprises car supprimées à la main lors d'un import
+           précédent : à ressaisir si la suppression était une erreur. -->
+      <div v-if="previouslyDeleted.length" class="result-deleted">
+        <div class="step-label">
+          {{ previouslyDeleted.length }} ligne(s) non reprise(s) car supprimée(s) auparavant
+        </div>
+        <p class="result-deleted-hint">
+          Vous les aviez supprimées après un import précédent. Si c'était une erreur, ressaisissez-les depuis l'écran Transactions.
+        </p>
+        <ul>
+          <li v-for="(line, i) in previouslyDeleted" :key="i">
+            <span class="result-deleted-date">{{ formatDate(line.date) }}</span>
+            <span class="result-deleted-payee">{{ line.payee || 'Sans tiers' }}</span>
+            <Money :value="Number(line.amount)" :currency="importCurrency" />
+          </li>
+        </ul>
+      </div>
       <div v-if="result.errors?.length" class="result-errors">
         <div class="step-label">Détails des erreurs ({{ result.errors.length }})</div>
         <ul>
@@ -123,17 +143,20 @@ import { notify } from '../services/feedback'
 import { computed, onMounted, ref } from 'vue'
 import { ImportAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
+import { needsCategory } from '../services/categories'
 import { activeAccounts } from '../services/accounts'
 import { alertApiError } from '../services/errors'
-import { VISIBLE_ERRORS_LIMIT, formatFileSize, importFileProblem, importOutcome } from '../services/importResult'
+import { VISIBLE_ERRORS_LIMIT, formatFileSize, importFileProblem, importOutcome, lastImportLabel } from '../services/importResult'
 import Icon from '../components/Icon.vue'
+import Money from '../components/Money.vue'
+import { DEFAULT_CURRENCY, formatDate } from '../services/format'
 
 // Import impossible vers un compte archivé (refusé par le backend, voir
 // ServiceCompte#ensureNotArchived) : seuls les comptes actifs sont proposés.
 const accounts = computed(() => activeAccounts(dataStore.state.accounts))
 const accountsLoaded = computed(() => dataStore.state.loaded.accounts)
 /** Transactions encore sans catégorie (rafraîchies après l'import) : raccourci « Catégoriser ». */
-const uncategorizedCount = computed(() => dataStore.state.transactions.filter(t => !t.categoryId).length)
+const uncategorizedCount = computed(() => dataStore.state.transactions.filter(needsCategory).length)
 const accountId = ref(null)
 const format = ref('csv')
 const file = ref(null)
@@ -150,7 +173,27 @@ const visibleErrors = computed(() => {
 })
 const hiddenErrorCount = computed(() => (result.value?.errors?.length || 0) - visibleErrors.value.length)
 
+const previouslyDeleted = computed(() => result.value?.previouslyDeleted || [])
+/** Devise du compte importé, pour afficher les montants des lignes non reprises. */
+const importCurrency = computed(() =>
+  dataStore.state.accounts.find(a => a.id === accountId.value)?.currency || DEFAULT_CURRENCY)
+
 const fileSize = computed(() => formatFileSize(file.value?.size))
+
+/** Date-heure du dernier import réussi (null si aucun), pour savoir quand refaire un import. */
+const lastImportAt = ref(null)
+const lastImportLoaded = ref(false)
+const lastImportText = computed(() => lastImportLabel(lastImportAt.value) || (lastImportLoaded.value ? "aucun pour l'instant" : null))
+
+async function loadLastImport() {
+  try {
+    lastImportAt.value = (await ImportAPI.last()).dateTime
+    lastImportLoaded.value = true
+  } catch {
+    // Information secondaire : en cas d'échec, la ligne n'est simplement pas
+    // affichée (l'erreur serveur éventuelle est déjà signalée par App.vue).
+  }
+}
 
 /** Dépôt par glisser-déposer : même chemin que le sélecteur de fichier (onFileChange). */
 function onDrop(e) {
@@ -196,6 +239,7 @@ async function doImport() {
     // Les transactions importées changent le solde du compte : rafraîchit le
     // cache partagé (sidebar, page Comptes, page Transactions...).
     await dataStore.refreshTransactions()
+    await loadLastImport()
     const outcome = importOutcome(result.value)
     notify(outcome.message, outcome.type, outcome.type === 'success' ? undefined : 6000)
   } catch (e) {
@@ -206,6 +250,7 @@ async function doImport() {
 }
 
 onMounted(async () => {
+  loadLastImport()
   try {
     await dataStore.ensureLoaded()
   } catch (e) {
@@ -222,6 +267,14 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.last-import {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
 .import-layout {
   display: grid;
   grid-template-columns: minmax(0, 620px) minmax(0, 320px);
@@ -293,6 +346,12 @@ onMounted(async () => {
 .result-value { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.2; }
 .result-label { margin-top: 2px; font-size: 13px; color: var(--text-muted); }
 .result-errors { margin-top: 18px; }
+.result-deleted { margin-top: 18px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--amber-dim); border-left: 3px solid var(--amber); }
+.result-deleted-hint { margin: 4px 0 8px; color: var(--text-muted); font-size: 13px; }
+.result-deleted ul { margin: 0; padding: 0; list-style: none; max-height: 200px; overflow-y: auto; }
+.result-deleted li { display: grid; grid-template-columns: 90px 1fr auto; gap: 12px; align-items: center; padding: 4px 0; font-size: 13px; }
+.result-deleted-date { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.result-deleted-payee { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-errors-more { margin-top: 10px; }
 .result-next { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 .result-errors ul { margin: 8px 0 0; padding-left: 18px; color: var(--text-muted); font-size: 13px; max-height: 200px; overflow-y: auto; }

@@ -105,11 +105,10 @@ public class TestDataSeeder implements CommandLineRunner {
             LocalDate monthStart = today.withDayOfMonth(1).minusMonths(monthsAgo);
             boolean isCurrentMonth = monthsAgo == 0;
 
-            // Salaire, le dernier jour "raisonnable" du mois (le 28). STANDING_ORDER
-            // (virement permanent recu), et non TRANSFER : ce dernier marque un
-            // virement INTERNE entre deux comptes de l'appli (voir ServiceTransaction#createTransfer)
-            // et est exclu des rapports de revenus/depenses (voir ServiceRapport) —
-            // l'utiliser ici ferait disparaitre le salaire du tableau de bord de demo.
+            // Salaire, le dernier jour "raisonnable" du mois (le 28), en virement
+            // permanent recu. Seuls les virements INTERNES (deux transactions liees,
+            // voir Transaction#isInternalTransfer) sont exclus des rapports, pas le
+            // mode de paiement « Virement » en lui-meme.
             transaction(new TransactionCore(courant, monthStart.withDayOfMonth(28), new BigDecimal("2400.00")),
                     "Employeur", "Virement salaire", salaire, ModePaiement.STANDING_ORDER, true, false);
 
@@ -200,11 +199,6 @@ public class TestDataSeeder implements CommandLineRunner {
         exceptional.setExceptional(true);
         transactionRepository.save(exceptional);
 
-        // --- Transactions avec tags libres (voir Transaction#tags) ---
-        Transaction roadTrip = transaction(new TransactionCore(courant, today.minusDays(6), new BigDecimal("-64.00")),
-                "Station essence", "Plein avant départ", transport, ModePaiement.CARD, true, false);
-        roadTrip.setTags("roadtrip vacances");
-        transactionRepository.save(roadTrip);
 
         // --- Doublon volontaire (import CSV importe deux fois par erreur), pour demo de l'onglet "Doublons" ---
         transaction(new TransactionCore(courant, today.minusDays(12), new BigDecimal("-18.40")),

@@ -136,6 +136,15 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
     BigDecimal sumAmountByAccountIdAsOf(@Param("accountId") Long accountId, @Param("asOf") LocalDate asOf);
 
     /**
+     * Transactions en attente d'un compte jusqu'a `asOf` inclus, jumelle de
+     * virement chargee (fetch join) pour pouvoir la valider avec (voir
+     * ServiceRapprochement).
+     */
+    @Query("select t from Transaction t left join fetch t.transferTransaction"
+            + " where t.account.id = :accountId and t.date <= :asOf and t.validated = false")
+    List<Transaction> findPendingByAccountIdUpTo(@Param("accountId") Long accountId, @Param("asOf") LocalDate asOf);
+
+    /**
      * Somme des montants survenus jusqu'a `asOf`, pour tous les comptes en une
      * seule requete (voir ServiceCompte#allBalances) : lignes [accountId, somme].
      * Un compte sans transaction n'a pas de ligne.

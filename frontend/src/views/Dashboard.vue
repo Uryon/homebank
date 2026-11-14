@@ -152,7 +152,7 @@
                   <tr><th>Tiers</th><th>Montant</th></tr>
                 </thead>
                 <tbody>
-                  <tr v-for="item in periodicExpenses.expenses.items" :key="item.payee">
+                  <tr v-for="item in periodicExpenses.expenses.items" :key="item.transactionId">
                     <td>{{ item.payee || 'Sans nom' }}</td>
                     <td class="num amount negative"
                         @mouseenter="scheduleHover($event, item.payee || 'Sans nom', () => periodicItemRows(item, -1))"
@@ -188,7 +188,7 @@
                   <tr><th>Tiers</th><th>Montant</th></tr>
                 </thead>
                 <tbody>
-                  <tr v-for="item in periodicExpenses.revenues.items" :key="item.payee">
+                  <tr v-for="item in periodicExpenses.revenues.items" :key="item.transactionId">
                     <td>{{ item.payee || 'Sans nom' }}</td>
                     <td class="num amount positive"
                         @mouseenter="scheduleHover($event, item.payee || 'Sans nom', () => periodicItemRows(item, 1))"

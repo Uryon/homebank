@@ -4,15 +4,42 @@
  * et TransactionRow.vue.
  */
 
-// Instance creee une seule fois (et non a chaque appel de formatAmount) :
-// construire un Intl.NumberFormat est couteux, et formatAmount est appele
-// pour chaque transaction a chaque frappe dans la recherche (Transactions.vue)
-// en plus de chaque rendu de ligne — recreer l'instance a chaque fois ralentit
-// nettement la saisie sur un historique de plusieurs milliers de transactions.
-const amountFormatter = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' })
+export const DEFAULT_CURRENCY = 'EUR'
 
-export function formatAmount(value) {
-  return amountFormatter.format(value || 0)
+// Une instance par devise, creee une seule fois (et non a chaque appel de
+// formatAmount) : construire un Intl.NumberFormat est couteux, et
+// formatAmount est appele pour chaque transaction a chaque frappe dans la
+// recherche (Transactions.vue) en plus de chaque rendu de ligne — recreer
+// l'instance a chaque fois ralentit nettement la saisie sur un historique de
+// plusieurs milliers de transactions.
+const amountFormatters = new Map()
+
+/**
+ * Formatteur fr-FR de la devise d'un compte (code ISO a 3 lettres, voir
+ * Compte#currency) ; euro si la devise est absente ou refusee par Intl.
+ */
+export function currencyFormatter(currency) {
+  const code = (currency || DEFAULT_CURRENCY).toUpperCase()
+  let formatter = amountFormatters.get(code)
+  if (!formatter) {
+    try {
+      formatter = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: code })
+    } catch {
+      // Code mal forme (RangeError d'Intl) : on retombe sur l'euro plutot que de casser l'affichage.
+      formatter = currencyFormatter(DEFAULT_CURRENCY)
+    }
+    amountFormatters.set(code, formatter)
+  }
+  return formatter
+}
+
+/**
+ * Montant dans la devise donnee (euro par defaut). Les totaux qui melangent
+ * plusieurs comptes (patrimoine, tableau de bord) restent en euro : aucun
+ * taux de change n'est gere.
+ */
+export function formatAmount(value, currency = DEFAULT_CURRENCY) {
+  return currencyFormatter(currency).format(value || 0)
 }
 
 const rateFormatter = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 3 })

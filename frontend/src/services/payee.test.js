@@ -123,3 +123,14 @@ describe('matchesPatternField', () => {
     expect(matchesPatternField('Carrefour', '  ')).toBe(false)
   })
 })
+
+describe('matchesPatternField (miroir du backend)', () => {
+  it('ignore la casse des lettres accentuées', () => {
+    expect(matchesPatternField('Crèche', 'PRELEVEMENT CRÈCHE LES PETITS')).toBe(true)
+  })
+
+  it('traite un motif avec étoiles de début et de fin comme le même motif sans elles', () => {
+    expect(matchesPatternField('*Carrefour*Paris*', 'CB CARREFOUR MARKET PARIS 15')).toBe(true)
+    expect(matchesPatternField('*Carrefour*Paris*', 'Paris Carrefour')).toBe(false)
+  })
+})

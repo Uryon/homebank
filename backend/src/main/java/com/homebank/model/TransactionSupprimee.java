@@ -10,8 +10,8 @@ import java.time.ZoneId;
 
 /**
  * Empreinte d'une transaction supprimee manuellement (compte, date, montant,
- * tiers, identifiant externe), conservee apres suppression pour que
- * ServiceImport#isDuplicate la reconnaisse et ne la reimporte pas si le
+ * tiers, libelle bancaire), conservee apres suppression pour que
+ * ServiceImport#isAlreadyKnown la reconnaisse et ne la reimporte pas si le
  * releve bancaire source la contient encore lors d'un futur import (voir
  * ServiceTransaction#delete). Sans cette trace, une transaction supprimee
  * (ex : paire "depense remboursee" totalement effacee, voir
@@ -47,8 +47,9 @@ public class TransactionSupprimee {
     @Column(name = "payee_name")
     private String payeeName;
 
-    @Column(name = "external_id")
-    private String externalId;
+    /** Libelle bancaire de la transaction supprimee (voir Transaction#bankLabel), null si saisie manuelle. */
+    @Column(name = "bank_label", length = 500)
+    private String bankLabel;
 
     @Column(name = "deleted_at", nullable = false)
     private LocalDate deletedAt = LocalDate.now(ZoneId.systemDefault());

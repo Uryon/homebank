@@ -126,6 +126,7 @@ class ServiceImportTest {
         assertThat(saved.getPayee()).isEqualTo(carrefour);
         assertThat(saved.getCategory()).isEqualTo(categorie);
         assertThat(saved.isValidated()).isFalse();
+        assertThat(saved.getBankLabel()).isEqualTo("Carrefour");
     }
 
     @Test
@@ -167,6 +168,156 @@ class ServiceImportTest {
         assertThat(result.getDuplicates()).isEqualTo(1);
         assertThat(result.getImported()).isZero();
         verify(transactionRepository, never()).save(any());
+    }
+
+    // --- Doublons : comptage des occurrences (deux operations identiques d'un meme releve) ---
+
+    private static final String DEUX_CAFES_CSV = """
+            Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+            01/03/2024;;;Café du coin;;-2,50;;
+            01/03/2024;;;Café du coin;;-2,50;;
+            """;
+
+    private Tiers cafeConnu() {
+        Tiers cafe = tiers(3L, "Café du coin", null);
+        when(payeeService.findExisting(eq("Café du coin"), any(), anyList())).thenReturn(Optional.of(cafe));
+        return cafe;
+    }
+
+    private static Transaction cafeEnBase(Tiers cafe) {
+        Transaction t = new Transaction();
+        t.setDate(LocalDate.of(2024, 3, 1));
+        t.setAmount(new BigDecimal("-2.50"));
+        t.setPayee(cafe);
+        return t;
+    }
+
+    @Test
+    void importCsv_operationDontLeTiersAEteChangeDepuis_nEstPasReimportee() {
+        Tiers cafe = cafeConnu();
+        Transaction reaffectee = cafeEnBase(tiers(8L, "Boulangerie", null));
+        reaffectee.setBankLabel("Café du coin");
+        when(transactionRepository.findByAccount_IdOrderByDateDescIdDesc(1L)).thenReturn(List.of(reaffectee));
+        String csv = """
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                01/03/2024;;;Café du coin;;-2,50;;
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(cafe.getName()).isEqualTo("Café du coin");
+        assertThat(result.getImported()).isZero();
+        assertThat(result.getDuplicates()).isEqualTo(1);
+    }
+
+    @Test
+    void importCsv_operationDiviseeDepuis_nEstPasReimportee() {
+        Tiers cafe = cafeConnu();
+        Transaction premierePartie = cafeEnBase(cafe);
+        premierePartie.setAmount(new BigDecimal("-1.00"));
+        premierePartie.setSplitFromAmount(new BigDecimal("-2.50"));
+        Transaction secondePartie = cafeEnBase(cafe);
+        secondePartie.setAmount(new BigDecimal("-1.50"));
+        when(transactionRepository.findByAccount_IdOrderByDateDescIdDesc(1L))
+                .thenReturn(List.of(premierePartie, secondePartie));
+        String csv = """
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                01/03/2024;;;Café du coin;;-2,50;;
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getImported()).isZero();
+        assertThat(result.getDuplicates()).isEqualTo(1);
+    }
+
+    @Test
+    void importCsv_deuxOperationsIdentiquesDuMemeReleve_sontToutesDeuxImportees() {
+        cafeConnu();
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(DEUX_CAFES_CSV), 1L);
+
+        assertThat(result.getImported()).isEqualTo(2);
+        assertThat(result.getDuplicates()).isZero();
+        verify(transactionRepository, times(2)).save(any());
+    }
+
+    @Test
+    void importCsv_reimportDuMemeReleve_reconnaitLesDeuxOccurrencesCommeDoublons() {
+        Tiers cafe = cafeConnu();
+        when(transactionRepository.findByAccount_IdOrderByDateDescIdDesc(1L))
+                .thenReturn(List.of(cafeEnBase(cafe), cafeEnBase(cafe)));
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(DEUX_CAFES_CSV), 1L);
+
+        assertThat(result.getImported()).isZero();
+        assertThat(result.getDuplicates()).isEqualTo(2);
+        verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void importCsv_releveQuiChevauche_nImporteQueLOccurrenceManquante() {
+        Tiers cafe = cafeConnu();
+        when(transactionRepository.findByAccount_IdOrderByDateDescIdDesc(1L)).thenReturn(List.of(cafeEnBase(cafe)));
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(DEUX_CAFES_CSV), 1L);
+
+        assertThat(result.getImported()).isEqualTo(1);
+        assertThat(result.getDuplicates()).isEqualTo(1);
+        verify(transactionRepository, times(1)).save(any());
+    }
+
+    @Test
+    void importCsv_occurrenceSupprimeeVolontairement_neRevientPasAuReimport() {
+        Tiers cafe = cafeConnu();
+        TransactionSupprimee supprimee = new TransactionSupprimee();
+        supprimee.setDate(LocalDate.of(2024, 3, 1));
+        supprimee.setAmount(new BigDecimal("-2.50"));
+        supprimee.setPayeeName("Café du coin");
+        when(transactionRepository.findByAccount_IdOrderByDateDescIdDesc(1L)).thenReturn(List.of(cafeEnBase(cafe)));
+        when(deletedTransactionRepository.findByAccountId(1L)).thenReturn(List.of(supprimee));
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(DEUX_CAFES_CSV), 1L);
+
+        assertThat(result.getImported()).isZero();
+        assertThat(result.getDuplicates()).isEqualTo(2);
+        verify(transactionRepository, never()).save(any());
+        // Seule la seconde occurrence correspond a la suppression : signalee a part.
+        assertThat(result.getPreviouslyDeleted()).containsExactly(
+                new ServiceImport.LigneDejaSupprimee(LocalDate.of(2024, 3, 1), new BigDecimal("-2.50"), "Café du coin"));
+    }
+
+    @Test
+    void importCsv_doublonDUneTransactionEncoreEnBase_nEstPasSignaleCommeSupprime() {
+        Tiers cafe = cafeConnu();
+        when(transactionRepository.findByAccount_IdOrderByDateDescIdDesc(1L))
+                .thenReturn(List.of(cafeEnBase(cafe), cafeEnBase(cafe)));
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(DEUX_CAFES_CSV), 1L);
+
+        assertThat(result.getDuplicates()).isEqualTo(2);
+        assertThat(result.getPreviouslyDeleted()).isEmpty();
+    }
+
+    @Test
+    void importQif_deuxOperationsIdentiquesDuMemeReleve_sontToutesDeuxImportees() {
+        cafeConnu();
+        String qif = """
+                !Type:Bank
+                D01/03/2024
+                T-2,50
+                PCafé du coin
+                ^
+                D01/03/2024
+                T-2,50
+                PCafé du coin
+                ^
+                """;
+
+        ServiceImport.ImportResult result = service.importQif(qifFile(qif), 1L);
+
+        assertThat(result.getImported()).isEqualTo(2);
+        assertThat(result.getDuplicates()).isZero();
     }
 
     @Test
@@ -213,7 +364,7 @@ class ServiceImportTest {
 
         assertThat(result.getImported()).isEqualTo(1);
         verify(payeeService).findExisting(eq("VIR SEPA CARREFOUR PARIS"), eq(new BigDecimal("-45.50")), anyList());
-        verify(payeeService).createFromText(eq("VIR SEPA CARREFOUR PARIS"), anyList());
+        verify(payeeService).createFromBankLabel(eq("VIR SEPA CARREFOUR PARIS"), anyList());
     }
 
     @Test
@@ -423,6 +574,29 @@ class ServiceImportTest {
     }
 
     @Test
+    void importCsv_sansAucuneLigneLisible_nEnregistrePasDeDateDeDernierImport() {
+        String csv = """
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                pas une date;;;Carrefour;;-10,00;;
+                """;
+
+        service.importCsv(csvFile(csv), 1L);
+
+        verify(dernierImportService, never()).enregistrerImport();
+    }
+
+    @Test
+    void importCsv_releveDejaImporte_enregistreQuandMemeLaDateDeDernierImport() {
+        Tiers cafe = cafeConnu();
+        when(transactionRepository.findByAccount_IdOrderByDateDescIdDesc(1L))
+                .thenReturn(List.of(cafeEnBase(cafe), cafeEnBase(cafe)));
+
+        service.importCsv(csvFile(DEUX_CAFES_CSV), 1L);
+
+        verify(dernierImportService).enregistrerImport();
+    }
+
+    @Test
     void importQif_doublon_estCompteCommeDoublonSansCreerDeTransaction() {
         Transaction existing = new Transaction();
         existing.setDate(LocalDate.of(2024, 3, 1));
@@ -466,14 +640,14 @@ class ServiceImportTest {
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
 
         assertThat(result.getDuplicates()).isEqualTo(1);
-        verify(payeeService, never()).createFromText(anyString(), anyList());
+        verify(payeeService, never()).createFromBankLabel(anyString(), anyList());
         verify(transactionRepository, never()).save(any());
     }
 
     @Test
     void importCsv_nouveauTiers_estCreeUneFoisLaLigneConfirmeeNonDoublon() {
         Tiers cree = tiers(8L, "Boulangerie Martin", null);
-        when(payeeService.createFromText(eq("Boulangerie Martin"), anyList())).thenReturn(cree);
+        when(payeeService.createFromBankLabel(eq("Boulangerie Martin"), anyList())).thenReturn(cree);
 
         String csv = """
                 Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
@@ -490,7 +664,7 @@ class ServiceImportTest {
     @Test
     void importCsv_echecDEnregistrementDUneLigne_annuleSonTiersCreeEtLeRetireDuCache() {
         Tiers cree = tiers(8L, "Boulangerie Martin", null);
-        when(payeeService.createFromText(eq("Boulangerie Martin"), anyList())).thenAnswer(invocation -> {
+        when(payeeService.createFromBankLabel(eq("Boulangerie Martin"), anyList())).thenAnswer(invocation -> {
             List<Tiers> known = invocation.getArgument(1);
             known.add(cree);
             return cree;

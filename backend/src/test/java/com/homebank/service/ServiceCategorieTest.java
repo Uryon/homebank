@@ -362,4 +362,69 @@ class ServiceCategorieTest {
         assertThat(result).isEqualTo(child);
         verify(categoryRepository, never()).save(any());
     }
+
+    @Test
+    void findOrCreateByName_formatParentEnfantAvecEspaces_retrouveLEnfantExistantAuLieuDeLeRecreer() {
+        Categorie parent = categorie(1L, "Alimentation", TypeCategorie.EXPENSE, null);
+        Categorie child = categorie(2L, "Restaurant", TypeCategorie.EXPENSE, parent);
+        when(categoryRepository.findByNameIgnoreCaseAndParentIsNull("Alimentation")).thenReturn(Optional.of(parent));
+        when(categoryRepository.findByNameIgnoreCaseAndParent("Restaurant", parent)).thenReturn(Optional.of(child));
+
+        assertThat(service.findOrCreateByName("Alimentation: Restaurant")).isEqualTo(child);
+        verify(categoryRepository, never()).save(any());
+    }
+
+    @Test
+    void findOrCreateByName_enfantVide_renvoieLeParentSansCreerDeSousCategorieSansNom() {
+        Categorie parent = categorie(1L, "Alimentation", TypeCategorie.EXPENSE, null);
+        when(categoryRepository.findByNameIgnoreCaseAndParentIsNull("Alimentation")).thenReturn(Optional.of(parent));
+
+        assertThat(service.findOrCreateByName("Alimentation:")).isEqualTo(parent);
+        verify(categoryRepository, never()).save(any());
+    }
+
+    // --- unicite du nom parmi les soeurs ---
+
+    @Test
+    void create_nomDejaPrisParUneCategorieRacine_refuse() {
+        when(categoryRepository.findByNameIgnoreCaseAndParentIsNull("loisirs"))
+                .thenReturn(Optional.of(categorie(1L, "Loisirs", TypeCategorie.EXPENSE, null)));
+        CategorieDTO payload = CategorieDTO.builder().name("loisirs").type(TypeCategorie.EXPENSE).build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("existe déjà");
+        verify(categoryRepository, never()).save(any());
+    }
+
+    @Test
+    void update_conserverSonPropreNom_nEstPasUnDoublon() {
+        Categorie existing = categorie(1L, "Loisirs", TypeCategorie.EXPENSE, null);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(categoryRepository.findByNameIgnoreCaseAndParentIsNull("Loisirs")).thenReturn(Optional.of(existing));
+        CategorieDTO payload = CategorieDTO.builder().name("Loisirs").type(TypeCategorie.EXPENSE).icon("🎮").build();
+
+        assertThat(service.update(1L, payload).getIcon()).isEqualTo("🎮");
+    }
+
+    @Test
+    void merge_sousCategorieHomonymeDansLaCible_estFusionneeAuLieuDEtreDupliquee() {
+        Categorie target = categorie(1L, "Courses", TypeCategorie.EXPENSE, null);
+        Categorie source = categorie(2L, "Supermarché", TypeCategorie.EXPENSE, null);
+        Categorie sourceChild = categorie(3L, "Bio", TypeCategorie.EXPENSE, source);
+        Categorie targetChild = categorie(4L, "Bio", TypeCategorie.EXPENSE, target);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(target));
+        when(categoryRepository.findById(2L)).thenReturn(Optional.of(source));
+        when(categoryRepository.findById(3L)).thenReturn(Optional.of(sourceChild));
+        when(categoryRepository.findById(4L)).thenReturn(Optional.of(targetChild));
+        when(categoryRepository.findByParent(source)).thenReturn(List.of(sourceChild));
+        when(categoryRepository.findByNameIgnoreCaseAndParent("Bio", target)).thenReturn(Optional.of(targetChild));
+
+        service.merge(List.of(2L), 1L);
+
+        verify(transactionRepository).reassignCategory(sourceChild, targetChild);
+        verify(categoryRepository).delete(sourceChild);
+        verify(categoryRepository).delete(source);
+        assertThat(sourceChild.getParent()).isEqualTo(source);
+    }
 }

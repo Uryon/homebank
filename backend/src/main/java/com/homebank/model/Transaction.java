@@ -58,13 +58,38 @@ public class Transaction {
     @Column(nullable = false)
     private ModePaiement paymentMode = ModePaiement.NONE;
 
-    /** Tags libres separes par des espaces, comme dans HomeBank */
-    private String tags;
 
     /** Pour les virements internes : transaction correspondante sur l'autre compte */
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "transfer_transaction_id")
     private Transaction transferTransaction;
+
+    /**
+     * Vrai pour un cote de virement INTERNE entre deux comptes de l'appli
+     * (voir ServiceTransaction#createTransfer) : c'est la liaison avec l'autre
+     * cote qui le caracterise, pas le mode de paiement. « Virement » reste un
+     * mode de paiement ordinaire (loyer, salaire...), compte normalement dans
+     * les rapports. Le test de nullite ne charge pas la jumelle (proxy LAZY).
+     */
+    public boolean isInternalTransfer() {
+        return transferTransaction != null;
+    }
+
+    /**
+     * Montant de la transaction AVANT sa premiere division (voir
+     * ServiceTransaction#splitTransaction), null si elle n'a jamais ete
+     * divisee. Le releve bancaire, lui, contient toujours le montant d'origine :
+     * sans ce souvenir, la detection de doublons de l'import (voir
+     * importKeyAmount) ne reconnaissait plus la ligne apres division, et le
+     * prochain import qui chevauchait le releve la reimportait en entier.
+     */
+    @Column(name = "split_from_amount", precision = 19, scale = 2)
+    private BigDecimal splitFromAmount;
+
+    /** Montant tel qu'il figure sur le releve : celui d'avant division le cas echeant (voir splitFromAmount). */
+    public BigDecimal importKeyAmount() {
+        return splitFromAmount != null ? splitFromAmount : amount;
+    }
 
     /**
      * Statut de rapprochement : false = "en attente" (import, ajout manuel ou
@@ -99,12 +124,14 @@ public class Transaction {
     private boolean exceptional = false;
 
     /**
-     * Identifiant unique fourni par la banque ou le fichier importe (si
-     * disponible), utilise en priorite pour la detection de doublons lors
-     * des imports CSV/QIF ou d'une future synchronisation bancaire.
+     * Libelle brut de la ligne du releve, enregistre a l'import (null pour une
+     * saisie manuelle) : marque la transaction comme importee, et sert a la
+     * reconnaitre aux imports suivants meme si l'utilisateur a change son
+     * tiers depuis (voir ServiceImport#loadDuplicateCounter). Affiche en
+     * info-bulle sur le tiers.
      */
-    @Column(name = "external_id")
-    private String externalId;
+    @Column(name = "bank_label", length = 500)
+    private String bankLabel;
 
     /**
      * Coche par l'utilisateur depuis l'onglet "Doublons" pour indiquer qu'un
@@ -129,4 +156,15 @@ public class Transaction {
      */
     @Column(name = "periodic_suggestion_ignored", nullable = false, columnDefinition = "boolean not null default false")
     private boolean periodicSuggestionIgnored = false;
+
+    /**
+     * Ajustement de solde (voir ServiceTransaction#adjustAccountBalance) :
+     * ecart entre la valeur reelle d'un compte saisie par l'utilisateur (ex :
+     * placement dont la valeur suit la bourse) et le solde calcule. Compte
+     * dans le solde, mais ce n'est ni une depense ni un revenu : exclu des
+     * rapports, des suggestions periodiques et des doublons, et ne demande
+     * jamais de categorie.
+     */
+    @Column(name = "balance_adjustment", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean balanceAdjustment = false;
 }

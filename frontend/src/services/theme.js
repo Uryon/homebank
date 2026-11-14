@@ -9,7 +9,7 @@ import { computed, ref, watch } from 'vue'
  * éviter un flash de thème clair au chargement.
  */
 export const THEME_STORAGE_KEY = 'homebank-theme'
-export const THEME_CHOICES = ['system', 'light', 'dark']
+const THEME_CHOICES = ['system', 'light', 'dark']
 
 export function normalizeThemePreference(value) {
   return THEME_CHOICES.includes(value) ? value : 'system'

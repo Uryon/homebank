@@ -24,9 +24,9 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 
 @Service
 public class ServiceImport {
@@ -77,7 +77,18 @@ public class ServiceImport {
         private int duplicates;
         private int skipped;
         private final List<String> errors = new ArrayList<>();
+        /**
+         * Lignes ignorees (comptees dans duplicates) parce qu'une operation
+         * identique avait ete supprimee a la main depuis un import precedent :
+         * listees a part pour que l'utilisateur voie qu'une ligne de son releve
+         * n'a pas ete reprise, et puisse la ressaisir si la suppression etait
+         * une erreur (sinon l'ecart n'apparaissait qu'au rapprochement).
+         */
+        private final List<LigneDejaSupprimee> previouslyDeleted = new ArrayList<>();
     }
+
+    /** Ligne du fichier ignoree car correspondant a une operation supprimee auparavant (voir ImportResult#previouslyDeleted). */
+    public record LigneDejaSupprimee(LocalDate date, BigDecimal amount, String payee) {}
 
     /**
      * Tiers d'une ligne importee : le tiers deja connu qui correspond au texte
@@ -91,7 +102,7 @@ public class ServiceImport {
         /** Nom compare aux doublons : celui du tiers existant, ou celui que portera le tiers cree. */
         String canonicalName() {
             if (existing != null) return existing.getName();
-            return text != null && !text.isBlank() ? text.trim() : text;
+            return text != null && !text.isBlank() ? ServiceTiers.suggestFromBankLabel(text).name() : text;
         }
     }
 
@@ -105,11 +116,18 @@ public class ServiceImport {
         return new TiersLigne(payeeService.findExisting(payeeText, amount, knownPayees).orElse(null), payeeText);
     }
 
+    /** Libelle bancaire conserve sur la transaction (voir Transaction#bankLabel), tronque a la taille de la colonne. */
+    private static String bankLabelOf(String text) {
+        if (text == null || text.isBlank()) return null;
+        String trimmed = text.trim();
+        return trimmed.length() > 500 ? trimmed.substring(0, 500) : trimmed;
+    }
+
     /** Tiers a enregistrer sur la transaction : l'existant, sinon cree a partir du texte (null si texte vide). */
     private Tiers payeeToSave(TiersLigne payeeLine, List<Tiers> knownPayees) {
         if (payeeLine.existing() != null) return payeeLine.existing();
         String text = payeeLine.text();
-        return text != null && !text.isBlank() ? payeeService.createFromText(text, knownPayees) : null;
+        return text != null && !text.isBlank() ? payeeService.createFromBankLabel(text, knownPayees) : null;
     }
 
     private Categorie resolveCategory(Tiers payee, String categoryNameFromFile, BigDecimal amount) {
@@ -128,42 +146,84 @@ public class ServiceImport {
     }
 
     /**
+     * Detection de doublons d'un import, par COMPTAGE des occurrences de
+     * chaque cle (date+montant+tiers canonique, insensible a la casse, voir
+     * CleDoublon) : la n-ieme ligne du fichier portant une cle donnee est un
+     * doublon seulement si cette cle existait deja au moins n fois sur le
+     * compte avant l'import. Deux operations reellement identiques d'un meme
+     * releve (ex : deux cafes au meme prix le meme jour) sont ainsi toutes
+     * deux importees, alors qu'un simple test "cle deja vue" ecartait la
+     * seconde comme doublon ; reimporter le meme releve n'importe toujours
+     * rien, et un releve qui chevauche le precedent n'importe que les
+     * occurrences manquantes.
+     */
+    static final class CompteurDoublons {
+        /** Ce que represente une ligne du fichier par rapport a l'existant. */
+        enum Occurrence { NOUVELLE, EXISTANTE, SUPPRIMEE }
+
+        private final Map<CleDoublon, Integer> existing = new HashMap<>();
+        private final Map<CleDoublon, Integer> deleted = new HashMap<>();
+        private final Map<CleDoublon, Integer> seenInFile = new HashMap<>();
+
+        void addExisting(CleDoublon key) {
+            existing.merge(key, 1, Integer::sum);
+        }
+
+        void addDeleted(CleDoublon key) {
+            deleted.merge(key, 1, Integer::sum);
+        }
+
+        /**
+         * Enregistre une occurrence de la cle dans le fichier. Les premieres
+         * occurrences correspondent aux transactions encore en base, les
+         * suivantes aux transactions supprimees, les autres sont nouvelles.
+         */
+        Occurrence classify(CleDoublon key) {
+            int occurrenceInFile = seenInFile.merge(key, 1, Integer::sum);
+            int existingCount = existing.getOrDefault(key, 0);
+            if (occurrenceInFile <= existingCount) return Occurrence.EXISTANTE;
+            if (occurrenceInFile <= existingCount + deleted.getOrDefault(key, 0)) return Occurrence.SUPPRIMEE;
+            return Occurrence.NOUVELLE;
+        }
+    }
+
+    /**
      * Precharge, en une seule requete, les cles (date+montant+tiers) de
      * toutes les transactions deja enregistrees sur ce compte, ET des
      * transactions supprimees manuellement depuis (voir TransactionSupprimee /
      * ServiceTransaction#delete) : un import peut contenir des centaines/
      * milliers de lignes, et interroger la base une fois par ligne pour
-     * verifier les doublons (comme avant) rendait l'import lineairement plus
-     * lent avec la taille du fichier ET la taille de l'historique deja
-     * importe. La detection se fait ensuite en memoire, en O(1) par ligne.
-     * Inclure les transactions supprimees evite qu'une transaction volontairement
-     * effacee (ex : paire "depense remboursee" nettoyee depuis l'onglet
-     * Doublons) ne revienne au prochain import simplement parce qu'elle
-     * figure encore dans le releve bancaire source.
+     * verifier les doublons rendait l'import lineairement plus lent avec la
+     * taille du fichier ET de l'historique. La detection se fait ensuite en
+     * memoire, en O(1) par ligne. Inclure les transactions supprimees evite
+     * qu'une transaction volontairement effacee (ex : paire "depense
+     * remboursee" nettoyee depuis l'onglet Doublons) ne revienne au prochain
+     * import simplement parce qu'elle figure encore dans le releve source.
      */
-    private Set<CleDoublon> loadDuplicateKeys(Long accountId) {
-        Set<CleDoublon> keys = new HashSet<>();
+    private CompteurDoublons loadDuplicateCounter(Long accountId, List<Tiers> knownPayees) {
+        CompteurDoublons counter = new CompteurDoublons();
         for (Transaction t : transactionRepository.findByAccount_IdOrderByDateDescIdDesc(accountId)) {
-            keys.add(CleDoublon.of(t.getDate(), t.getAmount(),
-                    t.getPayee() != null ? t.getPayee().getName() : null));
+            String payee = knownPayeeName(t.getBankLabel(), t.importKeyAmount(), t.getPayee() != null ? t.getPayee().getName() : null, knownPayees);
+            counter.addExisting(CleDoublon.of(t.getDate(), t.importKeyAmount(), payee));
         }
         for (TransactionSupprimee deleted : deletedTransactionRepository.findByAccountId(accountId)) {
-            keys.add(CleDoublon.of(deleted.getDate(), deleted.getAmount(), deleted.getPayeeName()));
+            String payee = knownPayeeName(deleted.getBankLabel(), deleted.getAmount(), deleted.getPayeeName(), knownPayees);
+            counter.addDeleted(CleDoublon.of(deleted.getDate(), deleted.getAmount(), payee));
         }
-        return keys;
+        return counter;
     }
 
     /**
-     * Detection de doublons, commune aux imports CSV/QIF : il y a doublon si
-     * une transaction du meme compte, a la meme date, pour le meme montant et
-     * le meme tiers (canonique, insensible a la casse) existe deja, ou a
-     * existe puis a ete supprimee (voir CleDoublon / loadDuplicateKeys).
-     * Cette combinaison large (date+montant+tiers) evite de rejeter deux
-     * operations distinctes qui se ressembleraient partiellement.
+     * Tiers a comparer pour une transaction deja connue. Importee (libelle
+     * bancaire conserve) : le tiers que l'import reconnaitrait AUJOURD'HUI pour
+     * ce libelle, exactement comme pour les lignes du fichier — la ligne reste
+     * reconnue meme si l'utilisateur a change le tiers de la transaction
+     * depuis (ex : « PAYPAL » reaffecte a « Vinted »), ce qui la faisait
+     * reimporter. Saisie manuelle : son tiers actuel.
      */
-    private static boolean isDuplicate(LocalDate date, BigDecimal amount, String canonicalPayee,
-                                       Set<CleDoublon> existingKeys) {
-        return existingKeys.contains(CleDoublon.of(date, amount, canonicalPayee));
+    private String knownPayeeName(String bankLabel, BigDecimal amount, String currentPayeeName, List<Tiers> knownPayees) {
+        if (bankLabel == null || bankLabel.isBlank()) return currentPayeeName;
+        return matchPayee(bankLabel, amount, knownPayees).canonicalName();
     }
 
     /**
@@ -171,10 +231,25 @@ public class ServiceImport {
      * processCsvLine/finalizeQifRecord), pour eviter de le faire transiter en
      * une longue liste de parametres individuels.
      */
-    private record ImportContext(Compte account, List<Tiers> knownPayees, Set<CleDoublon> existingKeys, ImportResult result) {}
+    private record ImportContext(Compte account, List<Tiers> knownPayees, CompteurDoublons duplicates, ImportResult result) {}
+
+    /**
+     * Vrai (et compte comme doublon) si la ligne correspond a une transaction
+     * deja en base ou supprimee depuis ; une ligne supprimee est aussi listee
+     * dans previouslyDeleted.
+     */
+    private static boolean isAlreadyKnown(ImportContext ctx, LocalDate date, BigDecimal amount, String canonicalPayee) {
+        CompteurDoublons.Occurrence occurrence = ctx.duplicates().classify(CleDoublon.of(date, amount, canonicalPayee));
+        if (occurrence == CompteurDoublons.Occurrence.NOUVELLE) return false;
+        ctx.result().duplicates++;
+        if (occurrence == CompteurDoublons.Occurrence.SUPPRIMEE) {
+            ctx.result().previouslyDeleted.add(new LigneDejaSupprimee(date, amount, canonicalPayee));
+        }
+        return true;
+    }
 
     /** Donnees d'une ligne CSV / d'un enregistrement QIF, deja lues et reconnues comme non doublon. */
-    private record LigneImportee(LocalDate date, BigDecimal amount, String memo, String tags,
+    private record LigneImportee(LocalDate date, BigDecimal amount, String memo,
                                  String categoryName, TiersLigne payeeLine) {}
 
     /**
@@ -195,10 +270,10 @@ public class ServiceImport {
                 t.setDate(line.date());
                 t.setAmount(line.amount());
                 t.setMemo(sanitizeMemo(line.memo()));
-                t.setTags(line.tags());
                 t.setPayee(payee);
                 t.setCategory(resolveCategory(payee, line.categoryName(), line.amount()));
                 t.setValidated(false); // toute transaction importee demarre "en attente"
+                t.setBankLabel(bankLabelOf(line.payeeLine().text()));
                 transactionRepository.save(t);
             });
         } catch (RuntimeException e) {
@@ -207,28 +282,28 @@ public class ServiceImport {
             knownPayees.subList(knownPayeesBefore, knownPayees.size()).clear();
             throw e;
         }
-        ctx.existingKeys().add(CleDoublon.of(line.date(), line.amount(), line.payeeLine().canonicalName()));
         ctx.result().imported++;
     }
 
     /**
      * Positions des colonnes utiles dans un CSV, deduites de sa ligne
      * d'en-tete (voir detectLayout ci-dessous). -1 pour une colonne absente
-     * de ce format (ex : pas de memo/categorie/tags separes dans un export
+     * de ce format (ex : pas de memo/categorie separes dans un export
      * bancaire brut).
      */
-    private record CsvLayout(int dateIdx, int payeeIdx, int memoIdx, int amountIdx, int categoryIdx, int tagsIdx) {
+    private record CsvLayout(int dateIdx, int payeeIdx, int memoIdx, int amountIdx, int categoryIdx) {
 
         /** Repli si aucune ligne d'en-tete n'est reconnue : format HomeBank classique, positions fixes. */
-        static final CsvLayout HOMEBANK_DEFAULT = new CsvLayout(0, 3, 4, 5, 6, 7);
+        static final CsvLayout HOMEBANK_DEFAULT = new CsvLayout(0, 3, 4, 5, 6);
 
-        /** Export bancaire brut (une seule colonne "Libelle" texte + un montant) : pas de memo/categorie/tags separes. */
-        static final CsvLayout BANK_STATEMENT = new CsvLayout(0, 1, -1, 2, -1, -1);
+        /** Export bancaire brut (une seule colonne "Libelle" texte + un montant) : pas de memo/categorie separes. */
+        static final CsvLayout BANK_STATEMENT = new CsvLayout(0, 1, -1, 2, -1);
     }
 
     /**
      * Import d'un fichier CSV. Reconnait deux formats :
-     * - le format HomeBank : date;paymode;info;payee;memo;amount;category;tags ;
+     * - le format HomeBank : date;paymode;info;payee;memo;amount;category;tags
+     *   (colonnes paymode, info et tags ignorees) ;
      * - un export bancaire brut (ex : "Date;Libelle;Montant(EUROS)"), tel que
      *   telecharge directement depuis l'espace client d'une banque : peut etre
      *   precede de quelques lignes de metadonnees ("Numero Compte;...", "Solde;...")
@@ -241,10 +316,9 @@ public class ServiceImport {
     public ImportResult importCsv(MultipartFile file, Long accountId) {
         Compte account = accountService.findById(accountId);
         ServiceCompte.ensureNotArchived(account);
-        dernierImportService.enregistrerImport();
         ImportResult result = new ImportResult();
         List<Tiers> knownPayees = payeeService.findAllForMatching();
-        Set<CleDoublon> existingKeys = loadDuplicateKeys(accountId);
+        CompteurDoublons duplicates = loadDuplicateCounter(accountId, knownPayees);
 
         List<String> lines;
         try {
@@ -261,12 +335,26 @@ public class ServiceImport {
         int firstDataLine = headerLineIndex >= 0 ? headerLineIndex + 1 : 0;
         int minRequiredFields = Math.max(layout.dateIdx(), layout.amountIdx()) + 1;
 
-        ImportContext ctx = new ImportContext(account, knownPayees, existingKeys, result);
+        ImportContext ctx = new ImportContext(account, knownPayees, duplicates, result);
         for (int i = firstDataLine; i < lines.size(); i++) {
             processCsvLine(lines.get(i), i + 1, layout, minRequiredFields, ctx);
         }
 
+        recordImportIfDataRecognized(result);
         return result;
+    }
+
+    /**
+     * Memorise la date du dernier import (voir ServiceDernierImport) seulement
+     * si le fichier a reellement ete lu : au moins une operation reconnue,
+     * nouvelle ou deja presente (un releve deja importe confirme que les
+     * donnees sont a jour). Un fichier illisible, vide ou dont toutes les
+     * lignes sont en erreur ne doit pas faire croire a un import recent.
+     */
+    private void recordImportIfDataRecognized(ImportResult result) {
+        if (result.imported + result.duplicates > 0) {
+            dernierImportService.enregistrerImport();
+        }
     }
 
     /** Traite une seule ligne de donnees du CSV (voir importCsv) : ligne vide ou insuffisante ignoree, doublon compte a part, sinon transaction creee. */
@@ -287,17 +375,13 @@ public class ServiceImport {
             String memo = csvField(fields, layout.memoIdx());
             BigDecimal amount = parseAmount(csvField(fields, layout.amountIdx()));
             String categoryName = csvField(fields, layout.categoryIdx());
-            String tags = csvField(fields, layout.tagsIdx());
 
             TiersLigne payeeLine = matchPayee(payeeText, amount, ctx.knownPayees());
             String canonicalPayee = payeeLine.canonicalName();
 
-            if (isDuplicate(date, amount, canonicalPayee, ctx.existingKeys())) {
-                result.duplicates++;
-                return;
-            }
+            if (isAlreadyKnown(ctx, date, amount, canonicalPayee)) return;
 
-            saveLine(ctx, new LigneImportee(date, amount, memo, tags, categoryName, payeeLine));
+            saveLine(ctx, new LigneImportee(date, amount, memo, categoryName, payeeLine));
         } catch (Exception e) {
             result.skipped++;
             result.errors.add("Ligne " + lineNumber + " : " + describeError(e));
@@ -408,11 +492,10 @@ public class ServiceImport {
     public ImportResult importQif(MultipartFile file, Long accountId) {
         Compte account = accountService.findById(accountId);
         ServiceCompte.ensureNotArchived(account);
-        dernierImportService.enregistrerImport();
         ImportResult result = new ImportResult();
         List<Tiers> knownPayees = payeeService.findAllForMatching();
-        Set<CleDoublon> existingKeys = loadDuplicateKeys(accountId);
-        ImportContext ctx = new ImportContext(account, knownPayees, existingKeys, result);
+        CompteurDoublons duplicates = loadDuplicateCounter(accountId, knownPayees);
+        ImportContext ctx = new ImportContext(account, knownPayees, duplicates, result);
 
         List<String> lines;
         try {
@@ -427,6 +510,7 @@ public class ServiceImport {
             processQifLine(lines.get(i), i + 1, ctx, state);
         }
 
+        recordImportIfDataRecognized(result);
         return result;
     }
 
@@ -510,10 +594,8 @@ public class ServiceImport {
             TiersLigne payeeLine = matchPayee(state.payeeText, state.amount, ctx.knownPayees());
             String canonicalPayee = payeeLine.canonicalName();
 
-            if (isDuplicate(state.date, state.amount, canonicalPayee, ctx.existingKeys())) {
-                result.duplicates++;
-            } else {
-                saveLine(ctx, new LigneImportee(state.date, state.amount, state.memo, null, state.categoryName, payeeLine));
+            if (!isAlreadyKnown(ctx, state.date, state.amount, canonicalPayee)) {
+                saveLine(ctx, new LigneImportee(state.date, state.amount, state.memo, state.categoryName, payeeLine));
             }
         } catch (Exception e) {
             result.skipped++;
@@ -547,8 +629,13 @@ public class ServiceImport {
         }
     }
 
+    /**
+     * Date d'une ligne importee. L'apostrophe que Quicken place avant l'annee
+     * dans ses QIF ("15/01'2024", "1/15'24") est lue comme un "/" : sans ca,
+     * tout l'enregistrement etait rejete en "Format de date non reconnu".
+     */
     static LocalDate parseDate(String raw) {
-        String trimmed = raw == null ? "" : raw.trim();
+        String trimmed = raw == null ? "" : raw.trim().replace('\'', '/');
         for (DateTimeFormatter fmt : DATE_FORMATS) {
             try {
                 return LocalDate.parse(trimmed, fmt);

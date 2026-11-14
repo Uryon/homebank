@@ -96,6 +96,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { dataStore } from './services/dataStore'
+import { needsCategory } from './services/categories'
 import { accountBalanceRows, activeAccounts, computeNetWorth, sortAccountsForDisplay } from './services/accounts'
 import AccountModal from './components/AccountModal.vue'
 import AppLogo from './components/AppLogo.vue'
@@ -212,7 +213,7 @@ const sidebarAccounts = computed(() =>
 )
 
 /** Transactions restant à catégoriser : pastille sur l'entrée « Transactions » de la navigation. */
-const uncategorizedCount = computed(() => dataStore.state.transactions.filter(t => !t.categoryId).length)
+const uncategorizedCount = computed(() => dataStore.state.transactions.filter(needsCategory).length)
 const uncategorizedLabel = computed(() => `${uncategorizedCount.value} transaction(s) sans catégorie`)
 
 /** Somme de tous les soldes (cartes de crédit en négatif : patrimoine NET). */

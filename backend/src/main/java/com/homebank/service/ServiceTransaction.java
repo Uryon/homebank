@@ -176,6 +176,13 @@ public class ServiceTransaction {
     public TransactionDTO create(TransactionDTO payload) {
         Transaction transaction = new Transaction();
         applyPayload(transaction, payload);
+        // Fixe a la creation seulement (jamais par update) : permet a
+        // l'annulation d'une suppression de recreer un ajustement de solde
+        // tel quel, au lieu d'une transaction ordinaire comptee comme une
+        // depense ou un revenu.
+        transaction.setBalanceAdjustment(payload.isBalanceAdjustment());
+        // Idem pour le libelle bancaire d'une transaction importee restauree.
+        transaction.setBankLabel(blankToNull(payload.getBankLabel()));
         Transaction saved = transactionRepository.save(transaction);
         return transactionMapper.toDTO(saved);
     }
@@ -186,19 +193,13 @@ public class ServiceTransaction {
     @Transactional
     public TransactionDTO update(Long id, TransactionDTO payload) {
         Transaction existing = findEntityById(id);
-
-        // Comme pour splitTransaction : editer une seule des deux transactions
-        // d'un virement (compte, montant, date...) sans repercuter le meme
-        // changement sur l'autre casserait silencieusement l'appariement
-        // (voir createTransfer). Pas de synchronisation cote serveur pour
-        // l'instant : on refuse plutot que de laisser desynchroniser.
-        if (existing.getPaymentMode() == ModePaiement.TRANSFER || existing.getTransferTransaction() != null) {
-            throw new IllegalArgumentException("Un virement ne peut pas etre modifie directement : supprimez-le et recreez-le si besoin.");
-        }
-
+        Transaction twin = existing.getTransferTransaction();
         Tiers previousPayee = existing.getPayee();
 
         applyPayload(existing, payload);
+        if (twin != null) {
+            syncTransferTwin(existing, twin);
+        }
         Transaction saved = transactionRepository.save(existing);
 
         if (previousPayee != null && !previousPayee.equals(saved.getPayee())) {
@@ -206,6 +207,43 @@ public class ServiceTransaction {
         }
 
         return transactionMapper.toDTO(saved);
+    }
+
+    /**
+     * Un virement est une seule operation representee par deux transactions
+     * (voir createTransfer) : la modification d'un cote est repercutee sur
+     * l'autre pour qu'ils ne se desynchronisent jamais — meme date, montant
+     * oppose, meme memo, meme statut de validation. Le compte de chaque cote
+     * reste modifiable (correction d'un compte source/destination mal choisi),
+     * tant que les deux comptes restent distincts et de meme devise. Tiers,
+     * categorie et marqueurs restent propres a chaque cote.
+     */
+    private void syncTransferTwin(Transaction edited, Transaction twin) {
+        if (edited.getAmount().signum() == 0) {
+            throw new IllegalArgumentException("Le montant d'un virement ne peut pas être nul.");
+        }
+        if (edited.getAccount().getId().equals(twin.getAccount().getId())) {
+            throw new IllegalArgumentException("Le compte source et le compte destination doivent etre differents");
+        }
+        ensureSameCurrency(edited.getAccount(), twin.getAccount());
+
+        edited.setPaymentMode(ModePaiement.TRANSFER);
+        twin.setDate(edited.getDate());
+        twin.setAmount(edited.getAmount().negate());
+        twin.setMemo(edited.getMemo());
+        twin.setValidated(edited.isValidated());
+        transactionRepository.save(twin);
+    }
+
+    /** Pas de taux de change gere : un virement relie toujours deux comptes de meme devise. */
+    private static void ensureSameCurrency(Compte first, Compte second) {
+        String firstCurrency = first.getCurrency();
+        String secondCurrency = second.getCurrency();
+        if (firstCurrency == null || secondCurrency == null || !firstCurrency.equalsIgnoreCase(secondCurrency)) {
+            throw new IllegalArgumentException(
+                    "Les virements entre comptes de devises différentes ne sont pas pris en charge"
+            );
+        }
     }
 
     /**
@@ -225,8 +263,13 @@ public class ServiceTransaction {
     public List<TransactionDTO> splitTransaction(Long id, DemandeDivisionDTO payload) {
         Transaction original = findEntityById(id);
 
-        if (original.getPaymentMode() == ModePaiement.TRANSFER || original.getTransferTransaction() != null) {
+        if (original.isInternalTransfer()) {
             throw new IllegalArgumentException("Un virement ne peut pas etre divise");
+        }
+        // Ni depense ni revenu : rien a repartir, et la 2e partie, creee sans
+        // le marqueur, aurait compte a tort comme une depense/un revenu.
+        if (original.isBalanceAdjustment()) {
+            throw new IllegalArgumentException("Un ajustement de solde ne peut pas etre divise");
         }
 
         BigDecimal totalAmount = original.getAmount();
@@ -243,6 +286,12 @@ public class ServiceTransaction {
         }
         BigDecimal secondAmount = totalAmount.subtract(firstAmount);
 
+        // Garde le montant du releve pour la detection de doublons a l'import
+        // (voir Transaction#splitFromAmount) ; une 2e division conserve celui
+        // de la toute premiere.
+        if (original.getSplitFromAmount() == null) {
+            original.setSplitFromAmount(totalAmount);
+        }
         original.setAmount(firstAmount);
         original.setCategory(payload.getFirstCategoryId() != null
                 ? categoryService.findById(payload.getFirstCategoryId())
@@ -259,7 +308,6 @@ public class ServiceTransaction {
                 : null);
         second.setMemo(sanitizeMemo(payload.getSecondMemo()));
         second.setPaymentMode(original.getPaymentMode());
-        second.setTags(original.getTags());
         second.setValidated(original.isValidated());
         second.setPeriodicExpense(original.isPeriodicExpense());
         second.setExceptional(original.isExceptional());
@@ -331,22 +379,32 @@ public class ServiceTransaction {
         }
 
         if (payload.isValidatedProvided()) {
-            t.setValidated(payload.isValidated());
+            setValidatedWithTransferTwin(t, payload.isValidated());
         }
     }
 
     /**
-     * Ignore le changement de mode de paiement en masse vers ou depuis
-     * TRANSFER : un virement n'existe que par sa paire (voir createTransfer),
-     * que l'edition en masse ne sait pas creer/rompre proprement — l'appliquer
-     * ici casserait silencieusement l'appariement (transaction marquee/
-     * demarquee TRANSFER sans que sa jumelle suive), voir aussi le meme garde-fou
-     * dans update().
+     * Statut de validation applique aussi a la jumelle d'un virement (meme
+     * regle que toggleValidated) : les deux cotes d'une meme operation sont
+     * toujours rapproches ensemble. Jumelle chargee par fetch join (voir
+     * findAllByIdWithTransferTransaction), enregistree par la transaction JPA.
+     */
+    private static void setValidatedWithTransferTwin(Transaction t, boolean validated) {
+        t.setValidated(validated);
+        if (t.getTransferTransaction() != null) {
+            t.getTransferTransaction().setValidated(validated);
+        }
+    }
+
+    /**
+     * Le mode de paiement d'un cote de virement interne reste TRANSFER : il
+     * n'existe que par sa paire (voir createTransfer / syncTransferTwin), que
+     * l'edition en masse ne doit pas denaturer. Pour toute autre transaction,
+     * « Virement » est un mode de paiement ordinaire et s'applique normalement.
      */
     private void applyBulkPaymentMode(Transaction t, ModePaiement requested) {
-        boolean isTransferSide = t.getPaymentMode() == ModePaiement.TRANSFER || t.getTransferTransaction() != null;
-        if (isTransferSide || requested == ModePaiement.TRANSFER) {
-            log.info("Changement de mode de paiement ignore pour la transaction {} : un virement se cree/modifie uniquement via l'action \"Virement\"", t.getId());
+        if (t.isInternalTransfer()) {
+            log.info("Changement de mode de paiement ignore pour la transaction {} : cote d'un virement interne", t.getId());
             return;
         }
         t.setPaymentMode(requested);
@@ -416,18 +474,19 @@ public class ServiceTransaction {
     @Transactional
     public void delete(Long id) {
         Transaction existing = findEntityById(id);
-        Tiers previousPayee = existing.getPayee();
 
         Map<Long, Transaction> byId = new LinkedHashMap<>();
         byId.put(existing.getId(), existing);
+        // Inclut la jumelle d'un virement, supprimee avec elle.
         List<Transaction> transactions = unlinkTransferPairs(byId);
 
         transactions.forEach(this::recordDeletion);
         transactionRepository.deleteAll(transactions);
 
-        if (previousPayee != null) {
-            prunePayeesAfterCommit(List.of(previousPayee));
-        }
+        // Tiers de CHAQUE transaction supprimee (jumelle comprise), comme
+        // deleteTransactions : sinon le tiers propre a l'autre cote d'un
+        // virement restait orphelin dans la liste des tiers.
+        prunePayeesAfterCommit(transactions.stream().map(Transaction::getPayee).toList());
     }
 
     /**
@@ -539,7 +598,7 @@ public class ServiceTransaction {
 
     /**
      * Enregistre une empreinte de la transaction avant sa suppression (voir
-     * TransactionSupprimee), pour que ServiceImport#isDuplicate la reconnaisse
+     * TransactionSupprimee), pour que ServiceImport#isAlreadyKnown la reconnaisse
      * et evite de la reimporter si le releve bancaire source la contient
      * encore lors d'un futur import — sans quoi une transaction supprimee
      * manuellement (ex : paire "depense remboursee", voir
@@ -549,9 +608,9 @@ public class ServiceTransaction {
         TransactionSupprimee tombstone = new TransactionSupprimee();
         tombstone.setAccountId(t.getAccount().getId());
         tombstone.setDate(t.getDate());
-        tombstone.setAmount(t.getAmount());
+        tombstone.setAmount(t.importKeyAmount());
         tombstone.setPayeeName(t.getPayee() != null ? t.getPayee().getName() : null);
-        tombstone.setExternalId(t.getExternalId());
+        tombstone.setBankLabel(t.getBankLabel());
         deletedTransactionRepository.save(tombstone);
     }
 
@@ -648,7 +707,7 @@ public class ServiceTransaction {
         List<Transaction> candidates = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
                 .filter(t -> !t.isPeriodicExpense())
                 .filter(t -> !t.isPeriodicSuggestionIgnored())
-                .filter(t -> t.getPaymentMode() != ModePaiement.TRANSFER)
+                .filter(t -> !t.isInternalTransfer() && !t.isBalanceAdjustment())
                 .filter(t -> t.getPayee() != null)
                 .toList();
 
@@ -800,10 +859,8 @@ public class ServiceTransaction {
      * Regroupe les transactions deja en base qui semblent doublonnees, en
      * deux categories (voir GroupeDoublonDTO#certain) :
      * - "certains" : meme definition que la detection a l'import (voir
-     *   ServiceImport#isDuplicate) — meme compte, et soit le meme identifiant
-     *   externe (fourni par la banque/le fichier importe), soit la meme date
-     *   + montant + tiers canonique (insensible a la casse). Occurrences
-     *   interchangeables.
+     *   ServiceImport#isAlreadyKnown) — meme compte, meme date + montant +
+     *   tiers canonique (insensible a la casse). Occurrences interchangeables.
      * - "probables" : meme compte + date + montant, mais tiers different —
      *   ratees par la detection ci-dessus car elle exige le meme tiers. Cas
      *   frequent d'un meme releve importe deux fois a des moments differents :
@@ -817,7 +874,7 @@ public class ServiceTransaction {
      */
     public List<GroupeDoublonDTO> findDuplicateGroups() {
         List<Transaction> all = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
-                .filter(t -> !t.isDuplicateIgnored())
+                .filter(t -> !t.isDuplicateIgnored() && !t.isBalanceAdjustment())
                 .toList();
 
         Map<String, List<Transaction>> certainGroups = all.stream()
@@ -832,7 +889,8 @@ public class ServiceTransaction {
 
         Stream<GroupeDoublonDTO> probable = looseGroups.values().stream()
                 .filter(group -> group.size() > 1)
-                .filter(group -> !samePayeeForAll(group) || mixesImportedAndManual(group))
+                // Meme tiers partout : deja liste parmi les "certains" (meme cle).
+                .filter(group -> !samePayeeForAll(group) && payeesMayBeSameMerchant(group))
                 .map(group -> buildDuplicateGroup(group, false, false));
 
         Stream<GroupeDoublonDTO> reimbursements = findReimbursementGroups(all).stream();
@@ -865,7 +923,7 @@ public class ServiceTransaction {
     private List<GroupeDoublonDTO> findReimbursementGroups(List<Transaction> all) {
         Map<Long, List<Transaction>> byPayee = all.stream()
                 .filter(t -> t.getPayee() != null)
-                .filter(t -> t.getPaymentMode() != ModePaiement.TRANSFER)
+                .filter(t -> !t.isInternalTransfer() && !t.isBalanceAdjustment())
                 .collect(Collectors.groupingBy(t -> t.getPayee().getId()));
 
         Comparator<Transaction> mostRecentFirst =
@@ -897,14 +955,9 @@ public class ServiceTransaction {
 
     /**
      * Cle de regroupement d'une transaction pour la detection de doublons
-     * "certains" : l'identifiant externe prime s'il est fourni (identique a
-     * ServiceImport#isDuplicate), sinon on retombe sur compte+date+montant+
-     * tiers canonique (voir CleDoublon).
+     * "certains" : compte + date + montant + tiers canonique (voir CleDoublon).
      */
     private String duplicateGroupKey(Transaction t) {
-        if (t.getExternalId() != null && !t.getExternalId().isBlank()) {
-            return "ext:" + t.getAccount().getId() + "|" + t.getExternalId();
-        }
         String canonicalPayee = t.getPayee() != null ? t.getPayee().getName() : null;
         CleDoublon key = CleDoublon.of(t.getDate(), t.getAmount(), canonicalPayee);
         return "key:" + t.getAccount().getId() + "|" + key;
@@ -930,23 +983,35 @@ public class ServiceTransaction {
     }
 
     /**
-     * Groupe "large" d'un meme tiers melangeant une transaction importee (avec
-     * identifiant bancaire) et une saisie manuelle (sans) : typiquement une
-     * ligne de releve ressaisie a la main apres coup. Les cles "certaines" de
-     * ces deux transactions different (identifiant externe d'un cote, compte/
-     * date/montant/tiers de l'autre, voir duplicateGroupKey), le doublon
-     * n'apparaissait donc nulle part. Un groupe d'un meme tiers sans ce
-     * melange est soit deja "certain" (aucun identifiant : meme cle), soit
-     * distingue explicitement par la banque (identifiants differents).
+     * Groupe "large" (meme compte, date, montant) aux tiers differents : n'est
+     * un doublon probable que si deux de ses transactions peuvent designer le
+     * meme commercant — l'une sans tiers, ou le motif de reconnaissance de
+     * l'un des tiers retrouvant le nom de l'autre (cas vise : la meme
+     * operation importee deux fois, une fois sous un tiers renomme, une fois
+     * sous le libelle brut de la banque). Deux tiers distincts deja reconnus
+     * (ex : « Pharmacie » et « Docteur Trillot », 30 € le meme jour) sont deux
+     * vraies operations : les proposer en doublon a conduit a en supprimer une
+     * a tort, que l'import refusait ensuite de reintegrer.
      */
-    private static boolean mixesImportedAndManual(List<Transaction> group) {
-        boolean anyImported = group.stream().anyMatch(ServiceTransaction::hasExternalId);
-        boolean anyManual = group.stream().anyMatch(t -> !hasExternalId(t));
-        return anyImported && anyManual;
+    private static boolean payeesMayBeSameMerchant(List<Transaction> group) {
+        for (int i = 0; i < group.size(); i++) {
+            for (int j = i + 1; j < group.size(); j++) {
+                if (sameBankLabel(group.get(i), group.get(j))
+                        || mayBeSameMerchant(group.get(i).getPayee(), group.get(j).getPayee())) return true;
+            }
+        }
+        return false;
     }
 
-    private static boolean hasExternalId(Transaction t) {
-        return t.getExternalId() != null && !t.getExternalId().isBlank();
+    /** Meme libelle de releve (voir Transaction#bankLabel) : meme operation bancaire, quels que soient les tiers affectes depuis. */
+    private static boolean sameBankLabel(Transaction first, Transaction second) {
+        return first.getBankLabel() != null && first.getBankLabel().equalsIgnoreCase(second.getBankLabel());
+    }
+
+    private static boolean mayBeSameMerchant(Tiers first, Tiers second) {
+        if (first == null || second == null) return true;
+        return ServiceTiers.matchesPatternField(first.getPattern(), second.getName())
+                || ServiceTiers.matchesPatternField(second.getPattern(), first.getName());
     }
 
     /**
@@ -980,10 +1045,53 @@ public class ServiceTransaction {
     }
 
     /**
+     * Aligne le solde calcule d'un compte sur sa valeur reelle a une date
+     * (ex : placement dont la valeur suit la bourse, livret sans mouvement
+     * saisi) : cree une transaction "Ajustement de solde" du montant de
+     * l'ecart, validee d'office (la valeur vient de l'utilisateur), et exclue
+     * des rapports de depenses/revenus (voir Transaction#balanceAdjustment).
+     * Le solde calcule inclut toutes les transactions jusqu'a `date` incluse,
+     * meme regle que le rapprochement (voir ServiceRapprochement).
+     */
+    @Transactional
+    public TransactionDTO adjustAccountBalance(Long accountId, LocalDate date, BigDecimal actualBalance) {
+        if (date == null) {
+            throw new IllegalArgumentException("La date est obligatoire.");
+        }
+        if (date.isAfter(LocalDate.now(ZoneId.systemDefault()))) {
+            throw new IllegalArgumentException("La date ne peut pas être dans le futur.");
+        }
+        if (actualBalance == null) {
+            throw new IllegalArgumentException("Le solde réel est obligatoire.");
+        }
+        Compte account = accountService.findById(accountId);
+        ServiceCompte.ensureNotArchived(account);
+
+        BigDecimal computedBalance = account.getInitialBalance()
+                .add(transactionRepository.sumAmountByAccountIdAsOf(accountId, date));
+        BigDecimal gap = actualBalance.subtract(computedBalance);
+        if (gap.signum() == 0) {
+            throw new IllegalArgumentException("Le solde est déjà de " + computedBalance + " à cette date : aucun ajustement nécessaire.");
+        }
+
+        Transaction adjustment = new Transaction();
+        adjustment.setAccount(account);
+        adjustment.setDate(date);
+        adjustment.setAmount(gap);
+        adjustment.setPaymentMode(ModePaiement.NONE);
+        adjustment.setValidated(true);
+        adjustment.setBalanceAdjustment(true);
+        Transaction saved = transactionRepository.save(adjustment);
+        log.info("Ajustement du solde du compte {} au {} : {} (solde réel {})", accountId, date, gap, actualBalance);
+        return transactionMapper.toDTO(saved);
+    }
+
+    /**
      * Cree un virement entre deux comptes : deux transactions liees
      * (debit sur le compte source, credit sur le compte destination),
      * chacune reliee a l'autre via transferTransaction, et marquees
-     * ModePaiement.TRANSFER pour etre exclues des rapports de depenses/revenus.
+     * ModePaiement.TRANSFER ; leur liaison les exclut des rapports de depenses/revenus
+     * (voir Transaction#isInternalTransfer).
      */
     @Transactional
     public List<TransactionDTO> createTransfer(DemandeVirementDTO request) {
@@ -1001,13 +1109,7 @@ public class ServiceTransaction {
         Compte to = accountService.findById(request.getToAccountId());
         ServiceCompte.ensureNotArchived(from);
         ServiceCompte.ensureNotArchived(to);
-        String fromCurrency = from.getCurrency();
-        String toCurrency = to.getCurrency();
-        if (fromCurrency == null || toCurrency == null || !fromCurrency.equalsIgnoreCase(toCurrency)) {
-            throw new IllegalArgumentException(
-                    "Les virements entre comptes de devises différentes ne sont pas pris en charge"
-            );
-        }
+        ensureSameCurrency(from, to);
         LocalDate date = request.getDate() != null ? request.getDate() : LocalDate.now(ZoneId.systemDefault());
         BigDecimal amount = request.getAmount().abs();
 
@@ -1078,16 +1180,14 @@ public class ServiceTransaction {
 
         transaction.setMemo(sanitizeMemo(payload.getMemo()));
         transaction.setPaymentMode(payload.getPaymentMode());
-        transaction.setTags(payload.getTags());
         transaction.setPeriodicExpense(payload.isPeriodicExpense());
         transaction.setExceptional(payload.isExceptional());
-        transaction.setExternalId(payload.getExternalId());
         // Une transaction saisie/modifiee manuellement est consideree comme validee ;
         // seules les transactions importees/synchronisees demarrent "en attente".
         transaction.setValidated(payload.isValidated());
 
         // Categorie appliquee TELLE QUELLE depuis le payload, comme les autres
-        // champs (memo, tags...) : payload.getCategoryId() == null signifie
+        // champs (memo...) : payload.getCategoryId() == null signifie
         // "pas de categorie", y compris quand l'utilisateur vient d'effacer
         // volontairement la categorie d'une transaction deja categorisee (le
         // champ CategoryAutocomplete a un bouton dedie pour ca). Le
@@ -1101,6 +1201,10 @@ public class ServiceTransaction {
         transaction.setCategory(payload.getCategoryId() != null
                 ? categoryService.findById(payload.getCategoryId())
                 : null);
+    }
+
+    private static String blankToNull(String text) {
+        return text == null || text.isBlank() ? null : text.trim();
     }
 
     /** Remplace un memo litteralement "(NULL)"/"NULL" ou vide par null. */

@@ -953,13 +953,6 @@ onMounted(load)
   gap: 6px;
   justify-content: flex-end;
 }
-/* Gabarit reduit par rapport a .btn par defaut (10px 16px / 14px) : quatre
-   boutons cote a cote sur une ligne de categorie n'ont pas besoin d'etre
-   aussi imposants qu'un bouton de page (ex : "+ Nouvelle categorie"). */
-.cat-btn {
-  padding: 5px 10px;
-  font-size: 12px;
-}
 .cat-row-editing {
   cursor: default;
   background: var(--ink-800);

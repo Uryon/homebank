@@ -41,6 +41,13 @@ class ServiceImportParsingTest {
     }
 
     @Test
+    void parseDate_accepteLApostropheAvantLAnneeDesQifQuicken() {
+        assertThat(ServiceImport.parseDate("15/01'2024")).isEqualTo(LocalDate.of(2024, 1, 15));
+        assertThat(ServiceImport.parseDate("5/1'24")).isEqualTo(LocalDate.of(2024, 1, 5));
+        assertThat(ServiceImport.parseDate("1/15'24")).isEqualTo(LocalDate.of(2024, 1, 15));
+    }
+
+    @Test
     void decodeImportedText_litLUtf8EtRetireLaMarqueBomDExcel() {
         byte[] avecBom = "\uFEFFDate;Libellé;Montant".getBytes(java.nio.charset.StandardCharsets.UTF_8);
 

@@ -19,10 +19,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
@@ -170,6 +172,15 @@ public class ServiceTiers {
         return result.toString();
     }
 
+    /** Retire les etoiles en tete et en fin de motif ("*Carrefour*Paris*" -> "Carrefour*Paris"). */
+    private static String stripOuterStars(String wildcardPattern) {
+        int start = 0;
+        int end = wildcardPattern.length();
+        while (start < end && wildcardPattern.charAt(start) == '*') start++;
+        while (end > start && wildcardPattern.charAt(end - 1) == '*') end--;
+        return wildcardPattern.substring(start, end);
+    }
+
     /** Convertit un seul motif "joker" (avec *) en expression reguliere Java equivalente. */
     private static String wildcardToRegex(String wildcardPattern) {
         String[] parts = wildcardPattern.split("\\*", -1);
@@ -193,22 +204,35 @@ public class ServiceTiers {
         return s == null ? null : WHITESPACE_RUN.matcher(s).replaceAll(" ").trim();
     }
 
-    /** Teste si le champ "pattern" (un ou plusieurs motifs separes par ";") correspond au texte donne. */
-    private static boolean matchesPatternField(String patternField, String text) {
+    /**
+     * Teste si le champ "pattern" (un ou plusieurs motifs separes par ";")
+     * correspond au texte donne. Aussi utilise par
+     * ServiceTransaction#payeesMayBeSameMerchant (detection des doublons probables).
+     */
+    static boolean matchesPatternField(String patternField, String text) {
         if (patternField == null || patternField.isBlank() || text == null || text.isBlank()) return false;
         String normalizedText = normalizeWhitespace(text);
+        String lowerText = normalizedText.toLowerCase(Locale.ROOT);
         for (String rawPart : patternField.split(";")) {
             String part = normalizeWhitespace(rawPart);
             if (part == null || part.isEmpty()) continue;
+            // Le champ stocke/affiche est du texte simple, sans etoile
+            // ("Carrefour"), reconnu partout ou il apparait dans le libelle :
+            // simple test "contient", insensible a la casse. Appele pour chaque
+            // tiers et chaque ligne d'un import (des centaines de milliers de
+            // fois) : l'ancienne expression ".*Carrefour.*" etait ~100 fois plus
+            // lente, son ".*" initial essayant chaque position du libelle.
+            if (part.indexOf('*') < 0) {
+                if (lowerText.contains(part.toLowerCase(Locale.ROOT))) return true;
+                continue;
+            }
+            // Motif avance avec etoile(s) (ex : "Carrefour*Paris") : expression
+            // reguliere. Les etoiles de debut/fin sont inutiles (find() cherche
+            // deja dans tout le libelle) et coutaient cher : retirees.
+            String core = stripOuterStars(part);
+            if (core.isEmpty()) return true; // motif "*" : correspond a tout, comme avant
             try {
-                // Le champ stocke/affiche est du texte simple, sans etoile
-                // ("Carrefour"). C'est ICI, au moment du traitement seulement,
-                // qu'on l'entoure d'etoiles ("*Carrefour*") pour qu'il soit
-                // reconnu partout ou il apparait dans le libelle. Si l'utilisateur
-                // a lui-meme mis une etoile (motif avance, ex : "Carrefour*Paris"),
-                // on ne touche a rien de plus : il sait ce qu'il fait.
-                String wildcarded = part.indexOf('*') < 0 ? "*" + part + "*" : part;
-                Pattern compiled = Pattern.compile(wildcardToRegex(wildcarded), Pattern.CASE_INSENSITIVE);
+                Pattern compiled = Pattern.compile(wildcardToRegex(core), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
                 if (compiled.matcher(normalizedText).find()) return true;
             } catch (PatternSyntaxException e) {
                 // motif invalide (ne devrait plus arriver avec le systeme "joker") : ignore ce
@@ -345,6 +369,70 @@ public class ServiceTiers {
         return saved;
     }
 
+    /**
+     * Libelle bancaire d'operation par carte, prelevement ou virement : prefixe
+     * de la banque (groupe 1), commercant (groupe 2), puis suffixe variable a
+     * chaque operation (date "jj.mm.aa", n° de carte, montant en devise,
+     * reference de prelevement...). Ex :
+     * "ACHAT CB SumUp DOMOUS 09.08.26 CARTE NUMERO 697".
+     */
+    private static final List<String> BANK_PREFIXES =
+            List.of("ACHAT CB", "CREDIT CARTE BANCAIRE", "PRELEVEMENT DE", "VIREMENT DE");
+    private static final Pattern BANK_LABEL = Pattern.compile(
+            "^(" + String.join("|", BANK_PREFIXES) + ")\\s+(.+?)"
+                    + "(?:,?\\s+\\d{2}\\.\\d{2}\\.\\d{2}\\b.*|\\s+REF\\s*:.*)$",
+            Pattern.CASE_INSENSITIVE);
+
+    /** Nom et motif d'un tiers cree automatiquement a l'import. */
+    record TiersSuggere(String name, String pattern) {}
+
+    /**
+     * Nom et motif d'un tiers a creer pour un libelle bancaire importe. Le
+     * libelle brut contient la date et le n° de carte : utilise tel quel comme
+     * motif, il ne reconnaissait que cette operation-la, et chaque achat
+     * suivant chez le meme commercant creait un nouveau tiers. On garde donc :
+     * - comme nom, le commercant seul ("SumUp DOMOUS") ;
+     * - comme motif, prefixe + commercant ("ACHAT CB SumUp DOMOUS") : le
+     *   prefixe evite qu'un nom court ("Action") reconnaisse n'importe quel
+     *   libelle le contenant ("TRANSACTION...").
+     * Libelle d'une autre forme : nom et motif = libelle, comme avant.
+     */
+    static TiersSuggere suggestFromBankLabel(String rawText) {
+        String label = normalizeWhitespace(rawText);
+        Matcher matcher = BANK_LABEL.matcher(label);
+        if (!matcher.matches()) return new TiersSuggere(label, defaultPattern(label));
+        String merchant = matcher.group(2).trim();
+        return new TiersSuggere(merchant, matcher.group(1) + " " + merchant);
+    }
+
+    /**
+     * Comme createFromText, mais pour une ligne de releve importe : nom et
+     * motif nettoyes des parties variables du libelle (voir suggestFromBankLabel).
+     * Reserve a l'import : un tiers saisi a la main garde le texte tape.
+     */
+    Tiers createFromBankLabel(String rawText, List<Tiers> knownPayees) {
+        TiersSuggere suggested = suggestFromBankLabel(rawText);
+        Tiers created = new Tiers();
+        created.setName(suggested.name());
+        created.setPattern(suggested.pattern());
+        created.setAmount(null);
+        Tiers saved = payeeRepository.save(created);
+        knownPayees.add(saved);
+        return saved;
+    }
+
+    /**
+     * Le tiers est-il encore tel que cree automatiquement (motif = nom, ou
+     * prefixe bancaire + nom, voir suggestFromBankLabel) ? Un tiers renomme ou
+     * dont le motif a ete retouche ne l'est plus.
+     */
+    private static boolean isAutoCreatedState(Tiers payee) {
+        String pattern = payee.getPattern();
+        String name = payee.getName();
+        return pattern.equals(defaultPattern(name))
+                || BANK_PREFIXES.stream().anyMatch(prefix -> pattern.equalsIgnoreCase(prefix + " " + name));
+    }
+
     /** Charge tous les tiers, pour etre reutilise a travers tout un lot (import, migration...). */
     List<Tiers> findAllForMatching() {
         return payeeRepository.findAll();
@@ -376,7 +464,7 @@ public class ServiceTiers {
         if (payee == null || payee.getId() == null) return;
         // Tiers personnalise (renomme, motif modifie, fusion...) : on ne
         // touche jamais a un tiers dans lequel l'utilisateur a investi du travail.
-        if (!payee.getPattern().equals(defaultPattern(payee.getName()))) return;
+        if (!isAutoCreatedState(payee)) return;
 
         // La relation Transaction#payee est une vraie cle etrangere : une
         // simple verification d'existence suffit, plus besoin de rescanner

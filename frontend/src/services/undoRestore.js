@@ -17,16 +17,25 @@ export function transactionPayloadFrom(t) {
     categoryId: t.categoryId,
     paymentMode: t.paymentMode,
     memo: t.memo,
-    tags: t.tags,
     transferTransactionId: t.transferTransactionId,
     periodicExpense: t.periodicExpense,
     exceptional: t.exceptional,
-    validated: t.validated
+    validated: t.validated,
+    // Recréé tel quel (pris en compte par le backend à la création seulement).
+    balanceAdjustment: !!t.balanceAdjustment,
+    // Libellé du relevé d'une transaction importée : restauré pour que l'import
+    // continue de la reconnaître (voir Transaction#bankLabel côté backend).
+    bankLabel: t.bankLabel || null
   }
 }
 
+/**
+ * Côté d'un virement INTERNE : c'est la liaison à sa jumelle qui le définit
+ * (voir Transaction#isInternalTransfer côté backend), pas le mode de
+ * paiement « Virement », qui peut être celui d'un simple loyer.
+ */
 function isTransferLeg(t) {
-  return t.paymentMode === 'TRANSFER' || !!t.transferTransactionId
+  return !!t.transferTransactionId
 }
 
 /**

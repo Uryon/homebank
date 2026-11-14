@@ -57,6 +57,7 @@ public class ServiceCategorie {
             category.setParent(null);
             category.setType(requireRootType(payload));
         }
+        ensureUniqueAmongSiblings(category.getName(), category.getParent(), null);
         return categoryRepository.save(category);
     }
 
@@ -81,6 +82,7 @@ public class ServiceCategorie {
             existing.setParent(null);
             existing.setType(requireRootType(payload));
         }
+        ensureUniqueAmongSiblings(existing.getName(), existing.getParent(), id);
         // Repercute le type sur toute la descendance (enfants, petits-enfants...)
         // pour qu'elle reste dans le meme groupe (revenu/depense), que le type
         // ait change directement ou suite a un reparentage.
@@ -96,6 +98,23 @@ public class ServiceCategorie {
             throw new IllegalArgumentException("Le nom de la categorie est obligatoire");
         }
         return name;
+    }
+
+    /**
+     * Refuse deux categories de meme nom (casse ignoree) sous le meme parent :
+     * impossibles a distinguer a la saisie, et l'import (findOrCreateByName,
+     * qui attend au plus un resultat) echouait alors avec une erreur 500.
+     * `selfId` (null en creation) exclut la categorie modifiee elle-meme.
+     */
+    private void ensureUniqueAmongSiblings(String name, Categorie parent, Long selfId) {
+        Optional<Categorie> homonym = parent == null
+                ? categoryRepository.findByNameIgnoreCaseAndParentIsNull(name)
+                : categoryRepository.findByNameIgnoreCaseAndParent(name, parent);
+        if (homonym.isPresent() && !homonym.get().getId().equals(selfId)) {
+            throw new IllegalArgumentException(parent == null
+                    ? "Une catégorie « " + name + " » existe déjà."
+                    : "La catégorie « " + parent.getName() + " » contient déjà une sous-catégorie « " + name + " ».");
+        }
     }
 
     /** Type obligatoire pour une categorie racine (une sous-categorie herite toujours de son parent). */
@@ -195,7 +214,8 @@ public class ServiceCategorie {
      * Fusionne plusieurs categories (sourceIds) dans une categorie cible (targetId) :
      * - toutes les transactions des categories source sont reaffectees a la cible ;
      * - tous les tiers dont la categorie par defaut etait une source sont reaffectes a la cible ;
-     * - les sous-categories des categories source sont reparentees sous la cible ;
+     * - les sous-categories des categories source sont reparentees sous la cible,
+     *   ou fusionnees avec sa sous-categorie de meme nom si elle en a une ;
      * - les categories source sont supprimees.
      */
     @Transactional
@@ -218,14 +238,22 @@ public class ServiceCategorie {
             transactionRepository.reassignCategory(source, target);
             payeeRepository.reassignCategory(source, target);
 
-            List<Categorie> children = categoryRepository.findByParent(source);
-            for (Categorie child : children) {
-                child.setParent(target);
-                child.setType(target.getType());
+            List<Categorie> movedChildren = new ArrayList<>();
+            for (Categorie child : categoryRepository.findByParent(source)) {
+                Optional<Categorie> homonym = categoryRepository.findByNameIgnoreCaseAndParent(child.getName(), target);
+                if (homonym.isPresent()) {
+                    // La cible a deja une sous-categorie de ce nom : on les fusionne
+                    // plutot que de creer deux soeurs homonymes (voir ensureUniqueAmongSiblings).
+                    merge(List.of(child.getId()), homonym.get().getId());
+                } else {
+                    child.setParent(target);
+                    child.setType(target.getType());
+                    movedChildren.add(child);
+                }
             }
-            categoryRepository.saveAll(children);
+            categoryRepository.saveAll(movedChildren);
             // Repercute aussi sur les petits-enfants (sous-categories des enfants reparentes).
-            for (Categorie child : children) {
+            for (Categorie child : movedChildren) {
                 cascadeTypeToDescendants(child);
             }
 
@@ -256,10 +284,15 @@ public class ServiceCategorie {
         if (trimmed.contains(":")) {
             String[] parts = trimmed.split(":", 2);
             Categorie parent = findOrCreateByName(parts[0], amount);
-            Optional<Categorie> existingChild = categoryRepository.findByNameIgnoreCaseAndParent(parts[1], parent);
+            // Nom de l'enfant nettoye AVANT la recherche : "Courses: Alimentation"
+            // cherchait " Alimentation" et recreait la sous-categorie a chaque import.
+            String childName = parts[1].trim();
+            if (parent == null) return findOrCreateByName(childName, amount);
+            if (childName.isEmpty()) return parent;
+            Optional<Categorie> existingChild = categoryRepository.findByNameIgnoreCaseAndParent(childName, parent);
             if (existingChild.isPresent()) return existingChild.get();
             Categorie child = new Categorie();
-            child.setName(parts[1].trim());
+            child.setName(childName);
             child.setParent(parent);
             child.setType(parent.getType());
             return categoryRepository.save(child);

@@ -49,6 +49,16 @@ describe('formatAmount', () => {
     expect(withoutWhitespace(formatAmount(null))).toBe('0,00€')
     expect(withoutWhitespace(formatAmount(undefined))).toBe('0,00€')
   })
+
+  it('affiche la devise réelle du compte quand elle est fournie', () => {
+    expect(withoutWhitespace(formatAmount(45.5, 'USD'))).toBe('45,50$US')
+    expect(withoutWhitespace(formatAmount(45.5, 'chf'))).toBe('45,50CHF')
+  })
+
+  it("retombe sur l'euro si la devise est absente ou invalide", () => {
+    expect(withoutWhitespace(formatAmount(1, null))).toBe('1,00€')
+    expect(withoutWhitespace(formatAmount(1, 'E1'))).toBe('1,00€')
+  })
 })
 
 describe('formatDate', () => {

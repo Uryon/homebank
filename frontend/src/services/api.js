@@ -9,7 +9,13 @@ export const AccountsAPI = {
     balances: () => api.get('/accounts/balances').then(r => r.data),
     create: (payload) => api.post('/accounts', payload).then(r => r.data),
     update: (id, payload) => api.put(`/accounts/${id}`, payload).then(r => r.data),
-    remove: (id) => api.delete(`/accounts/${id}`)
+    remove: (id) => api.delete(`/accounts/${id}`),
+    reconciliation: (id, date, statementBalance) =>
+        api.get(`/accounts/${id}/reconciliation`, { params: { date, statementBalance } }).then(r => r.data),
+    adjustBalance: (id, date, actualBalance) =>
+        api.post(`/accounts/${id}/balance-adjustment`, null, { params: { date, actualBalance } }).then(r => r.data),
+    validateReconciled: (id, date) =>
+        api.post(`/accounts/${id}/reconciliation/validate`, null, { params: { date } }).then(r => r.data)
 }
 
 export const CategoriesAPI = {
@@ -69,6 +75,7 @@ export const LoansAPI = {
 }
 
 export const ImportAPI = {
+    last: () => api.get('/import/last').then(r => r.data),
     csv: (file, accountId) => {
         const form = new FormData()
         form.append('file', file)

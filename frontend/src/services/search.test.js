@@ -85,6 +85,15 @@ describe('matchesSearchTerm', () => {
     amountFormattedNormalized: '99,09'
   }
 
+  it('mode "contient" : matche aussi le memo', () => {
+    expect(matchesSearchTerm({ ...idx, memoNormalized: 'cadeau elodie' }, { term: 'cadeau', exact: false })).toBe(true)
+    expect(matchesSearchTerm(idx, { term: 'cadeau', exact: false })).toBe(false)
+  })
+
+  it('mode "exact" : ignore le memo (texte libre)', () => {
+    expect(matchesSearchTerm({ ...idx, memoNormalized: 'cadeau' }, { term: 'cadeau', exact: true })).toBe(false)
+  })
+
   it('mode "contient" : matche un tiers/categorie qui contient seulement le terme', () => {
     expect(matchesSearchTerm({ ...idx, payeeNormalized: 'decafeine' }, { term: 'caf', exact: false })).toBe(true)
   })

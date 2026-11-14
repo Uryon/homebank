@@ -5,7 +5,7 @@ import { formatAmount } from './format'
  * le tableau de bord et la page Comptes, pour ne pas les dupliquer.
  */
 
-export const ACCOUNT_TYPE_LABELS = {
+const ACCOUNT_TYPE_LABELS = {
   CHECKING: 'Courant',
   SAVINGS: 'Épargne',
   CASH: 'Espèces',
@@ -69,7 +69,7 @@ export function accountBalanceRows(accounts, balances) {
       account,
       typeClass: account.type.toLowerCase(),
       balanceClass: amountToneClass(balance),
-      formattedBalance: formatAmount(balance)
+      formattedBalance: formatAmount(balance, account.currency)
     }
   })
 }

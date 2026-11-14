@@ -114,6 +114,23 @@ class ServiceTiersTest {
     }
 
     @Test
+    void matchPayee_motifAvecEtoilesEnDebutEtFin_resteUnSimpleContient() {
+        Tiers p = tiers(1L, "Carrefour Paris", "*Carrefour*Paris*", null);
+        when(payeeRepository.findAll()).thenReturn(List.of(p));
+
+        assertThat(service.matchPayee("CB CARREFOUR MARKET PARIS 15 03/11", null)).contains(p);
+        assertThat(service.matchPayee("Paris Carrefour", null)).isEmpty();
+    }
+
+    @Test
+    void matchPayee_ignoreLaCasseAussiSurLesLettresAccentuees() {
+        Tiers p = tiers(1L, "Crèche", "Crèche", null);
+        when(payeeRepository.findAll()).thenReturn(List.of(p));
+
+        assertThat(service.matchPayee("PRELEVEMENT CRÈCHE LES PETITS", null)).contains(p);
+    }
+
+    @Test
     void matchPayee_plusieursMotifsSepareParPointVirguleFonctionnentEnOu() {
         Tiers p = tiers(1L, "Bailleur", "Bailleur;Loyer", null);
         when(payeeRepository.findAll()).thenReturn(List.of(p));
@@ -397,6 +414,53 @@ class ServiceTiersTest {
         verify(payeeRepository, never()).delete(any(Tiers.class));
         // Tiers personnalise : jamais supprime, sans meme verifier ses transactions.
         verify(transactionRepository, never()).existsByPayee(personnalise);
+    }
+
+    @Test
+    void deleteIfOrphan_supprimeAussiUnTiersCreeDepuisUnLibelleBancaire() {
+        Tiers ancien = tiers(1L, "SumUp DOMOUS", "ACHAT CB SumUp DOMOUS", null);
+        when(payeeRepository.findById(1L)).thenReturn(Optional.of(ancien));
+        when(transactionRepository.existsByPayee(ancien)).thenReturn(false);
+
+        service.deleteIfOrphan(1L);
+
+        verify(payeeRepository).delete(ancien);
+    }
+
+    // --- suggestFromBankLabel : tiers cree a l'import depuis un libelle bancaire ---
+
+    @Test
+    void suggestFromBankLabel_retireDateCarteEtMontantDuLibelle() {
+        assertThat(ServiceTiers.suggestFromBankLabel("ACHAT CB SumUp   DOMOUS 09.08.26 CARTE NUMERO     697"))
+                .isEqualTo(new ServiceTiers.TiersSuggere("SumUp DOMOUS", "ACHAT CB SumUp DOMOUS"));
+        assertThat(ServiceTiers.suggestFromBankLabel("ACHAT CB SARL DU PARC 20.09.25, CARTE NUMERO 697"))
+                .isEqualTo(new ServiceTiers.TiersSuggere("SARL DU PARC", "ACHAT CB SARL DU PARC"));
+        assertThat(ServiceTiers.suggestFromBankLabel("ACHAT CB UBER    EATS   03.11.26 EUR  37,43 CARTE NO  697"))
+                .isEqualTo(new ServiceTiers.TiersSuggere("UBER EATS", "ACHAT CB UBER EATS"));
+        assertThat(ServiceTiers.suggestFromBankLabel("CREDIT CARTE BANCAIRE Steam Purchase  03.11.26 CARTE NUMERO 697"))
+                .isEqualTo(new ServiceTiers.TiersSuggere("Steam Purchase", "CREDIT CARTE BANCAIRE Steam Purchase"));
+        assertThat(ServiceTiers.suggestFromBankLabel("PRELEVEMENT DE Bouygues Telecom REF : PAGP0110 06xxxxx675"))
+                .isEqualTo(new ServiceTiers.TiersSuggere("Bouygues Telecom", "PRELEVEMENT DE Bouygues Telecom"));
+    }
+
+    @Test
+    void suggestFromBankLabel_libelleDUneAutreForme_gardeLeTexteTelQuel() {
+        assertThat(ServiceTiers.suggestFromBankLabel("Vinted"))
+                .isEqualTo(new ServiceTiers.TiersSuggere("Vinted", "Vinted"));
+        assertThat(ServiceTiers.suggestFromBankLabel("VIREMENT INSTANTANE A KELLY Cadeau"))
+                .isEqualTo(new ServiceTiers.TiersSuggere("VIREMENT INSTANTANE A KELLY Cadeau", "VIREMENT INSTANTANE A KELLY Cadeau"));
+    }
+
+    @Test
+    void createFromBankLabel_leTiersCreeReconnaitLesAchatsSuivantsChezLeMemeCommercant() {
+        when(payeeRepository.save(any(Tiers.class))).thenAnswer(inv -> inv.getArgument(0));
+        List<Tiers> known = new ArrayList<>();
+
+        Tiers cree = service.createFromBankLabel("ACHAT CB ALCEL          08.11.26 CARTE NUMERO 697", known);
+
+        assertThat(cree.getName()).isEqualTo("ALCEL");
+        assertThat(service.findExisting("ACHAT CB ALCEL          17.10.26 CARTE NUMERO 697", new BigDecimal("-12.00"), known))
+                .contains(cree);
     }
 
     // --- autoCategorize : categorisation automatique en masse (page Tiers) ---

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_IMPORT_FILE_BYTES, formatFileSize, importFileProblem, importOutcome } from './importResult'
+import { MAX_IMPORT_FILE_BYTES, formatFileSize, importFileProblem, importOutcome, lastImportLabel } from './importResult'
 
 describe('importOutcome', () => {
   it('signale un succès avec le nombre de transactions importées', () => {
@@ -59,5 +59,23 @@ describe('importFileProblem', () => {
 
   it('ne signale rien sans fichier', () => {
     expect(importFileProblem(null, 'csv')).toBeNull()
+  })
+})
+
+describe('lastImportLabel', () => {
+  const now = new Date(2026, 10, 13, 15, 0)
+
+  it("indique aujourd'hui ou hier avec l'heure", () => {
+    expect(lastImportLabel('2026-11-13T14:45:10', now)).toBe("aujourd'hui à 14:45")
+    expect(lastImportLabel('2026-11-12T09:12:00', now)).toBe('hier à 09:12')
+  })
+
+  it('indique le nombre de jours et la date au-delà', () => {
+    expect(lastImportLabel('2026-11-01T08:00:00', now)).toBe('il y a 12 jours (le 01/11/2026)')
+  })
+
+  it('renvoie null sans import ou pour une date illisible', () => {
+    expect(lastImportLabel(null, now)).toBeNull()
+    expect(lastImportLabel('pas une date', now)).toBeNull()
   })
 })

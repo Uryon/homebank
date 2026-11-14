@@ -8,6 +8,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class MappeurTransaction {
 
+    /** Libelle affiche a la place du tiers pour un ajustement de solde (voir Transaction#balanceAdjustment). */
+    static final String BALANCE_ADJUSTMENT_LABEL = "Ajustement de solde";
+
     public TransactionDTO toDTO(Transaction transaction) {
         return TransactionDTO.builder()
                 .id(transaction.getId())
@@ -23,15 +26,15 @@ public class MappeurTransaction {
                         ? transaction.getCategory().getId()
                         : null)
                 .paymentMode(transaction.getPaymentMode())
-                .tags(transaction.getTags())
                 .transferTransactionId(transaction.getTransferTransaction() != null
                         ? transaction.getTransferTransaction().getId()
                         : null)
                 .validated(transaction.isValidated())
                 .periodicExpense(transaction.isPeriodicExpense())
                 .exceptional(transaction.isExceptional())
-                .externalId(transaction.getExternalId())
+                .bankLabel(transaction.getBankLabel())
                 .duplicateIgnored(transaction.isDuplicateIgnored())
+                .balanceAdjustment(transaction.isBalanceAdjustment())
                 .build();
     }
 
@@ -53,6 +56,9 @@ public class MappeurTransaction {
                     ? "Virement vers "
                     : "Virement depuis ";
             return direction + counterpartAccount;
+        }
+        if (transaction.isBalanceAdjustment()) {
+            return BALANCE_ADJUSTMENT_LABEL;
         }
         return null;
     }

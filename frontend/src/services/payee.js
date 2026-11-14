@@ -65,10 +65,14 @@ function wildcardToRegex(wildcardPattern) {
 export function matchesPatternField(patternField, text) {
   if (!text || !text.trim()) return false
   const normalizedText = text.trim().replace(/\s+/g, ' ')
+  const lowerText = normalizedText.toLowerCase()
   return splitPatternSegments(patternField).some(segment => {
-    const wildcarded = segment.includes('*') ? segment : `*${segment}*`
+    if (!segment.includes('*')) return lowerText.includes(segment.toLowerCase())
+    // Étoiles de début/fin inutiles (la recherche porte déjà sur tout le libellé).
+    const core = segment.replace(/^\*+|\*+$/g, '')
+    if (!core) return true // motif « * » : correspond à tout
     try {
-      return new RegExp(wildcardToRegex(wildcarded), 'i').test(normalizedText)
+      return new RegExp(wildcardToRegex(core), 'i').test(normalizedText)
     } catch {
       return false // motif invalide : ignoré, comme côté backend
     }

@@ -75,3 +75,26 @@ export function importFileProblem(file, format) {
   }
   return null
 }
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+function startOfDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+/**
+ * Libellé de fraîcheur des données importées (page Import), à partir de la
+ * date-heure ISO du dernier import réussi renvoyée par le backend :
+ * « aujourd'hui à 14:45 », « hier à 09:12 », « il y a 12 jours (le 01/11/2026) ».
+ * Null si aucun import n'a encore été fait.
+ */
+export function lastImportLabel(isoDateTime, now = new Date()) {
+  if (!isoDateTime) return null
+  const date = new Date(isoDateTime)
+  if (Number.isNaN(date.getTime())) return null
+  const time = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+  const days = Math.round((startOfDay(now) - startOfDay(date)) / MS_PER_DAY)
+  if (days <= 0) return `aujourd'hui à ${time}`
+  if (days === 1) return `hier à ${time}`
+  return `il y a ${days} jours (le ${date.toLocaleDateString('fr-FR')})`
+}

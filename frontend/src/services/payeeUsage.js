@@ -23,7 +23,7 @@ const EMPTY_USAGE = { count: 0, lastDate: '' }
 const nameCollator = new Intl.Collator('fr', { sensitivity: 'base', numeric: true })
 
 /** Sens par défaut au premier clic sur une colonne : A→Z pour le nom, le plus grand / le plus récent d'abord sinon. */
-export const DEFAULT_SORT_DIRECTION = { name: 'asc', count: 'desc', lastDate: 'desc' }
+const DEFAULT_SORT_DIRECTION = { name: 'asc', count: 'desc', lastDate: 'desc' }
 
 /**
  * Nouveau tri après un clic sur l'en-tête `key` : même colonne → sens inversé ;

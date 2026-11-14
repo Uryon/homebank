@@ -1,5 +1,5 @@
 <template>
-  <div class="transactions-page">
+  <div class="transactions-page" :style="stickyOffsetStyle">
     <div class="page-header">
       <div>
         <h1>Transactions</h1>
@@ -13,7 +13,7 @@
 
     <TransactionsSubNav />
 
-    <div class="toolbar transactions-toolbar">
+    <div ref="toolbarEl" class="toolbar transactions-toolbar">
       <div class="form-field">
         <label for="tx-filter-account">Compte</label>
         <select id="tx-filter-account" v-model="filterAccount" @change="load">
@@ -77,8 +77,8 @@
       </div>
 
       <div class="form-field" style="margin-left: auto;">
-        <label for="tx-search" title="Tiers, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Entre guillemets (&quot;CAF&quot;), le critère doit correspondre exactement au lieu de simplement le contenir. Ou &gt; / &lt; / = un montant seul.">Rechercher</label>
-        <input id="tx-search" v-model="searchQuery" placeholder="Tiers, catégorie, montant… ex : > 100" style="min-width: 280px;" />
+        <label for="tx-search" title="Tiers, catégorie, mémo ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Entre guillemets (&quot;CAF&quot;), le critère doit correspondre exactement au lieu de simplement le contenir. Ou &gt; / &lt; / = un montant seul.">Rechercher</label>
+        <input id="tx-search" v-model="searchQuery" placeholder="Tiers, catégorie, mémo, montant… ex : > 100" style="min-width: 280px;" />
         <div v-if="amountQuery" class="text-hint">
           {{ amountSearchLoading ? 'Recherche…' : `${filteredTransactions.length} transaction(s) trouvée(s)` }}
         </div>
@@ -269,11 +269,6 @@
             <input id="new-tx-memo" v-model="form.memo" placeholder="Note libre" />
           </div>
 
-          <div class="form-field" style="grid-column: span 2;">
-            <label for="new-tx-tags">Tags (séparés par des espaces)</label>
-            <input id="new-tx-tags" v-model="form.tags" />
-          </div>
-
           <div class="form-field" style="grid-column: span 2; flex-direction: row; align-items: center; gap: 8px;">
             <input type="checkbox" v-model="form.periodicExpense" id="new-periodic-expense" style="width: auto;" />
             <label for="new-periodic-expense" style="margin: 0;">Dépense périodique récurrente (loyer, abonnement...)</label>
@@ -422,7 +417,7 @@
         <h2>Diviser la transaction</h2>
         <div class="text-hint" style="margin-bottom: 20px;">
           {{ splitTransaction?.payee || 'Sans tiers' }} · {{ formatDate(splitTransaction?.date) }} ·
-          Montant total : {{ formatAmount(splitTransaction?.amount) }}
+          Montant total : {{ formatAmount(splitTransaction?.amount, splitCurrency) }}
         </div>
 
         <div class="form-grid">
@@ -448,7 +443,7 @@
           <div class="form-field">
             <span class="form-field-label">Montant — 2e partie</span>
             <div class="split-second-amount amount" :class="secondAmount >= 0 ? 'positive' : 'negative'">
-              {{ formatAmount(secondAmount) }}
+              {{ formatAmount(secondAmount, splitCurrency) }}
             </div>
           </div>
           <div class="form-field">
@@ -497,7 +492,7 @@ import {
 import { dataStore } from '../services/dataStore'
 import { planRestore, transactionPayloadFrom } from '../services/undoRestore'
 import { normalizeSearch, parseAmountQuery, parseSearchTerms, matchesSearchTerm } from '../services/search'
-import { flattenCategories } from '../services/categories'
+import { flattenCategories, needsCategory } from '../services/categories'
 import PayeeAutocomplete from '../components/PayeeAutocomplete.vue'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import TransactionRow from '../components/TransactionRow.vue'
@@ -515,6 +510,27 @@ import { bulkTouchedFields, bulkUpdatePayload, countTouchedFields, emptyBulkForm
 import { useProgressiveList } from '../services/progressiveList'
 
 const route = useRoute()
+
+/*
+ * Barre de filtres collée en haut pendant le défilement (CSS, voir
+ * .transactions-toolbar) : l'en-tête du tableau et les intertitres de mois,
+ * eux aussi collants, se placent juste en dessous grâce à la variable
+ * --tx-toolbar-height. Sa hauteur varie (passage sur deux lignes en écran
+ * étroit) : un ResizeObserver la tient à jour, sans aucun calcul au scroll.
+ */
+const toolbarEl = ref(null)
+const toolbarHeight = ref(0)
+const stickyOffsetStyle = computed(() => ({ '--tx-toolbar-height': `${toolbarHeight.value}px` }))
+let toolbarResizeObserver = null
+
+onMounted(() => {
+  if (!toolbarEl.value || typeof ResizeObserver === 'undefined') return
+  toolbarResizeObserver = new ResizeObserver(([entry]) => {
+    toolbarHeight.value = entry.target.offsetHeight
+  })
+  toolbarResizeObserver.observe(toolbarEl.value)
+})
+onBeforeUnmount(() => toolbarResizeObserver?.disconnect())
 const router = useRouter()
 
 const filterAccount = ref(null)
@@ -802,7 +818,6 @@ function emptyForm() {
     categoryId: null,
     paymentMode: 'NONE',
     memo: '',
-    tags: '',
     transferTransactionId: null,
     periodicExpense: false,
     exceptional: false,
@@ -825,7 +840,7 @@ const pendingCount = computed(() =>
 )
 
 const uncategorizedCount = computed(() =>
-  transactions.value.filter(t => !t.categoryId).length
+  transactions.value.filter(needsCategory).length
 )
 
 // Categories a plat { id, label, type, selectable } (voir flattenCategories),
@@ -876,6 +891,7 @@ const searchIndexById = computed(() => {
       payeeNormalized: normalizeSearch(t.payee),
       categoryNormalized: normalizeSearch(labels.get(t.categoryId) || ''),
       categoryNameNormalized: normalizeSearch(names.get(t.categoryId) || ''),
+      memoNormalized: normalizeSearch(t.memo),
       rawAmount: String(t.amount ?? '').toLowerCase(),
       absAmount: String(Math.abs(t.amount ?? 0)),
       // Montant formate ("0,60 €") avec la virgule decimale remplacee par un
@@ -906,7 +922,7 @@ const statusAndDateFiltered = computed(() => {
     : baseTransactions
 
   if (uncategorizedOnly.value) {
-    filtered = filtered.filter(t => !t.categoryId)
+    filtered = filtered.filter(needsCategory)
   }
 
   if (filterMonth.value == null && filterYear.value == null) return filtered
@@ -1176,13 +1192,8 @@ async function save() {
 /* --- Édition inline : clic sur une ligne --- */
 
 function startEdit(t) {
-  // Meme garde-fou que openSplit : un virement ne peut pas etre modifie
-  // directement (voir ServiceTransaction#update), qui rejette la requete
-  // apres coup si on laisse l'edition s'ouvrir.
-  if (t.paymentMode === 'TRANSFER' || t.transferTransactionId) {
-    notify('Un virement ne peut pas être modifié directement : supprimez-le et recréez-le si besoin.', 'warning')
-    return
-  }
+  // Un virement est modifiable : date, montant, mémo et validation sont
+  // répercutés sur l'autre côté par le backend (voir ServiceTransaction#syncTransferTwin).
   editingId.value = t.id
 }
 
@@ -1247,6 +1258,9 @@ const secondAmount = computed(() => {
   return Number(splitTransaction.value.amount) - Number(splitForm.value.firstAmount || 0)
 })
 
+/** Devise du compte de la transaction divisée, pour afficher ses montants dans la bonne monnaie. */
+const splitCurrency = computed(() => accountsById.value.get(splitTransaction.value?.accountId)?.currency)
+
 // Même logique que formAmountType/editAmountType : ne proposer que des
 // catégories du bon sens (dépense/revenu) selon le signe du montant d'origine.
 const splitAmountType = computed(() => {
@@ -1256,8 +1270,14 @@ const splitAmountType = computed(() => {
 })
 
 function openSplit(transaction) {
-  if (transaction.paymentMode === 'TRANSFER' || transaction.transferTransactionId) {
-    notify('Un virement ne peut pas être divisé.', 'warning')
+  // Seul un virement interne (lié à sa jumelle) est indivisible ; un paiement
+  // par virement ordinaire (loyer…) se divise comme une autre dépense.
+  if (transaction.transferTransactionId) {
+    notify('Un virement entre comptes ne peut pas être divisé.', 'warning')
+    return
+  }
+  if (transaction.balanceAdjustment) {
+    notify('Un ajustement de solde ne peut pas être divisé.', 'warning')
     return
   }
   splitTransaction.value = transaction
@@ -1364,7 +1384,11 @@ async function validateAll() {
     await load()
     notify(`${pendingIds.length} transaction(s) validée(s).`, 'success')
     setLastAction(`Validation de ${pendingIds.length} transaction(s)`, async () => {
-      await Promise.all(pendingIds.map(id => TransactionsAPI.toggleValidated(id)))
+      // Remise explicite « en attente » (et non une bascule par transaction) :
+      // basculer un côté de virement bascule aussi sa jumelle, si bien que
+      // deux bascules successives (une par côté, tous deux en attente)
+      // laissaient le virement validé après l'annulation.
+      await TransactionsAPI.bulkUpdate({ ids: pendingIds, validatedProvided: true, validated: false })
       await load()
     })
   } catch (e) {
@@ -1459,6 +1483,7 @@ onMounted(async () => {
  * - edit=<id>   : ouvre la transaction en édition (« À traiter » > « Modifier ») ;
  * - search=<t>  : pré-remplit la recherche ;
  * - pending=1 / uncategorized=1 : active le filtre « À traiter » / « Sans catégorie » ;
+ * - account=<id> : filtre sur ce compte (lien « opérations en attente » du rapprochement) ;
  * - new=1       : ouvre la fenêtre de création.
  * Réappliqués à chaque changement de query : la page n'est pas remontée
  * quand on y navigue alors qu'elle est déjà affichée.
@@ -1472,6 +1497,11 @@ function applyRouteQuery(query) {
   if (typeof query.search === 'string') searchQuery.value = query.search
   if (query.uncategorized) uncategorizedOnly.value = true
   if (query.pending) pendingOnly.value = true
+  const accountId = query.account ? Number(query.account) : null
+  if (accountId && accountId !== filterAccount.value) {
+    filterAccount.value = accountId
+    load().catch(e => alertApiError('Erreur lors du chargement des transactions du compte', e))
+  }
   if (query.new && entryAccounts.value.length) {
     openCreate()
     // Retire "new" de l'URL : un retour arrière ou un nouveau raccourci
@@ -1559,7 +1589,7 @@ watch(() => route.query, (query) => {
    le défilement, pour toujours savoir quel mois on est en train de lire. */
 .transactions-table .month-row th {
   position: sticky;
-  top: 43px;
+  top: calc(var(--tx-sticky-top) + 43px);
   z-index: 5;
   padding: 7px 12px;
   background: var(--surface-sunken);
@@ -1594,9 +1624,14 @@ watch(() => route.query, (query) => {
   text-overflow: ellipsis;
 }
 
+/* Sous la barre de filtres collante (hauteur + son écart de 14 px avec le tableau). */
+.transactions-page {
+  --tx-sticky-top: calc(var(--tx-toolbar-height, 0px) + 14px);
+}
+
 .transactions-table thead th {
   position: sticky;
-  top: 0;
+  top: var(--tx-sticky-top);
   z-index: 6;
 }
 
@@ -1857,7 +1892,15 @@ watch(() => route.query, (query) => {
   letter-spacing: -0.035em;
 }
 
+/*
+ * Barre de filtres toujours visible : collée en haut pendant le défilement.
+ * La 2e ombre, pleine et de la couleur du fond de page, masque les lignes qui
+ * défilent dans l'écart de 14 px entre la barre et l'en-tête du tableau.
+ */
 .transactions-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 8;
   align-items: flex-end;
   gap: 14px;
   padding: 16px;
@@ -1865,7 +1908,19 @@ watch(() => route.query, (query) => {
   background: var(--ink-900);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm), 0 15px 0 0 var(--ink-950);
+}
+
+/* Mobile : la barre (sur plusieurs lignes) prendrait la moitié de l'écran ;
+   elle défile normalement, comme l'en-tête du tableau à cette taille. */
+@media (max-width: 760px) {
+  .transactions-toolbar {
+    position: static;
+    box-shadow: var(--shadow-sm);
+  }
+  .transactions-page {
+    --tx-toolbar-height: 0px !important;
+  }
 }
 
 .transactions-toolbar .form-field {

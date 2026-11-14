@@ -22,6 +22,17 @@
  * masquee), tout en l'excluant des suggestions proposees pour un nouveau
  * choix.
  */
+/**
+ * Vrai si la transaction attend encore une catégorie : sans catégorie, et
+ * ni virement interne (lié à sa jumelle) ni ajustement de solde, qui ne
+ * sont ni des dépenses ni des revenus (voir Transaction#isInternalTransfer
+ * et Transaction#balanceAdjustment côté backend). Source unique pour la
+ * pastille « sans catégorie » et le filtre du même nom.
+ */
+export function needsCategory(t) {
+  return !t.categoryId && !t.transferTransactionId && !t.balanceAdjustment
+}
+
 export function flattenCategories(categories) {
   const childrenByParentId = new Map()
   for (const c of categories) {

@@ -19,7 +19,6 @@ import com.homebank.model.Categorie;
 import com.homebank.model.Transaction;
 import com.homebank.repository.DepotCompte;
 import com.homebank.repository.DepotTransaction;
-import com.homebank.utils.ModePaiement;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -102,9 +101,9 @@ public class ServiceRapport {
         return result;
     }
 
-    /** Vrai si t doit etre exclue de tous les rapports, quelle que soit sa categorie : virement, transaction future, ou marquee exceptionnelle. */
+    /** Vrai si t doit etre exclue de tous les rapports, quelle que soit sa categorie : virement interne, ajustement de solde, transaction future, ou marquee exceptionnelle. */
     private static boolean isExcludedFromReports(Transaction t, LocalDate today) {
-        return t.getPaymentMode() == ModePaiement.TRANSFER || t.getDate().isAfter(today) || t.isExceptional();
+        return t.isInternalTransfer() || t.isBalanceAdjustment() || t.getDate().isAfter(today) || t.isExceptional();
     }
 
     /** Ajoute t a result s'il est attribuable normalement (voir attributedTransactions) : les categories annuelles sont traitees a part par addAnnualizedShares, jamais ici pour leur montant plein. */
@@ -456,6 +455,8 @@ public class ServiceRapport {
                 // Une transaction exceptionnelle est exclue de tous les tableaux de
                 // bord (voir Transaction#exceptional), y compris celui-ci.
                 .filter(t -> !t.isExceptional())
+                // Virement interne : ni depense ni revenu (exclu des rapports, voir isExcludedFromReports).
+                .filter(t -> !t.isInternalTransfer())
                 // Une occurrence future n'a pas encore reellement eu lieu : on ne la
                 // retient pas comme "derniere" occurrence connue de la depense.
                 .filter(t -> !t.getDate().isAfter(today))
@@ -473,9 +474,13 @@ public class ServiceRapport {
 
     /** Une ligne par tiers (la plus recente occurrence) + le total, pour un groupe de transactions periodiques deja filtre par signe. */
     private GroupePeriodiqueDTO summarizePeriodicGroup(List<Transaction> transactions) {
+        // Cle = id du tiers, pas son nom : deux tiers homonymes distingues par
+        // leur montant ou leur motif (ex : deux lignes "Bouygues Telecom") sont
+        // deux abonnements distincts, qu'un regroupement par nom fusionnait en
+        // une seule ligne, sous-estimant le total.
         Map<String, Transaction> latestByPayee = new LinkedHashMap<>();
         for (Transaction t : transactions) {
-            String key = (t.getPayee() != null ? t.getPayee().getName().toLowerCase(Locale.ROOT) : "id-" + t.getId());
+            String key = t.getPayee() != null ? "tiers-" + t.getPayee().getId() : "id-" + t.getId();
             latestByPayee.putIfAbsent(key, t);
         }
 

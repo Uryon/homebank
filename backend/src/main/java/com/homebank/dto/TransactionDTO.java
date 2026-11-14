@@ -24,11 +24,13 @@ public class TransactionDTO {
     private String memo;
     private Long categoryId;
     private ModePaiement paymentMode;
-    private String tags;
     private Long transferTransactionId;
     private boolean validated;
     private boolean periodicExpense;
     private boolean exceptional;
-    private String externalId;
+    /** Libelle bancaire d'origine (voir Transaction#bankLabel) : pris en compte a la creation seulement (restauration apres annulation). */
+    private String bankLabel;
     private boolean duplicateIgnored;
+    /** Ajustement de solde (voir Transaction#balanceAdjustment) : pris en compte a la creation seulement, jamais modifie par une mise a jour. */
+    private boolean balanceAdjustment;
 }

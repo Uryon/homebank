@@ -106,7 +106,43 @@ class ServiceRapportTest {
         return t;
     }
 
+    /** Fait de t un cote de virement interne : liee a sa jumelle de montant oppose sur un autre compte. */
+    private static void lierAUnAutreCompte(Transaction t) {
+        Transaction jumelle = transaction(t.getId() + 1000, compte(99L, "0"), t.getDate(),
+                t.getAmount().negate().toPlainString(), null);
+        t.setPaymentMode(ModePaiement.TRANSFER);
+        jumelle.setPaymentMode(ModePaiement.TRANSFER);
+        t.setTransferTransaction(jumelle);
+        jumelle.setTransferTransaction(t);
+    }
+
     // --- attributedTransactions (exclusions), exercee via expensesByCategory ---
+
+    @Test
+    void expensesByCategory_ignoreLesAjustementsDeSolde() {
+        Compte account = compte(1L, "0");
+        Transaction ajustement = transaction(1L, account, LocalDate.of(2026, 1, 5), "-120.00", null);
+        ajustement.setBalanceAdjustment(true);
+        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(ajustement));
+
+        assertThat(service.expensesByCategory(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), null)).isEmpty();
+    }
+
+    /** « Virement » comme simple mode de paiement (loyer payé par virement) : une vraie dépense, comptée. */
+    @Test
+    void expensesByCategory_paiementParVirementNonLie_estCompteCommeUneDepense() {
+        Compte account = compte(1L, "0");
+        Categorie logement = categorie(1L, "Logement", null, false);
+        Transaction loyer = transaction(1L, account, LocalDate.of(2026, 1, 5), "-800.00", logement);
+        loyer.setPaymentMode(ModePaiement.TRANSFER);
+        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(loyer));
+
+        List<DepenseParCategorieDTO> result = service.expensesByCategory(
+                LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), null);
+
+        assertThat(result).singleElement().extracting(DepenseParCategorieDTO::total)
+                .isEqualTo(new BigDecimal("800.00"));
+    }
 
     @Test
     void expensesByCategory_excluLesVirementsLesTransactionsFuturesEtLesExceptionnelles() {
@@ -114,7 +150,7 @@ class ServiceRapportTest {
         Categorie courses = categorie(1L, "Courses", null, false);
         Transaction depenseValide = transaction(1L, account, LocalDate.of(2026, 1, 10), "-50.00", courses);
         Transaction virement = transaction(2L, account, LocalDate.of(2026, 1, 10), "-30.00", courses);
-        virement.setPaymentMode(ModePaiement.TRANSFER);
+        lierAUnAutreCompte(virement);
         Transaction future = transaction(3L, account, LocalDate.now().plusDays(5), "-20.00", courses);
         Transaction exceptionnelle = transaction(4L, account, LocalDate.of(2026, 1, 15), "-999.00", courses);
         exceptionnelle.setExceptional(true);
@@ -258,7 +294,7 @@ class ServiceRapportTest {
         Transaction revenu = transaction(1L, account, LocalDate.of(2026, 1, 5), "2000.00", null);
         Transaction depense = transaction(2L, account, LocalDate.of(2026, 1, 10), "-500.00", null);
         Transaction virement = transaction(3L, account, LocalDate.of(2026, 1, 12), "-300.00", null);
-        virement.setPaymentMode(ModePaiement.TRANSFER);
+        lierAUnAutreCompte(virement);
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(revenu, depense, virement));
 
         ResumePeriodeDTO result = service.summary(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
@@ -464,6 +500,56 @@ class ServiceRapportTest {
     }
 
     @Test
+    void periodicExpensesSummary_deuxTiersHomonymes_gardeUneLigneChacun() {
+        LocalDate today = LocalDate.now();
+        Tiers ligneMel = new Tiers();
+        ligneMel.setId(1L);
+        ligneMel.setName("Bouygues Telecom");
+        Tiers ligneVal = new Tiers();
+        ligneVal.setId(2L);
+        ligneVal.setName("Bouygues Telecom");
+        Transaction forfaitMel = new Transaction();
+        forfaitMel.setId(1L);
+        forfaitMel.setPayee(ligneMel);
+        forfaitMel.setDate(today.minusDays(3));
+        forfaitMel.setAmount(new BigDecimal("-10.00"));
+        Transaction forfaitVal = new Transaction();
+        forfaitVal.setId(2L);
+        forfaitVal.setPayee(ligneVal);
+        forfaitVal.setDate(today.minusDays(4));
+        forfaitVal.setAmount(new BigDecimal("-20.00"));
+        when(transactionRepository.findByPeriodicExpenseTrueOrderByDateDescIdDesc())
+                .thenReturn(List.of(forfaitMel, forfaitVal));
+
+        SynthesePeriodiqueDTO result = service.periodicExpensesSummary();
+
+        assertThat(result.expenses().items()).hasSize(2);
+        assertThat(result.expenses().total()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    void periodicExpensesSummary_ignoreLesVirementsInternes() {
+        LocalDate today = LocalDate.now();
+        Transaction versLivret = new Transaction();
+        versLivret.setId(1L);
+        versLivret.setDate(today.minusDays(2));
+        versLivret.setAmount(new BigDecimal("-200.00"));
+        Transaction surLivret = new Transaction();
+        surLivret.setId(2L);
+        surLivret.setDate(today.minusDays(2));
+        surLivret.setAmount(new BigDecimal("200.00"));
+        versLivret.setTransferTransaction(surLivret);
+        surLivret.setTransferTransaction(versLivret);
+        when(transactionRepository.findByPeriodicExpenseTrueOrderByDateDescIdDesc())
+                .thenReturn(List.of(versLivret, surLivret));
+
+        SynthesePeriodiqueDTO result = service.periodicExpensesSummary();
+
+        assertThat(result.expenses().items()).isEmpty();
+        assertThat(result.revenues().items()).isEmpty();
+    }
+
+    @Test
     void periodicExpensesSummary_excludLesOccurrencesFuturesEtExceptionnellesEtCellesDePlusDeTroisMois() {
         LocalDate today = LocalDate.now();
         Tiers netflix = new Tiers();
@@ -535,7 +621,7 @@ class ServiceRapportTest {
         LocalDate lastMonthStart = LocalDate.now().withDayOfMonth(1).minusMonths(1);
         Transaction normale = transaction(1L, account, lastMonthStart.plusDays(1), "100.00", null);
         Transaction virement = transaction(2L, account, lastMonthStart.plusDays(2), "5000.00", null);
-        virement.setPaymentMode(ModePaiement.TRANSFER);
+        lierAUnAutreCompte(virement);
         Transaction exceptionnelle = transaction(3L, account, lastMonthStart.plusDays(3), "3000.00", null);
         exceptionnelle.setExceptional(true);
 

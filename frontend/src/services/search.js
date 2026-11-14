@@ -52,7 +52,8 @@ export function parseSearchTerms(query) {
 /**
  * Un critère matche l'index précalculé d'une transaction (voir
  * searchIndexById dans Transactions.vue) : en mode "contient" (défaut) il
- * suffit que le terme soit inclus dans le tiers, la catégorie ou le montant ;
+ * suffit que le terme soit inclus dans le tiers, la catégorie, le mémo ou le
+ * montant (le mémo, texte libre, n'est pas concerné par le mode "exact") ;
  * en mode "exact" (terme entre guillemets) il faut une égalité stricte —
  * contre le nom de la catégorie seul (categoryNameNormalized, ex : "Salaire")
  * ou son libellé complet avec le parent (categoryNormalized, ex :
@@ -74,6 +75,7 @@ export function matchesSearchTerm(idx, { term, exact }) {
   return (
     idx.payeeNormalized.includes(term) ||
     idx.categoryNormalized.includes(term) ||
+    (idx.memoNormalized ?? '').includes(term) ||
     idx.rawAmount.includes(termAsAmount) ||
     idx.absAmount.includes(termAsAmount) ||
     idx.amountFormattedNormalized.includes(termAsAmount)

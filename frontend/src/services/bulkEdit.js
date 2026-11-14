@@ -6,7 +6,7 @@
  */
 
 /** Champs modifiables en masse, dans l'ordre du formulaire. */
-export const BULK_FIELDS = ['categoryId', 'payee', 'paymentMode', 'periodicExpense', 'exceptional', 'validated']
+const BULK_FIELDS = ['categoryId', 'payee', 'paymentMode', 'periodicExpense', 'exceptional', 'validated']
 
 /**
  * Formulaire vierge : Categorie/Tiers utilisent un drapeau *Touched explicite,

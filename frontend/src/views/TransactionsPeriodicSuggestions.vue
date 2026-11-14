@@ -88,7 +88,13 @@ async function ignoreGroup(group) {
 async function markPeriodic(group) {
   marking.value = groupKey(group)
   try {
-    await Promise.all(group.transactions.map(t => TransactionsAPI.togglePeriodicExpense(t.id)))
+    // Marquage explicite en une requête (et non une bascule par transaction,
+    // qui démarquerait une transaction du groupe déjà marquée périodique).
+    await TransactionsAPI.bulkUpdate({
+      ids: group.transactions.map(t => t.id),
+      periodicExpenseProvided: true,
+      periodicExpense: true
+    })
     await dataStore.refreshTransactions()
     await load()
   } catch (e) {
