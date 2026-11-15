@@ -11,7 +11,7 @@
     <div class="toolbar">
       <div class="form-field">
         <label for="categories-search" title="Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET). Entourez un critère de guillemets pour une correspondance exacte, ex : &quot;CAF&quot;">Recherche</label>
-        <input id="categories-search" v-model="searchQuery" placeholder='Ex : Alimentation ou "CAF"' style="min-width: 240px;" />
+        <input id="categories-search" v-model="searchQuery" class="toolbar-search" placeholder='Ex : Alimentation ou "CAF"' />
       </div>
 
       <div v-if="selectedIds.length >= 2" class="form-field" style="align-self: flex-end;">
@@ -63,7 +63,7 @@
               @drop="onRootDrop($event, root)"
             >
               <template v-if="editingId === root.id">
-                <div class="cat-row-inline" @click.stop>
+                <div class="cat-row-inline inline-edit-fields" @click.stop>
                   <input v-model="editForm.icon" aria-label="Icône" placeholder="🙂" maxlength="4" class="icon-field" />
                   <input v-model="editForm.name" ref="firstEditField" aria-label="Nom" placeholder="Nom" style="flex: 1;" />
                   <select v-model="editForm.type" aria-label="Type">
@@ -71,15 +71,16 @@
                     <option value="INCOME">Revenu</option>
                     <option value="BOTH">Les deux</option>
                   </select>
-                  <button class="btn" style="padding: 6px 9px;" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
-                  <button class="btn secondary" style="padding: 6px 9px;" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
+                  <button class="btn btn-icon" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
+                  <button class="btn secondary btn-icon" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
                 </div>
               </template>
               <template v-else>
                 <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
                   <input type="checkbox" :value="root.id" v-model="selectedIds" :aria-label="'Sélectionner ' + root.name" @click.stop />
                   <strong>{{ iconPrefix(root.icon) }}{{ root.name }}</strong>
-                  <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
+                  <!-- Type déjà donné par la colonne : badge seulement pour « Les deux » -->
+                  <span v-if="root.type === 'BOTH'" class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
                   <span v-if="root.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
                 <div class="cat-actions hover-actions" @click.stop>
@@ -109,7 +110,7 @@
               @dragend="onDragEnd"
             >
               <template v-if="editingId === child.id">
-                <div class="cat-row-inline" @click.stop>
+                <div class="cat-row-inline inline-edit-fields" @click.stop>
                   <input v-model="editForm.icon" aria-label="Icône" placeholder="🙂" maxlength="4" class="icon-field" />
                   <input v-model="editForm.name" ref="firstEditField" aria-label="Nom" placeholder="Nom" style="flex: 1;" />
                   <select v-model.number="editForm.parentId" aria-label="Catégorie parente">
@@ -118,8 +119,8 @@
                   <span class="text-muted" style="font-size: 12px;">
                     {{ typeLabel(rootTypeById.get(editForm.parentId)) }} (hérité du parent)
                   </span>
-                  <button class="btn" style="padding: 6px 9px;" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
-                  <button class="btn secondary" style="padding: 6px 9px;" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
+                  <button class="btn btn-icon" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
+                  <button class="btn secondary btn-icon" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
                 </div>
               </template>
               <template v-else>
@@ -173,7 +174,7 @@
               @drop="onRootDrop($event, root)"
             >
               <template v-if="editingId === root.id">
-                <div class="cat-row-inline" @click.stop>
+                <div class="cat-row-inline inline-edit-fields" @click.stop>
                   <input v-model="editForm.icon" aria-label="Icône" placeholder="🙂" maxlength="4" class="icon-field" />
                   <input v-model="editForm.name" ref="firstEditField" aria-label="Nom" placeholder="Nom" style="flex: 1;" />
                   <select v-model="editForm.type" aria-label="Type">
@@ -181,15 +182,16 @@
                     <option value="INCOME">Revenu</option>
                     <option value="BOTH">Les deux</option>
                   </select>
-                  <button class="btn" style="padding: 6px 9px;" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
-                  <button class="btn secondary" style="padding: 6px 9px;" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
+                  <button class="btn btn-icon" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
+                  <button class="btn secondary btn-icon" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
                 </div>
               </template>
               <template v-else>
                 <div style="display:flex; align-items:center; gap:10px; padding: 8px 0;">
                   <input type="checkbox" :value="root.id" v-model="selectedIds" :aria-label="'Sélectionner ' + root.name" @click.stop />
                   <strong>{{ iconPrefix(root.icon) }}{{ root.name }}</strong>
-                  <span class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
+                  <!-- Type déjà donné par la colonne : badge seulement pour « Les deux » -->
+                  <span v-if="root.type === 'BOTH'" class="badge" :style="typeBadgeStyle(root.type)">{{ typeLabel(root.type) }}</span>
                   <span v-if="root.annualized" class="badge" style="background: var(--amber-dim); color: var(--amber);" title="Les transactions de cette catégorie sont lissées sur 12 mois dans les rapports">Annuelle</span>
                 </div>
                 <div class="cat-actions hover-actions" @click.stop>
@@ -219,7 +221,7 @@
               @dragend="onDragEnd"
             >
               <template v-if="editingId === child.id">
-                <div class="cat-row-inline" @click.stop>
+                <div class="cat-row-inline inline-edit-fields" @click.stop>
                   <input v-model="editForm.icon" aria-label="Icône" placeholder="🙂" maxlength="4" class="icon-field" />
                   <input v-model="editForm.name" ref="firstEditField" aria-label="Nom" placeholder="Nom" style="flex: 1;" />
                   <select v-model.number="editForm.parentId" aria-label="Catégorie parente">
@@ -228,8 +230,8 @@
                   <span class="text-muted" style="font-size: 12px;">
                     {{ typeLabel(rootTypeById.get(editForm.parentId)) }} (hérité du parent)
                   </span>
-                  <button class="btn" style="padding: 6px 9px;" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
-                  <button class="btn secondary" style="padding: 6px 9px;" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
+                  <button class="btn btn-icon" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
+                  <button class="btn secondary btn-icon" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
                 </div>
               </template>
               <template v-else>
@@ -251,7 +253,8 @@
       </div>
     </div>
     <div v-else class="empty-state">
-      {{ searchQuery.trim() ? 'Aucune catégorie ne correspond à cette recherche.' : 'Aucune catégorie. Créez-en une pour classer vos transactions.' }}
+      <span>{{ searchQuery.trim() ? 'Aucune catégorie ne correspond à cette recherche.' : 'Aucune catégorie. Créez-en une pour classer vos transactions.' }}</span>
+      <button v-if="searchQuery.trim()" type="button" class="btn secondary" @click="searchQuery = ''">Effacer la recherche</button>
     </div>
 
     <!-- Catégories masquées : encart à part sous les colonnes Dépenses/Revenus -->
@@ -274,7 +277,7 @@
         @keydown.esc="cancelEdit"
       >
         <template v-if="editingId === item.id">
-          <div class="cat-row-inline" @click.stop>
+          <div class="cat-row-inline inline-edit-fields" @click.stop>
             <input v-model="editForm.icon" aria-label="Icône" placeholder="🙂" maxlength="4" class="icon-field" />
             <input v-model="editForm.name" ref="firstEditField" aria-label="Nom" placeholder="Nom" style="flex: 1;" />
             <template v-if="!item.parentId">
@@ -292,8 +295,8 @@
                 {{ typeLabel(rootTypeById.get(editForm.parentId)) }} (hérité du parent)
               </span>
             </template>
-            <button class="btn" style="padding: 6px 9px;" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
-            <button class="btn secondary" style="padding: 6px 9px;" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
+            <button class="btn btn-icon" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
+            <button class="btn secondary btn-icon" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
           </div>
         </template>
         <template v-else>

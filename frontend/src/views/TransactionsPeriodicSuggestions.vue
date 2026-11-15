@@ -9,13 +9,20 @@
 
     <TransactionsSubNav />
 
-    <div v-if="suggestions.length" class="suggestion-list">
+    <div v-if="loading" class="empty-state" role="status">Recherche des dépenses et revenus périodiques…</div>
+    <div v-else-if="loadError" class="empty-state" role="alert">
+      <p>Impossible de charger les suggestions. Tes transactions n'ont pas été modifiées.</p>
+      <button class="btn secondary" type="button" @click="load">Réessayer</button>
+    </div>
+
+    <div v-else-if="suggestions.length" class="suggestion-list">
       <div v-for="group in suggestions" :key="groupKey(group)" class="suggestion-card">
         <div class="suggestion-main">
           <div class="suggestion-payee">{{ group.payee }}</div>
           <div class="suggestion-meta">
-            {{ group.count }} occurrences · {{ formatAmount(group.averageAmount) }} en moyenne
-            <span v-if="group.averageIntervalDays">· tous les ~{{ group.averageIntervalDays }} jours</span>
+            {{ group.count }} occurrences ·
+            <span class="amount" :class="group.averageAmount < 0 ? 'negative' : 'positive'">{{ formatAmount(group.averageAmount) }}</span> en moyenne
+            <span v-if="group.averageIntervalDays">· {{ formatFrequency(group.averageIntervalDays) }}</span>
           </div>
           <div class="suggestion-occurrences">
             <span v-for="t in group.transactions" :key="t.id" class="occurrence-chip">
@@ -25,11 +32,18 @@
         </div>
 
         <div class="suggestion-actions">
-          <button class="btn secondary" :disabled="marking === groupKey(group)" @click="markPeriodic(group)">
-            {{ marking === groupKey(group) ? 'Marquage…' : '✓ Marquer périodique' }}
+          <button class="btn secondary" type="button" :disabled="isBusy(group)" @click="markPeriodic(group)">
+            <Icon name="check" size="sm" />
+            {{ marking === groupKey(group) ? 'Marquage…' : 'Marquer périodique' }}
           </button>
-          <button class="btn secondary" :disabled="ignoring === groupKey(group)" @click="ignoreGroup(group)">
-            {{ ignoring === groupKey(group) ? 'Marquage…' : 'Ignorer' }}
+          <button
+            class="btn secondary"
+            type="button"
+            :disabled="isBusy(group)"
+            title="Ne plus proposer ce groupe de transactions"
+            @click="ignoreGroup(group)"
+          >
+            {{ ignoring === groupKey(group) ? 'Masquage…' : 'Ignorer' }}
           </button>
         </div>
       </div>
@@ -53,23 +67,39 @@
 import { ref, onMounted } from 'vue'
 import { TransactionsAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
-import { formatAmount, formatDate } from '../services/format'
+import { formatAmount, formatDate, formatFrequency } from '../services/format'
 import { alertApiError } from '../services/errors'
 import TransactionsSubNav from './TransactionsSubNav.vue'
+import Icon from '../components/Icon.vue'
 
 const suggestions = ref([])
 const marking = ref(null)
 const ignoring = ref(null)
+// true jusqu'au premier chargement : évite d'afficher « Aucune suggestion » avant la réponse.
+const loading = ref(true)
+const loadError = ref(false)
 
 function groupKey(group) {
   return group.payee + '|' + (group.transactions[0]?.id ?? group.averageAmount)
 }
 
-async function load() {
+/** Une action en cours sur le groupe bloque ses deux boutons (pas de double requête). */
+function isBusy(group) {
+  const key = groupKey(group)
+  return marking.value === key || ignoring.value === key
+}
+
+/** Les rechargements après une action restent silencieux : la liste reste affichée. */
+async function load({ silent = false } = {}) {
+  if (!silent) loading.value = true
+  loadError.value = false
   try {
     suggestions.value = await TransactionsAPI.periodicSuggestions()
   } catch (e) {
+    loadError.value = true
     alertApiError('Erreur lors du chargement des suggestions', e)
+  } finally {
+    loading.value = false
   }
 }
 
@@ -77,9 +107,9 @@ async function ignoreGroup(group) {
   ignoring.value = groupKey(group)
   try {
     await TransactionsAPI.ignorePeriodicSuggestion(group.transactions.map(t => t.id))
-    await load()
+    await load({ silent: true })
   } catch (e) {
-    alertApiError("Erreur lors de l'ignorance de la suggestion", e)
+    alertApiError('Erreur lors du masquage de la suggestion', e)
   } finally {
     ignoring.value = null
   }
@@ -96,7 +126,7 @@ async function markPeriodic(group) {
       periodicExpense: true
     })
     await dataStore.refreshTransactions()
-    await load()
+    await load({ silent: true })
   } catch (e) {
     alertApiError('Erreur lors du marquage en dépense périodique', e)
   } finally {
@@ -104,7 +134,7 @@ async function markPeriodic(group) {
   }
 }
 
-onMounted(load)
+onMounted(() => load())
 </script>
 
 <style scoped>
@@ -152,6 +182,7 @@ onMounted(load)
 .occurrence-chip {
   font-size: 12px;
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums; /* espace fine des milliers visible */
   color: var(--text-faint);
   background: var(--ink-800);
   border-radius: 999px;

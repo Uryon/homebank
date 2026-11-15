@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_IMPORT_FILE_BYTES, formatFileSize, importFileProblem, importOutcome, lastImportLabel } from './importResult'
+import { MAX_IMPORT_FILE_BYTES, formatFileSize, importFileProblem, importOutcome, lastImportLabel, resultTileLabels } from './importResult'
 
 describe('importOutcome', () => {
   it('signale un succès avec le nombre de transactions importées', () => {
@@ -25,6 +25,11 @@ describe('importOutcome', () => {
 
   it('avertit d\'un fichier vide', () => {
     expect(importOutcome({ imported: 0, duplicates: 0, skipped: 0 }).type).toBe('warning')
+  })
+
+  it('ne met pas en cause le format quand le relevé est réimporté avec quelques erreurs', () => {
+    expect(importOutcome({ imported: 0, duplicates: 4, skipped: 1 }))
+      .toEqual({ type: 'warning', message: 'Aucune nouvelle transaction : 4 lignes déjà présentes, 1 ligne en erreur.' })
   })
 })
 
@@ -77,5 +82,23 @@ describe('lastImportLabel', () => {
   it('renvoie null sans import ou pour une date illisible', () => {
     expect(lastImportLabel(null, now)).toBeNull()
     expect(lastImportLabel('pas une date', now)).toBeNull()
+  })
+})
+
+describe('resultTileLabels', () => {
+  it('accorde les libellés au singulier (0 ou 1)', () => {
+    expect(resultTileLabels({ imported: 1, duplicates: 0 })).toEqual({
+      imported: 'importée', duplicates: 'déjà présente, ignorée', skipped: 'en erreur'
+    })
+  })
+
+  it('accorde les libellés au pluriel au-delà de 1', () => {
+    const labels = resultTileLabels({ imported: 3, duplicates: 2 })
+    expect(labels.imported).toBe('importées')
+    expect(labels.duplicates).toBe('déjà présentes, ignorées')
+  })
+
+  it('tolère un résultat incomplet', () => {
+    expect(resultTileLabels(null).imported).toBe('importée')
   })
 })

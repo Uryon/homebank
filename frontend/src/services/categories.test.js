@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { flattenCategories, needsCategory } from './categories'
+import { categoryChipInfo, flattenCategories, needsCategory } from './categories'
 
 describe('flattenCategories', () => {
   it('une racine sans enfant reste selectable', () => {
@@ -58,5 +58,28 @@ describe('needsCategory', () => {
   it("n'attend pas de catégorie pour un virement interne ni un ajustement de solde", () => {
     expect(needsCategory({ categoryId: null, transferTransactionId: 12 })).toBe(false)
     expect(needsCategory({ categoryId: null, balanceAdjustment: true })).toBe(false)
+  })
+})
+
+describe('categoryChipInfo', () => {
+  const byId = new Map([
+    [3, { id: 3, name: 'Alimentation', icon: '🍽', parentId: null }],
+    [8, { id: 8, name: 'Restaurant', icon: '🍔', parentId: 3 }],
+    [9, { id: 9, name: 'Divers', parentId: null }]
+  ])
+
+  it("une sous-catégorie prend la teinte et l'icône de sa racine", () => {
+    expect(categoryChipInfo(8, byId)).toEqual({
+      name: 'Restaurant', parent: 'Alimentation', icon: '🍽', hue: (3 * 47) % 360, path: 'Alimentation › Restaurant'
+    })
+  })
+
+  it("une racine sans icône s'affiche seule, sans parent", () => {
+    expect(categoryChipInfo(9, byId)).toEqual({ name: 'Divers', parent: '', icon: '', hue: (9 * 47) % 360, path: 'Divers' })
+  })
+
+  it('renvoie null sans catégorie ou pour une catégorie inconnue', () => {
+    expect(categoryChipInfo(null, byId)).toBeNull()
+    expect(categoryChipInfo(42, byId)).toBeNull()
   })
 })

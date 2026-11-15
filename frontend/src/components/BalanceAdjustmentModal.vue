@@ -15,7 +15,7 @@
         </div>
         <div class="form-field">
           <label for="adjust-balance">Solde réel ({{ currencyLabel }})</label>
-          <AmountInput id="adjust-balance" v-model="actualBalance" :allow-relative="false" />
+          <AmountInput id="adjust-balance" v-model="actualBalance" />
         </div>
       </div>
       <p class="adjust-current">

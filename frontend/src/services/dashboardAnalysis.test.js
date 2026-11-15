@@ -107,8 +107,18 @@ describe('anomalyClass', () => {
   const row = [100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 100, 1000]
 
   it('signale une valeur tres eloignee de la moyenne de la ligne', () => {
-    expect(anomalyClass(1000, row)).toEqual({ 'monthly-anomaly': true })
-    expect(anomalyClass(100, row)).toEqual({ 'monthly-anomaly': false })
+    expect(anomalyClass(1000, row)).toEqual({ 'monthly-anomaly': true, 'anomaly-favorable': false })
+    expect(anomalyClass(100, row)).toEqual({ 'monthly-anomaly': false, 'anomaly-favorable': false })
+  })
+
+  it('marque favorable un écart dans le bon sens selon la ligne', () => {
+    const lowMonth = [1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000, 100]
+    // Dépense : un pic est défavorable, un creux favorable
+    expect(anomalyClass(1000, row)['anomaly-favorable']).toBe(false)
+    expect(anomalyClass(100, lowMonth)['anomaly-favorable']).toBe(true)
+    // Revenu ou solde : l'inverse
+    expect(anomalyClass(1000, row, true)['anomaly-favorable']).toBe(true)
+    expect(anomalyClass(100, lowMonth, true)['anomaly-favorable']).toBe(false)
   })
 
   it('ne signale jamais une valeur nulle', () => {
@@ -117,6 +127,11 @@ describe('anomalyClass', () => {
 
   it('ignore les mois a zero et exige assez de mois renseignes', () => {
     expect(anomalyClass(1000, [100, 100, 1000, 0, 0, 0])).toEqual({})
+  })
+
+  it('ignore un écart de quelques centimes sur une ligne quasi constante', () => {
+    const steady = [105.92, 105.92, 105.92, 105.92, 105.92, 105.92, 105.92, 105.88]
+    expect(anomalyClass(105.88, steady)['monthly-anomaly']).toBe(false)
   })
 
   it('ne signale rien sur une ligne constante', () => {

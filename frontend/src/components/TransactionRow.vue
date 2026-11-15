@@ -48,7 +48,7 @@
         <input v-model="editForm.memo" aria-label="Mémo" placeholder="Note libre" />
       </td>
       <td class="num" colspan="2" @click.stop>
-        <AmountInput v-model="editForm.amount" aria-label="Montant" style="text-align: right;" :allow-relative="false" />
+        <AmountInput v-model="editForm.amount" aria-label="Montant" />
       </td>
       <td class="num" @click.stop>
         <input type="checkbox" v-model="editForm.periodicExpense" title="Dépense périodique récurrente" aria-label="Dépense périodique récurrente" />
@@ -58,8 +58,8 @@
       </td>
       <td @click.stop>
         <span class="row-actions">
-          <button class="btn" style="padding: 6px 9px;" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
-          <button class="btn secondary" style="padding: 6px 9px;" title="Annuler (Échap)" aria-label="Annuler" @click="$emit('cancel-edit')"><Icon name="x" /></button>
+          <button class="btn btn-icon" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
+          <button class="btn secondary btn-icon" title="Annuler (Échap)" aria-label="Annuler" @click="$emit('cancel-edit')"><Icon name="x" /></button>
         </span>
       </td>
     </template>
@@ -91,11 +91,7 @@
       <!-- Texte complet au survol s'il est tronqué : infobulle globale (OverflowTooltip.vue) -->
       <td class="col-payee" :title="bankLabelTitle">{{ transaction.payee }}</td>
       <td class="col-cat">
-        <span v-if="categoryInfo" class="cat-chip" :style="{ '--h': categoryInfo.hue }" :data-tooltip="categoryInfo.path">
-          <span class="cat-mark" aria-hidden="true">{{ categoryInfo.icon }}</span>
-          <span v-if="categoryInfo.parent" class="cat-parent">{{ categoryInfo.parent }} ›</span>
-          <span class="cat-name">{{ categoryInfo.name }}</span>
-        </span>
+        <CategoryChip v-if="categoryPath" :category-id="transaction.categoryId" :categories-by-id="categoriesById" />
         <span v-else-if="awaitsCategory" class="cat-none">Sans catégorie</span>
         <span v-else class="cat-none" title="Virement entre comptes ou ajustement de solde : ni dépense ni revenu, pas de catégorie">—</span>
       </td>
@@ -159,10 +155,11 @@ import CategoryAutocomplete from './CategoryAutocomplete.vue'
 import AmountInput from './AmountInput.vue'
 import Icon from './Icon.vue'
 import Money from './Money.vue'
+import CategoryChip from './CategoryChip.vue'
 import { formatAmount, formatDate, displayMemo } from '../services/format'
 import { findPayeeByName } from '../services/payee'
 import { accountOptionLabel } from '../services/accounts'
-import { needsCategory } from '../services/categories'
+import { categoryChipInfo, needsCategory } from '../services/categories'
 
 const props = defineProps({
   transaction: { type: Object, required: true },
@@ -300,26 +297,8 @@ const bankLabelTitle = computed(() => {
   return label && label !== props.transaction.payee ? `Libellé bancaire : ${label}` : undefined
 })
 
-/**
- * Données d'affichage de la pastille de catégorie. La teinte (0-360) est
- * dérivée de la catégorie RACINE : une catégorie et ses sous-catégories
- * partagent la même couleur, et elle reste stable d'une session à l'autre
- * sans rien stocker en base.
- */
-const categoryInfo = computed(() => {
-  const id = props.transaction.categoryId
-  const category = id ? props.categoriesById.get(id) : null
-  if (!category) return null
-  const parent = category.parentId ? props.categoriesById.get(category.parentId) : null
-  const root = parent || category
-  return {
-    name: category.name,
-    parent: parent ? parent.name : '',
-    icon: root.icon || category.icon || '',
-    hue: (root.id * 47) % 360,
-    path: parent ? `${parent.name} › ${category.name}` : category.name
-  }
-})
+/** Chemin « Parent › Catégorie », vide si la transaction n'a pas de catégorie connue. */
+const categoryPath = computed(() => categoryChipInfo(props.transaction.categoryId, props.categoriesById)?.path || '')
 
 function isFuture(iso) {
   return !!iso && iso > props.todayIso
@@ -328,7 +307,7 @@ function isFuture(iso) {
 /** Libellé de la ligne pour les lecteurs d'écran quand elle reçoit le focus clavier. */
 const rowLabel = computed(() => {
   const t = props.transaction
-  const parts = [formatDate(t.date), t.payee || 'sans tiers', formatAmount(t.amount, accountCurrency.value), categoryInfo.value?.path || 'sans catégorie']
+  const parts = [formatDate(t.date), t.payee || 'sans tiers', formatAmount(t.amount, accountCurrency.value), categoryPath.value || 'sans catégorie']
   return `${parts.join(', ')} — Entrée pour modifier`
 })
 
@@ -540,8 +519,13 @@ tr:hover td:last-child {
   background: var(--ink-800);
 }
 tr.row-editing td:last-child {
+  padding-left: 4px;
+  padding-right: 4px;
   background: var(--ink-800);
 }
+/* Enregistrer / Annuler (.btn-icon, 30 px) tiennent dans la colonne
+   d'actions (72 px) sans déborder du tableau. */
+tr.row-editing .row-actions { gap: 4px; }
 tr.row-future td:last-child {
   background: var(--ink-800);
 }
@@ -585,35 +569,6 @@ tr.row-selected:hover td:last-child {
   tr.row-selected .row-actions { opacity: 1; }
 }
 
-/* Pastille de catégorie : teinte dérivée de la catégorie racine (--h) */
-.cat-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  padding: 2px 10px 2px 6px;
-  border-radius: 999px;
-  background: hsl(var(--h) var(--chip-bg-saturation) var(--chip-bg-lightness));
-  color: hsl(var(--h) var(--chip-text-saturation) var(--chip-text-lightness));
-  font-size: 13px;
-  font-weight: 500;
-  vertical-align: middle;
-}
-.cat-mark { font-size: 13px; line-height: 1; flex-shrink: 0; }
-.cat-mark:empty { display: none; }
-.cat-chip:has(.cat-mark:empty) { padding-left: 10px; }
-/* Faute de place, c'est le parent qui se tronque en premier (forte valeur de
-   flex-shrink) : la sous-catégorie, plus précise, reste lisible. Le chemin
-   complet est dans l'infobulle (title). */
-.cat-parent {
-  opacity: 0.65;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 2.5em;
-  flex: 0 1000 auto;
-}
-.cat-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 .cat-none { color: var(--text-faint); font-size: 13px; }
 tr.row-future .cat-chip { opacity: 0.6; }
 

@@ -1,7 +1,7 @@
 <template>
   <!-- aria-live : le détail est annoncé par les lecteurs d'écran quand il apparaît
        pour la cellule qui a le focus clavier (voir directives/gridNav.js). -->
-  <div v-if="visible" class="cell-popover" :style="{ left: x + 'px', top: y + 'px' }" aria-live="polite" @mouseenter="$emit('stay')" @mouseleave="$emit('leave')">
+  <div v-if="visible" class="cell-popover" :style="positionStyle" aria-live="polite" @mouseenter="$emit('stay')" @mouseleave="$emit('leave')">
     <div class="cell-popover-title">{{ title }}</div>
 
     <div v-if="loading" class="cell-popover-loading">Chargement…</div>
@@ -33,19 +33,27 @@
  * Purement presentationnel : la logique de declenchement (delai de 2s,
  * appel API, positionnement) vit dans le composant appelant.
  */
+import { computed } from 'vue'
 import { formatAmount, formatDate } from '../services/format'
 
-defineProps({
+const props = defineProps({
   visible: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
   x: { type: Number, default: 0 },
   y: { type: Number, default: 0 },
+  // Ouvert au-dessus de la case : `y` est alors la distance au bas de la fenêtre
+  above: { type: Boolean, default: false },
   title: { type: String, default: '' },
   rows: { type: Array, default: () => [] },
   total: { type: Number, default: 0 }
 })
 
 defineEmits(['stay', 'leave'])
+
+const positionStyle = computed(() => ({
+  left: props.x + 'px',
+  [props.above ? 'bottom' : 'top']: props.y + 'px'
+}))
 </script>
 
 <style scoped>
@@ -124,6 +132,9 @@ defineEmits(['stay', 'leave'])
   border-top: 1px solid var(--line);
   font-weight: 700;
   font-size: 13px;
+  /* Sans chiffres tabulaires, Inter dessine l'espace fine des milliers
+     (U+202F) presque sans largeur : « -1267,87 € » au lieu de « -1 267,87 € ». */
+  font-variant-numeric: tabular-nums;
 }
 
 .positive { color: var(--mint); }

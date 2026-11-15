@@ -21,7 +21,7 @@
     <div class="toolbar">
       <div class="form-field">
         <label for="payees-search" title="Nom, motif, catégorie ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Entourez un critère de guillemets pour une correspondance exacte, ex : &quot;CAF&quot;">Recherche</label>
-        <input id="payees-search" v-model="searchQuery" placeholder='Ex : Bouygues;29,99 ou "CAF"' style="min-width: 240px;" />
+        <input id="payees-search" v-model="searchQuery" class="toolbar-search" placeholder='Ex : Bouygues;29,99 ou "CAF"' />
       </div>
 
       <div class="form-field" style="align-self: flex-end;">
@@ -47,9 +47,9 @@
 
     <div v-if="autoCategorizeResult" class="auto-categorize-result">
       <span>
-        {{ autoCategorizeResult.payeesUpdated }} tiers catégorisé(s), {{ autoCategorizeResult.transactionsUpdated }} transaction(s) mise(s) à jour.
+        {{ pluralize(autoCategorizeResult.payeesUpdated, 'tiers catégorisé', 'tiers catégorisés') }}, {{ pluralize(autoCategorizeResult.transactionsUpdated, 'transaction mise', 'transactions mises') }} à jour.
       </span>
-      <button type="button" class="auto-categorize-result-close" @click="autoCategorizeResult = null">✕</button>
+      <button type="button" class="auto-categorize-result-close" title="Fermer" aria-label="Fermer ce message" @click="autoCategorizeResult = null"><Icon name="x" size="sm" /></button>
     </div>
 
     <div class="table-scroll" v-if="filteredPayees.length">
@@ -62,7 +62,7 @@
           <col style="width: 118px;" />
           <col style="width: 104px;" />
           <col />
-          <col style="width: 64px;" />
+          <col style="width: 72px;" />
         </colgroup>
         <thead>
           <tr>
@@ -114,7 +114,7 @@
               <td @click.stop><input v-model="editForm.name" ref="firstEditField" aria-label="Nom" /></td>
               <td @click.stop><input v-model="editForm.pattern" aria-label="Motif de reconnaissance" placeholder="Ex : Carrefour" /></td>
               <td class="num" @click.stop>
-                <AmountInput v-model="editForm.amount" aria-label="Montant" style="text-align:right;" placeholder="Tous montants" :allow-relative="false" />
+                <AmountInput v-model="editForm.amount" aria-label="Montant" placeholder="Tous" title="Vide : le tiers est reconnu quel que soit le montant" />
               </td>
               <td class="num usage-cell">{{ usageOf(p.id).count }}</td>
               <td class="num usage-cell usage-date">{{ usageOf(p.id).lastDate ? formatDate(usageOf(p.id).lastDate) : '—' }}</td>
@@ -128,8 +128,8 @@
                 />
               </td>
               <td @click.stop class="row-actions">
-                <button class="btn" style="padding: 6px 9px;" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
-                <button class="btn secondary" style="padding: 6px 9px;" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
+                <button class="btn btn-icon" title="Enregistrer (Entrée)" aria-label="Enregistrer" @click="confirmEdit"><Icon name="check" /></button>
+                <button class="btn secondary btn-icon" title="Annuler (Échap)" aria-label="Annuler" @click="cancelEdit"><Icon name="x" /></button>
               </td>
             </template>
             <template v-else>
@@ -145,7 +145,7 @@
               </td>
               <td class="num usage-cell usage-date">{{ usageOf(p.id).lastDate ? formatDate(usageOf(p.id).lastDate) : '—' }}</td>
               <td>
-                <template v-if="p.categoryId">{{ categoryLabel(p.categoryId) }}</template>
+                <CategoryChip v-if="p.categoryId" :category-id="p.categoryId" :categories-by-id="categoriesById" />
                 <button
                   v-else-if="suggestedCategoryId(p)"
                   type="button"
@@ -154,7 +154,7 @@
                   :title="'Toutes les transactions déjà catégorisées de ce tiers utilisent ' + categoryLabel(suggestedCategoryId(p)) + ' — cliquer pour appliquer cette catégorie au tiers'"
                   @click.stop="applySuggestion(p)"
                 >
-                  {{ applyingSuggestionId === p.id ? 'Application…' : `Suggestion : ${categoryLabel(suggestedCategoryId(p))}` }}
+                  {{ applyingSuggestionId === p.id ? 'Application…' : `Suggestion : ${suggestionPath(p)}` }}
                 </button>
                 <template v-else>—</template>
               </td>
@@ -174,11 +174,12 @@
     </div>
     <SkeletonRows v-else-if="!payeesLoaded" label="Chargement des tiers…" :columns="['4%', '20%', '24%', '8%', '28%']" />
     <div v-else class="empty-state">
-      {{
+      <span>{{
         searchQuery.trim()
           ? 'Aucun tiers ne correspond à cette recherche.'
           : 'Aucun tiers enregistré. Créez-en un pour catégoriser automatiquement vos imports (ex : nom "Carrefour", motif Carrefour, catégorie "Alimentation").'
-      }}
+      }}</span>
+      <button v-if="searchQuery.trim()" type="button" class="btn secondary" @click="searchQuery = ''">Effacer la recherche</button>
     </div>
 
     <!-- Modal création uniquement -->
@@ -203,7 +204,7 @@
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label for="new-payee-amount">Montant associé (laisser vide = s'applique à tous les montants)</label>
-            <AmountInput id="new-payee-amount" v-model="form.amount" placeholder="Ex : 10" :allow-relative="false" />
+            <AmountInput id="new-payee-amount" v-model="form.amount" placeholder="Ex : 10" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label for="new-payee-category">Catégorie associée (appliquée automatiquement aux transactions de ce tiers)</label>
@@ -264,17 +265,18 @@ import { useRoute } from 'vue-router'
 import { PayeesAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { normalizeSearch, parseSearchTerms } from '../services/search'
-import { flattenCategories } from '../services/categories'
+import { categoryChipInfo, flattenCategories } from '../services/categories'
 import { splitPatternSegments } from '../services/payee'
 import { handleRowEnter, restoreFocusToRow } from '../services/rowKeyboard'
 import { nextSort, sortPayees, usageByPayeeId } from '../services/payeeUsage'
-import { formatAmount, formatDate } from '../services/format'
+import { formatAmount, formatDate, pluralize } from '../services/format'
 import { alertApiError } from '../services/errors'
 import { useProgressiveList } from '../services/progressiveList'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import AmountInput from '../components/AmountInput.vue'
 import MergeModal from '../components/MergeModal.vue'
 import Icon from '../components/Icon.vue'
+import CategoryChip from '../components/CategoryChip.vue'
 import SkeletonRows from '../components/SkeletonRows.vue'
 
 const route = useRoute()
@@ -379,6 +381,7 @@ const filteredPayees = computed(() => {
 })
 
 const flatCategories = computed(() => flattenCategories(categories.value))
+const categoriesById = computed(() => new Map(categories.value.map(c => [c.id, c])))
 
 /** Segments du motif de chaque tiers, découpés une seule fois (affichés en pastilles séparées). */
 const patternSegmentsById = computed(() => new Map(payees.value.map(p => [p.id, splitPatternSegments(p.pattern)])))
@@ -388,6 +391,11 @@ const patternSegmentsById = computed(() => new Map(payees.value.map(p => [p.id, 
 // flatCategories pour chaque tiers a chaque frappe dans la recherche (voir
 // filteredPayees ci-dessous, qui appelle categoryLabel pour chaque ligne).
 const categoryLabelById = computed(() => new Map(flatCategories.value.map(c => [c.id, c.label])))
+
+/** Chemin de la catégorie suggérée, au même format « Parent › Enfant » que les pastilles. */
+function suggestionPath(payee) {
+  return categoryChipInfo(suggestedCategoryId(payee), categoriesById.value)?.path || '—'
+}
 
 function categoryLabel(categoryId) {
   if (!categoryId) return '—'
@@ -545,7 +553,7 @@ async function remove(payee) {
   // pas demander une confirmation qui aboutirait forcément à un refus.
   const usedBy = usageOf(payee.id).count
   if (usedBy > 0) {
-    notify(`Le tiers "${payee.name}" est utilisé par ${usedBy} transaction(s) : fusionnez-le avec un autre tiers plutôt que de le supprimer.`, 'warning', 6000)
+    notify(`Le tiers "${payee.name}" est utilisé par ${pluralize(usedBy, 'transaction', 'transactions')} : fusionnez-le avec un autre tiers plutôt que de le supprimer.`, 'warning', 6000)
     return
   }
   if (!(await askConfirm(`Supprimer le tiers "${payee.name}" ?`))) return
@@ -752,6 +760,7 @@ watch(() => route.query, (query) => {
 }
 .auto-categorize-result-close {
   flex-shrink: 0;
+  display: inline-flex;
   border: none;
   background: transparent;
   color: var(--text-muted);
@@ -837,7 +846,12 @@ td.row-actions {
   white-space: nowrap;
 }
 td.row-actions > .btn + .btn {
-  margin-left: 6px;
+  margin-left: 4px;
+}
+/* En édition, Enregistrer + Annuler (2 × 30 px) occupent toute la colonne (72 px) */
+tr.row-editing td.row-actions {
+  padding-left: 4px;
+  padding-right: 4px;
 }
 .payees-table tbody tr:has(input[type="checkbox"]:checked) {
   background: var(--azure-dim);
@@ -905,7 +919,7 @@ td.row-actions > .btn + .btn {
 /* table-layout fixed : les largeurs du <colgroup> sont respectées (sinon le
    navigateur les répartit selon le contenu et le nom s'étale sur 4 lignes). */
 .payees-page .payees-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; width: 100%; min-width: 1000px; }
-.payees-page .payees-table thead th { background: var(--surface-sunken); color: var(--text-muted); font-size: 12.5px; font-weight: 600; text-transform: none; }
+.payees-page .payees-table thead th { background: var(--table-head-bg); color: var(--table-head-text); font-size: 12.5px; font-weight: 600; text-transform: none; }
 .payees-page .payees-table tbody td { padding-top: 13px; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
 .payees-page .payees-table tbody tr:last-child td { border-bottom: 0; }
 .payees-page .payees-table tbody tr:hover { background: var(--row-hover); }

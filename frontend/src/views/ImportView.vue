@@ -77,7 +77,7 @@
           <li>Les lignes en erreur sont listées avec leur détail après l'import.</li>
           <li v-if="format === 'csv'">
             Colonnes attendues, séparées par des points-virgules :
-            <code>date;paymode;info;payee;memo;amount;category;tags</code>
+            <code>date;<wbr>paymode;<wbr>info;<wbr>payee;<wbr>memo;<wbr>amount;<wbr>category;<wbr>tags</code>
           </li>
         </ul>
       </aside>
@@ -87,16 +87,16 @@
       <div class="card-title">Résultat de l'import</div>
       <div class="result-tiles">
         <div class="result-tile">
-          <div class="result-value amount positive">{{ result.imported }}</div>
-          <div class="result-label">importée(s)</div>
+          <div class="result-value" :class="{ 'amount positive': result.imported > 0 }">{{ result.imported }}</div>
+          <div class="result-label">{{ tileLabels.imported }}</div>
         </div>
         <div class="result-tile">
           <div class="result-value">{{ result.duplicates ?? 0 }}</div>
-          <div class="result-label">déjà existante(s), ignorée(s)</div>
+          <div class="result-label">{{ tileLabels.duplicates }}</div>
         </div>
         <div class="result-tile">
           <div class="result-value" :class="{ 'amount negative': result.skipped > 0 }">{{ result.skipped }}</div>
-          <div class="result-label">en erreur</div>
+          <div class="result-label">{{ tileLabels.skipped }}</div>
         </div>
       </div>
       <!-- Suite logique d'un import : passer en revue ce qui vient d'arriver. -->
@@ -112,7 +112,7 @@
            précédent : à ressaisir si la suppression était une erreur. -->
       <div v-if="previouslyDeleted.length" class="result-deleted">
         <div class="step-label">
-          {{ previouslyDeleted.length }} ligne(s) non reprise(s) car supprimée(s) auparavant
+          {{ pluralize(previouslyDeleted.length, 'ligne non reprise car supprimée', 'lignes non reprises car supprimées') }} auparavant
         </div>
         <p class="result-deleted-hint">
           Vous les aviez supprimées après un import précédent. Si c'était une erreur, ressaisissez-les depuis l'écran Transactions.
@@ -146,10 +146,10 @@ import { dataStore } from '../services/dataStore'
 import { needsCategory } from '../services/categories'
 import { activeAccounts } from '../services/accounts'
 import { alertApiError } from '../services/errors'
-import { VISIBLE_ERRORS_LIMIT, formatFileSize, importFileProblem, importOutcome, lastImportLabel } from '../services/importResult'
+import { VISIBLE_ERRORS_LIMIT, formatFileSize, importFileProblem, importOutcome, lastImportLabel, resultTileLabels } from '../services/importResult'
 import Icon from '../components/Icon.vue'
 import Money from '../components/Money.vue'
-import { DEFAULT_CURRENCY, formatDate } from '../services/format'
+import { DEFAULT_CURRENCY, formatDate, pluralize } from '../services/format'
 
 // Import impossible vers un compte archivé (refusé par le backend, voir
 // ServiceCompte#ensureNotArchived) : seuls les comptes actifs sont proposés.
@@ -162,6 +162,7 @@ const format = ref('csv')
 const file = ref(null)
 const loading = ref(false)
 const result = ref(null)
+const tileLabels = computed(() => resultTileLabels(result.value))
 const dragging = ref(false)
 
 // Liste d'erreurs repliée au-delà de VISIBLE_ERRORS_LIMIT : un fichier
@@ -337,7 +338,7 @@ onMounted(async () => {
 
 .import-help h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .import-help ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 10px; color: var(--text-muted); font-size: 13.5px; }
-.import-help code { display: block; margin-top: 6px; padding: 6px 8px; white-space: normal; word-break: break-all; }
+.import-help code { display: block; margin-top: 6px; padding: 6px 8px; white-space: normal; } /* coupures seulement aux <wbr> après les « ; » */
 
 .import-result { margin-top: 20px; max-width: 960px; }
 .card-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 14px; }

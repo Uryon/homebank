@@ -54,7 +54,7 @@
       <tbody>
         <tr v-for="{ account: a, typeClass, balanceClass, formattedBalance } in accountRows" :key="a.id" :class="{ 'account-archived': a.archived }">
           <td class="account-name">
-            {{ a.name }}
+            <RouterLink :to="{ path: '/transactions', query: { account: String(a.id) } }" class="account-link" :title="'Voir les transactions de ' + a.name">{{ a.name }}</RouterLink>
             <span v-if="a.archived" class="archived-tag">Archivé</span>
           </td>
           <td><span class="badge" :class="typeClass">{{ accountTypeLabel(a.type) }}</span></td>
@@ -131,25 +131,25 @@
           <div class="form-field">
             <label for="transfer-from">Compte source</label>
             <select id="transfer-from" v-model.number="transferForm.fromAccountId">
-              <option v-for="a in transferableAccounts" :key="a.id" :value="a.id">{{ a.name }}</option>
+              <option v-for="a in transferOptions" :key="a.id" :value="a.id">{{ a.label }}</option>
             </select>
           </div>
           <div class="form-field">
             <label for="transfer-to">Compte destination</label>
             <select id="transfer-to" v-model.number="transferForm.toAccountId">
               <option
-                v-for="a in transferableAccounts"
+                v-for="a in transferOptions"
                 :key="a.id"
                 :value="a.id"
                 :disabled="a.id === transferForm.fromAccountId"
               >
-                {{ a.name }}
+                {{ a.label }}
               </option>
             </select>
           </div>
           <div class="form-field">
             <label for="transfer-amount">Montant</label>
-            <AmountInput id="transfer-amount" v-model="transferForm.amount" :allow-relative="false" />
+            <AmountInput id="transfer-amount" v-model="transferForm.amount" placeholder="0,00" />
           </div>
           <div class="form-field">
             <label for="transfer-date">Date</label>
@@ -204,7 +204,7 @@ function emptyTransferForm() {
   return {
     fromAccountId: null,
     toAccountId: null,
-    amount: 0,
+    amount: null, // vide plutôt que 0 : on tape directement le montant
     date: toLocalIsoDate(),
     memo: ''
   }
@@ -216,6 +216,11 @@ const accountsCountLabel = computed(() => accountCountLabel(accounts.value.lengt
 
 /** Seuls les comptes non archivés peuvent recevoir un virement (voir ServiceCompte#ensureNotArchived). */
 const transferableAccounts = computed(() => activeAccounts(accounts.value))
+/** Comptes du transfert avec leur solde, pour choisir sans repasser par le tableau. */
+const transferOptions = computed(() => transferableAccounts.value.map(a => ({
+  id: a.id,
+  label: `${a.name} — ${formatAmount(Number(balances.value[a.id] ?? 0), a.currency)}`
+})))
 
 const netWorth = computed(() => computeNetWorth(accounts.value, balances.value))
 const netWorthClass = computed(() => amountToneClass(netWorth.value))
@@ -381,7 +386,10 @@ onMounted(() => {
 .allocation-segment.investment, .allocation-dot.investment { background: var(--violet); }
 @media (prefers-reduced-motion: reduce) { .allocation-segment { transition: none; } }
 .accounts-table { width: 100%; border-collapse: separate; border-spacing: 0; }
-.accounts-table thead th { background: var(--surface-sunken); color: var(--text-muted); font-size: 12.5px; font-weight: 600; text-transform: none; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+/* Nom du compte : lien vers ses transactions (filtre ?account= de la page Transactions) */
+.account-link { color: inherit; text-decoration: none; }
+.account-link:hover { color: var(--azure); text-decoration: underline; text-underline-offset: 3px; }
+.accounts-table thead th { background: var(--table-head-bg); color: var(--table-head-text); font-size: 12.5px; font-weight: 600; text-transform: none; padding: 14px 18px; border-bottom: 1px solid var(--table-head-border); }
 .accounts-table tbody td { padding: 15px 18px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .accounts-table tbody tr:last-child td { border-bottom: 0; }
 .accounts-table tbody tr { transition: background .15s ease; }

@@ -13,8 +13,8 @@
             aria-controls="palette-results"
             :aria-activedescendant="activeOptionId"
             aria-autocomplete="list"
-            aria-label="Aller à une page, un tiers, ou rechercher une transaction"
-            placeholder="Aller à une page, un tiers, rechercher une transaction…"
+            aria-label="Aller à une page, une catégorie, un tiers, ou rechercher une transaction"
+            placeholder="Page, catégorie, tiers, ou texte à rechercher…"
             autocomplete="off"
             spellcheck="false"
             @keydown="onKeydown"
@@ -37,7 +37,7 @@
               @click="run(item)"
             >
               <Icon :name="item.icon" size="sm" />
-              <span class="palette-label">{{ item.label }}</span>
+              <span class="palette-label"><template v-for="(segment, s) in labelSegments[index]" :key="s"><mark v-if="segment.match" class="palette-match">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template></span>
               <kbd v-if="item.hint">{{ item.hint }}</kbd>
               <Icon v-if="index === activeIndex" name="chevronRight" size="sm" />
             </li>
@@ -62,7 +62,7 @@ import { useRouter } from 'vue-router'
 import Icon from './Icon.vue'
 import { dataStore } from '../services/dataStore'
 import { themePreference } from '../services/theme'
-import { ACTION_COMMANDS, PAGE_COMMANDS, buildResults, indexCommands, indexPayees } from '../services/commandPalette'
+import { ACTION_COMMANDS, PAGE_COMMANDS, buildResults, highlightSegments, indexCategories, indexCommands, indexPayees } from '../services/commandPalette'
 
 const props = defineProps({
   open: { type: Boolean, required: true }
@@ -78,8 +78,11 @@ let focusBeforeOpen = null
 // Index normalisés une seule fois (et non à chaque frappe), voir CLAUDE.md.
 const staticIndex = indexCommands([...PAGE_COMMANDS, ...ACTION_COMMANDS])
 const payeeIndex = computed(() => indexPayees(dataStore.state.payees))
+const categoryIndex = computed(() => indexCategories(dataStore.state.categories))
 
-const results = computed(() => buildResults({ staticIndex, payeeIndex: payeeIndex.value, query: query.value }))
+const results = computed(() => buildResults({ staticIndex, payeeIndex: payeeIndex.value, categoryIndex: categoryIndex.value, query: query.value }))
+// Mots saisis surlignés dans chaque libellé (une vingtaine de résultats au plus).
+const labelSegments = computed(() => results.value.map(item => highlightSegments(item.label, query.value)))
 const activeOptionId = computed(() => (results.value.length ? `palette-option-${activeIndex.value}` : undefined))
 
 watch(query, () => { activeIndex.value = 0 })
@@ -135,8 +138,8 @@ function run(item) {
   justify-content: center;
   align-items: flex-start;
   padding: 12vh 16px 16px;
-  background: rgba(12, 20, 34, 0.42);
-  backdrop-filter: blur(3px);
+  background: var(--scrim);
+  backdrop-filter: blur(5px) saturate(115%);
 }
 .palette {
   display: flex;
@@ -195,6 +198,12 @@ function run(item) {
 .palette-option.active { background: var(--azure-dim); }
 .palette-option.active .icon { color: var(--azure); }
 .palette-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Mots saisis : simple graisse + couleur d'accent, pas de fond « surligneur ». */
+.palette-match {
+  background: none;
+  color: var(--azure);
+  font-weight: 650;
+}
 .palette-empty { padding: 22px; text-align: center; color: var(--text-muted); font-size: 13.5px; }
 .palette-footer {
   display: flex;

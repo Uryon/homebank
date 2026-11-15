@@ -152,6 +152,13 @@ const ANOMALY_STDDEV_THRESHOLD = 2.5
 /** En dessous de ce nombre de mois avec une valeur non nulle, l'ecart-type n'est pas assez fiable pour signaler une anomalie. */
 const ANOMALY_MIN_NONZERO_MONTHS = 4
 
+/**
+ * Écart minimal à la moyenne, en proportion de celle-ci, pour signaler une
+ * case : sur une ligne quasi constante (abonnement, crédit d'impôts fixe),
+ * l'écart-type est minuscule et quelques centimes suffiraient sinon.
+ */
+const ANOMALY_MIN_RELATIVE_GAP = 0.1
+
 /** Moyenne et ecart-type (population) d'un tableau de valeurs numeriques. */
 export function meanStdDev(values) {
   const nums = values.map(Number)
@@ -175,14 +182,21 @@ export function meanStdDev(values) {
  * elle-meme nulle n'est jamais signalee. Aucune case signalee si la ligne est
  * quasi constante (stdDev nul) ou si trop peu de mois ont une valeur pour
  * qu'un ecart-type soit fiable (voir ANOMALY_MIN_NONZERO_MONTHS).
+ *
+ * `higherIsBetter` (revenus, solde) indique le sens favorable : la classe
+ * "anomaly-favorable" est ajoutée quand l'écart va dans ce sens (revenu
+ * exceptionnel, dépense inhabituellement basse), pour l'afficher en vert
+ * plutôt qu'en corail.
  */
-export function anomalyClass(value, rowValues) {
+export function anomalyClass(value, rowValues, higherIsBetter = false) {
   if (!Number(value)) return {}
   const nonZero = rowValues.map(Number).filter(Boolean)
   if (nonZero.length < ANOMALY_MIN_NONZERO_MONTHS) return {}
   const { mean, stdDev } = meanStdDev(nonZero)
   if (!stdDev) return {}
-  return { 'monthly-anomaly': Math.abs(Number(value) - mean) / stdDev > ANOMALY_STDDEV_THRESHOLD }
+  const gap = Math.abs(Number(value) - mean)
+  const isAnomaly = gap / stdDev > ANOMALY_STDDEV_THRESHOLD && gap > Math.abs(mean) * ANOMALY_MIN_RELATIVE_GAP
+  return { 'monthly-anomaly': isAnomaly, 'anomaly-favorable': isAnomaly && (Number(value) > mean) === higherIsBetter }
 }
 
 /**

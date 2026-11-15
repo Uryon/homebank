@@ -1,6 +1,7 @@
 <template>
   <input
     ref="inputEl"
+    class="amount-input"
     type="text"
     inputmode="decimal"
     v-model="text"
@@ -15,12 +16,10 @@
 /**
  * Champ de saisie de montant : tape comme un input numerique classique (le
  * curseur se place normalement, rien n'est preselectionne), mais reconnait
- * aussi une expression d'ajustement a la validation (blur ou Entree) :
- * - "21000-500+300" ou "21000 - 500 + 300" : chaine de termes +/- (autant
- *   que voulu), evaluee de gauche a droite telle quelle ;
- * - "+5", "-5" ou "-500+300" sans nombre de base en tete : les termes
- *   s'appliquent au montant ACTUEL (props.modelValue) au moment de la
- *   validation, comme s'il etait le premier terme.
+ * aussi un calcul a la validation (blur ou Entree) : "21000-500+300" ou
+ * "21000 - 500 + 300", chaine de termes +/- (autant que voulu) evaluee de
+ * gauche a droite. Le resultat REMPLACE toujours le montant : un signe en
+ * tete fait partie de la valeur ("-4" vaut -4, jamais "montant actuel - 4").
  * Le calcul ne s'applique jamais pendant la frappe, seulement a la
  * validation, pour pouvoir taper "21000-500+300" et voir ce texte tel quel
  * avant de valider.
@@ -35,17 +34,10 @@
  * transaction qui se referme au moment meme de la confirmation).
  */
 import { ref, watch } from 'vue'
+import { formatAmountForInput as formatForDisplay } from '../services/format'
 
 const props = defineProps({
   modelValue: { type: Number, default: null },
-  // Desactive le mode ajustement (termes +/- sans nombre de base en tete
-  // appliques au montant ACTUEL, voir resolve() ci-dessous) : a mettre a
-  // false la ou le champ doit toujours representer une valeur ABSOLUE saisie
-  // telle quelle (ex : montant de la 1ere partie d'une division, voir
-  // Transactions.vue) — sans ca, taper "-4" pour remplacer un montant deja
-  // pre-rempli (ex : la moitie calculee par defaut) l'ADDITIONNAIT au lieu
-  // de le remplacer, ce qui ne correspond jamais a l'intention dans ce cas.
-  allowRelative: { type: Boolean, default: true },
   // Transmis tel quel au <input> interne, pour permettre a l'appelant
   // d'associer un <label for="..."> (accessibilite).
   id: { type: String, default: null }
@@ -53,11 +45,7 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 
 const inputEl = ref(null)
-const attrTitle = "Tapez un montant, ou une suite d'ajustements +/- (ex : 21000-500+300) : le calcul s'applique en validant (Entrée ou en quittant le champ)"
-
-function formatForDisplay(value) {
-  return value === null || value === undefined ? '' : String(value)
-}
+const attrTitle = "Tapez un montant, ou un calcul +/- (ex : 21000-500+300) : il s'applique en validant (Entrée ou en quittant le champ)"
 
 const text = ref(formatForDisplay(props.modelValue))
 
@@ -84,14 +72,7 @@ function resolve(raw) {
   // autant de "+/- nombre" que voulu (ex : "21000-500+300", "-500+300").
   if (/^[+-]?\d+(?:\.\d+)?([+-]\d+(?:\.\d+)?)*$/.test(normalized)) {
     const terms = normalized.match(/[+-]?\d+(?:\.\d+)?/g) || []
-    // Pas de nombre de base en tete (le texte commence directement par un
-    // signe, ex : "+5" ou "-500+300") : les termes s'ajoutent au montant
-    // actuel, comme s'il etait lui-meme le premier terme — sauf si
-    // allowRelative est desactive, auquel cas un signe en tete fait partie
-    // de la valeur absolue saisie (ex : "-4" veut dire -4, jamais "montant
-    // actuel - 4").
-    const startsWithSign = props.allowRelative && (normalized[0] === '+' || normalized[0] === '-')
-    const total = terms.reduce((sum, term) => sum + Number(term), startsWithSign ? (props.modelValue || 0) : 0)
+    const total = terms.reduce((sum, term) => sum + Number(term), 0)
     return { value: Math.round(total * 100) / 100, valid: true }
   }
 
@@ -112,3 +93,11 @@ function commit() {
 
 defineExpose({ focus: () => inputEl.value?.focus() })
 </script>
+
+<style scoped>
+/* Montants alignés à droite partout, comme dans les tableaux */
+.amount-input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+</style>

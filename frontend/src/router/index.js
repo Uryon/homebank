@@ -11,7 +11,9 @@ const routes = [
     { path: '/categories', name: 'categories', component: () => import('../views/Categories.vue'), meta: { title: 'Catégories' } },
     { path: '/payees', name: 'payees', component: () => import('../views/Payees.vue'), meta: { title: 'Tiers' } },
     { path: '/loans', name: 'loans', component: () => import('../views/Loans.vue'), meta: { title: 'Prêts' } },
-    { path: '/import', name: 'import', component: () => import('../views/ImportView.vue'), meta: { title: 'Importer' } }
+    { path: '/import', name: 'import', component: () => import('../views/ImportView.vue'), meta: { title: 'Importer' } },
+    // Toute autre adresse : page « introuvable » plutôt qu'une zone principale vide.
+    { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('../views/NotFound.vue'), meta: { title: 'Page introuvable' } }
 ]
 
 const router = createRouter({

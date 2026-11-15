@@ -86,7 +86,7 @@ const apple = isApplePlatform()
 .shortcuts-group dl { margin: 0; }
 .shortcut-row {
   display: grid;
-  grid-template-columns: 118px 1fr;
+  grid-template-columns: 140px 1fr; /* assez large pour « Tab ou Maj + Tab » sur une ligne */
   gap: 12px;
   align-items: baseline;
   padding: 6px 0;

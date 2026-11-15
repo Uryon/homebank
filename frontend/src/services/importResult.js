@@ -3,13 +3,10 @@
  * imported, duplicates, skipped, errors) pour la notification affichée
  * après l'import (voir ImportView.vue).
  */
+import { pluralize } from './format'
 
 /** Nombre d'erreurs affichées d'emblée : au-delà, la liste est repliée (fichier entièrement mal formé). */
 export const VISIBLE_ERRORS_LIMIT = 50
-
-function plural(count, singular, pluralForm) {
-  return `${count} ${count > 1 ? pluralForm : singular}`
-}
 
 /**
  * Message et type de notification selon l'issue réelle de l'import, plutôt
@@ -21,28 +18,36 @@ export function importOutcome(result) {
   const duplicates = Number(result?.duplicates || 0)
   const skipped = Number(result?.skipped || 0)
 
-  if (imported === 0 && skipped > 0) {
+  // Toutes les lignes en erreur : là seulement, le format du fichier est en cause.
+  if (imported === 0 && duplicates === 0 && skipped > 0) {
     return {
       type: 'error',
-      message: `Aucune transaction importée : ${plural(skipped, 'ligne en erreur', 'lignes en erreur')}. Vérifiez le format du fichier.`
+      message: `Aucune transaction importée : ${pluralize(skipped, 'ligne en erreur', 'lignes en erreur')}. Vérifiez le format du fichier.`
+    }
+  }
+  // Relevé réimporté avec quelques lignes en erreur : le fichier est lisible.
+  if (imported === 0 && skipped > 0) {
+    return {
+      type: 'warning',
+      message: `Aucune nouvelle transaction : ${pluralize(duplicates, 'ligne déjà présente', 'lignes déjà présentes')}, ${pluralize(skipped, 'ligne en erreur', 'lignes en erreur')}.`
     }
   }
   if (skipped > 0) {
     return {
       type: 'warning',
-      message: `${plural(imported, 'transaction importée', 'transactions importées')}, ${plural(skipped, 'ligne en erreur', 'lignes en erreur')}.`
+      message: `${pluralize(imported, 'transaction importée', 'transactions importées')}, ${pluralize(skipped, 'ligne en erreur', 'lignes en erreur')}.`
     }
   }
   if (imported === 0 && duplicates > 0) {
     return {
       type: 'info',
-      message: `Aucune nouvelle transaction : ${plural(duplicates, 'ligne déjà présente', 'lignes déjà présentes')}.`
+      message: `Aucune nouvelle transaction : ${pluralize(duplicates, 'ligne déjà présente', 'lignes déjà présentes')}.`
     }
   }
   if (imported === 0) {
     return { type: 'warning', message: 'Aucune transaction trouvée dans ce fichier.' }
   }
-  return { type: 'success', message: `${plural(imported, 'transaction importée', 'transactions importées')}.` }
+  return { type: 'success', message: `${pluralize(imported, 'transaction importée', 'transactions importées')}.` }
 }
 
 /**
@@ -97,4 +102,18 @@ export function lastImportLabel(isoDateTime, now = new Date()) {
   if (days <= 0) return `aujourd'hui à ${time}`
   if (days === 1) return `hier à ${time}`
   return `il y a ${days} jours (le ${date.toLocaleDateString('fr-FR')})`
+}
+
+/**
+ * Libellés des tuiles du résultat d'import, accordés au nombre réel
+ * (« 1 importée », « 3 importées ») plutôt qu'en « importée(s) ».
+ */
+export function resultTileLabels(result) {
+  const imported = Number(result?.imported) || 0
+  const duplicates = Number(result?.duplicates) || 0
+  return {
+    imported: imported > 1 ? 'importées' : 'importée',
+    duplicates: duplicates > 1 ? 'déjà présentes, ignorées' : 'déjà présente, ignorée',
+    skipped: 'en erreur'
+  }
 }

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Même pile de pièces que le logo (AppLogo.vue), contour bleu nuit pour rester lisible sur un onglet clair ou sombre -->
+  <defs>
+    <linearGradient id="or" x1="5" y1="6" x2="27" y2="29" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE38A" />
+      <stop offset="1" stop-color="#C8921A" />
+    </linearGradient>
+  </defs>
+  <circle cx="20" cy="12" r="7.6" fill="url(#or)" stroke="#0B2650" stroke-width="1.2" />
+  <circle cx="16" cy="16.5" r="8" fill="url(#or)" stroke="#0B2650" stroke-width="1.2" />
+  <circle cx="12" cy="21" r="8.4" fill="url(#or)" stroke="#0B2650" stroke-width="1.2" />
+  <circle cx="12" cy="21" r="5" fill="none" stroke="#0B2650" stroke-width="1.1" opacity="0.5" />
+</svg>

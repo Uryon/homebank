@@ -16,7 +16,7 @@
           <label for="reconcile-balance">Solde du relevé ({{ currencyLabel }})</label>
           <!-- @input (à chaque frappe), pas @update:model-value : AmountInput ne
                valide le montant qu'en quittant le champ, trop tard (voir invalidateResult). -->
-          <AmountInput id="reconcile-balance" v-model="statementBalance" :allow-relative="false" @input="invalidateResult" />
+          <AmountInput id="reconcile-balance" v-model="statementBalance" placeholder="0,00" @input="invalidateResult" />
         </div>
       </div>
 
@@ -30,14 +30,14 @@
         <p v-if="isBalanced" class="reconcile-message">
           <Icon name="check" size="sm" /> Les soldes concordent.
           <template v-if="result.pendingCount">
-            Vous pouvez valider les {{ result.pendingCount }} opération(s) encore en attente jusqu'au {{ formattedDate }}.
+            Vous pouvez valider {{ pendingOperationsLabel }} encore en attente jusqu'au {{ formattedDate }}.
           </template>
           <template v-else>Toutes les opérations jusqu'à cette date sont déjà validées.</template>
         </p>
         <p v-else class="reconcile-message">
           {{ gapExplanation }}
           <template v-if="result.pendingCount">
-            {{ result.pendingCount }} opération(s) sont encore en attente jusqu'à cette date
+            {{ pluralize(result.pendingCount, 'opération est', 'opérations sont') }} encore en attente jusqu'à cette date
             (total {{ formattedPendingTotal }}) :
             <RouterLink :to="pendingLink" @click="$emit('close')">les vérifier</RouterLink>.
           </template>
@@ -52,7 +52,7 @@
           :disabled="busy"
           @click="validatePending"
         >
-          {{ busy ? 'Validation…' : `Valider les ${result.pendingCount} opération(s)` }}
+          {{ busy ? 'Validation…' : `Valider ${pendingOperationsLabel}` }}
         </button>
         <button v-else class="btn" :disabled="busy" @click="compare">
           {{ busy ? 'Calcul…' : 'Comparer' }}
@@ -72,7 +72,7 @@ import { computed, ref } from 'vue'
 import { AccountsAPI } from '../services/api'
 import { alertApiError } from '../services/errors'
 import { notify } from '../services/feedback'
-import { DEFAULT_CURRENCY, formatAmount, formatDate, toLocalIsoDate } from '../services/format'
+import { DEFAULT_CURRENCY, formatAmount, formatDate, pluralize, toLocalIsoDate } from '../services/format'
 import AmountInput from './AmountInput.vue'
 import Icon from './Icon.vue'
 import Money from './Money.vue'
@@ -84,7 +84,8 @@ const emit = defineEmits(['close', 'validated'])
 
 const todayIso = toLocalIsoDate()
 const date = ref(todayIso)
-const statementBalance = ref(0)
+// Vide au départ : comparer à un relevé « 0 » non saisi donnerait un écart trompeur.
+const statementBalance = ref(null)
 const result = ref(null)
 const busy = ref(false)
 
@@ -92,6 +93,11 @@ const currencyLabel = computed(() => props.account.currency || DEFAULT_CURRENCY)
 const formattedDate = computed(() => formatDate(result.value?.date))
 const isBalanced = computed(() => Number(result.value?.difference) === 0)
 const canValidate = computed(() => isBalanced.value && result.value.pendingCount > 0)
+/** « l'opération » ou « les 3 opérations » : complément de « valider ». */
+const pendingOperationsLabel = computed(() => {
+  const count = result.value?.pendingCount || 0
+  return count === 1 ? "l'opération" : `les ${count} opérations`
+})
 const formattedPendingTotal = computed(() => formatAmount(result.value?.pendingTotal, props.account.currency))
 
 /**
@@ -125,9 +131,13 @@ async function compare() {
     notify('La date du relevé est obligatoire.', 'warning')
     return
   }
+  if (statementBalance.value == null) {
+    notify('Saisissez le solde indiqué sur le relevé.', 'warning')
+    return
+  }
   busy.value = true
   try {
-    result.value = await AccountsAPI.reconciliation(props.account.id, date.value, statementBalance.value || 0)
+    result.value = await AccountsAPI.reconciliation(props.account.id, date.value, statementBalance.value)
   } catch (e) {
     alertApiError('Rapprochement impossible', e)
   } finally {
@@ -139,7 +149,7 @@ async function validatePending() {
   busy.value = true
   try {
     const { validatedCount } = await AccountsAPI.validateReconciled(props.account.id, result.value.date)
-    notify(`${validatedCount} opération(s) validée(s) : compte rapproché au ${formattedDate.value}.`, 'success')
+    notify(`${pluralize(validatedCount, 'opération validée', 'opérations validées')} : compte rapproché au ${formattedDate.value}.`, 'success')
     emit('validated')
   } catch (e) {
     alertApiError('Validation des opérations impossible', e)

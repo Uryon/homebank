@@ -29,7 +29,7 @@
         {{ name }}
       </div>
       <div v-if="truncated" class="payee-autocomplete-more">
-        et {{ truncated }} autre(s)… affinez la recherche
+        et {{ pluralize(truncated, 'autre', 'autres') }}… affinez la recherche
       </div>
     </div>
   </div>
@@ -56,6 +56,7 @@
  */
 import { ref, computed, watch } from 'vue'
 import { normalizeSearch } from '../services/search'
+import { pluralize } from '../services/format'
 
 const props = defineProps({
   modelValue: { type: String, default: '' },

@@ -99,8 +99,8 @@
         </table>
       </div>
       <p class="chart-note">
-        Les échéances passées ou en cours sont surlignées. Calcul théorique à partir des paramètres
-        du prêt (indépendant des transactions saisies).
+        Échéances déjà payées en grisé, prochaine échéance surlignée. Calcul théorique à partir des
+        paramètres du prêt (indépendant des transactions saisies).
       </p>
     </div>
 
@@ -115,7 +115,7 @@
           </div>
           <div class="form-field">
             <label for="loan-principal">Capital emprunté</label>
-            <AmountInput id="loan-principal" v-model="form.principal" :allow-relative="false" />
+            <AmountInput id="loan-principal" v-model="form.principal" />
           </div>
           <div class="form-field">
             <label for="loan-rate">Taux annuel (%)</label>
@@ -131,11 +131,15 @@
           </div>
           <div class="form-field">
             <label for="loan-monthly-payment">Mensualité (hors assurance)</label>
-            <AmountInput id="loan-monthly-payment" v-model="form.monthlyPayment" :allow-relative="false" />
+            <AmountInput id="loan-monthly-payment" v-model="form.monthlyPayment" />
+            <div v-if="suggestedMonthlyPayment && suggestedMonthlyPayment !== form.monthlyPayment" class="payment-hint">
+              Théorique : <strong>{{ formatAmount(suggestedMonthlyPayment) }}</strong>
+              <button type="button" class="payment-hint-btn" @click="form.monthlyPayment = suggestedMonthlyPayment">Utiliser</button>
+            </div>
           </div>
           <div class="form-field">
             <label for="loan-monthly-insurance">Assurance mensuelle (optionnel)</label>
-            <AmountInput id="loan-monthly-insurance" v-model="form.monthlyInsurance" :allow-relative="false" />
+            <AmountInput id="loan-monthly-insurance" v-model="form.monthlyInsurance" />
           </div>
           <div class="form-field" style="grid-column: span 2;">
             <label for="loan-notes">Notes</label>
@@ -157,6 +161,7 @@ import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch } from 'vue'
 import Chart from 'chart.js/auto'
 import { LoansAPI } from '../services/api'
 import { formatAmount, formatRate, toLocalIsoDate } from '../services/format'
+import { monthlyPaymentFor } from '../services/loanMath'
 import { alertApiError } from '../services/errors'
 import { areaGradient, axisOptions, readChartColors, tooltipOptions } from '../services/chartTheme'
 import { effectiveTheme } from '../services/theme'
@@ -171,6 +176,8 @@ const schedule = ref([])
 const showModal = ref(false)
 const editing = ref(null)
 const form = ref(emptyForm())
+/** Proposée sous le champ Mensualité : celle de la banque peut différer de quelques centimes, on ne l'impose pas. */
+const suggestedMonthlyPayment = computed(() => monthlyPaymentFor(form.value.principal, form.value.annualRate, form.value.termMonths))
 
 const balanceChart = ref(null)
 const scheduleScroll = ref(null)
@@ -268,12 +275,19 @@ function setRowRef(row, el) {
   if (row.isCurrent && el) currentRowNode = el
 }
 
+/** Échéances déjà payées laissées visibles au-dessus de l'échéance courante, pour le contexte. */
+const PAID_ROWS_ABOVE_CURRENT = 3
+
 function scrollToCurrentRow() {
   // Défilement limité au conteneur du tableau : scrollIntoView() faisait aussi
   // défiler toute la page, et masquait les cartes de prêts en haut.
+  // Calé sur des lignes entières sous l'en-tête collant : un centrage simple
+  // laissait une ligne à moitié cachée sous l'en-tête.
   const container = scheduleScroll.value
   if (currentRowNode && container) {
-    container.scrollTop = currentRowNode.offsetTop - container.clientHeight / 2 + currentRowNode.clientHeight / 2
+    const headerHeight = container.querySelector('thead')?.offsetHeight || 0
+    const rowHeight = currentRowNode.offsetHeight
+    container.scrollTop = currentRowNode.offsetTop - headerHeight - PAID_ROWS_ABOVE_CURRENT * rowHeight
   }
 }
 
@@ -458,6 +472,28 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* Taux et durée alignés à droite, comme les montants (AmountInput) */
+#loan-rate, #loan-term { text-align: right; font-variant-numeric: tabular-nums; }
+.payment-hint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.payment-hint strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.payment-hint-btn {
+  padding: 1px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--azure);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.payment-hint-btn:hover { background: var(--azure-dim); }
 .loans-page .page-header { margin-bottom: 22px; }
 .loans-page .loan-card { background: var(--ink-900); border: 1px solid var(--line); box-shadow: var(--shadow-card); padding: 20px; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
 .loans-page .loan-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
@@ -466,11 +502,11 @@ onMounted(async () => {
 .loans-page .loan-meta { padding-top: 13px; border-top: 1px solid var(--line); }
 .loans-page .loan-progress-bar { border-radius: 999px; }
 .loans-page > .card { border: 1px solid var(--line); box-shadow: var(--shadow-card); }
-.loans-page .loan-schedule-table thead th { background: var(--surface-sunken); color: var(--text-muted); font-size: 12.5px; font-weight: 600; text-transform: none; }
+.loans-page .loan-schedule-table thead th { background: var(--table-head-bg); color: var(--table-head-text); font-size: 12.5px; font-weight: 600; text-transform: none; }
 .loans-page .loan-schedule-table tbody td { padding-top: 11px; padding-bottom: 11px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
 .loans-page .row-current { background: var(--azure-dim); box-shadow: inset 3px 0 0 var(--azure); }
 .loan-grid {
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
 }
 .loan-card {
   cursor: pointer;
@@ -519,7 +555,8 @@ onMounted(async () => {
   background: var(--ink-900);
   z-index: 1;
 }
-.row-paid {
+/* Sur les cellules et non la ligne : la couleur des td (style.css) l'emporterait */
+.row-paid td {
   color: var(--text-muted);
 }
 .row-current {

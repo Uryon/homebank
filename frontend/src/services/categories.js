@@ -54,3 +54,23 @@ export function flattenCategories(categories) {
   }
   return result
 }
+
+/**
+ * Données d'affichage de la pastille de catégorie (CategoryChip). La teinte
+ * (0-360) est dérivée de la catégorie RACINE : une catégorie et ses
+ * sous-catégories partagent la même couleur, stable d'une session à l'autre
+ * sans rien stocker en base. Renvoie null si la catégorie est inconnue.
+ */
+export function categoryChipInfo(categoryId, categoriesById) {
+  const category = categoryId ? categoriesById.get(categoryId) : null
+  if (!category) return null
+  const parent = category.parentId ? categoriesById.get(category.parentId) : null
+  const root = parent || category
+  return {
+    name: category.name,
+    parent: parent ? parent.name : '',
+    icon: root.icon || category.icon || '',
+    hue: (root.id * 47) % 360,
+    path: parent ? `${parent.name} › ${category.name}` : category.name
+  }
+}

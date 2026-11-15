@@ -35,7 +35,7 @@ const THEME_OPTIONS = [
   padding: 3px;
   border: 1px solid var(--sidebar-border);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--sidebar-raised-bg);
 }
 .theme-option {
   display: inline-flex;

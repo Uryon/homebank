@@ -97,6 +97,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { dataStore } from './services/dataStore'
 import { needsCategory } from './services/categories'
+import { pluralize } from './services/format'
 import { accountBalanceRows, activeAccounts, computeNetWorth, sortAccountsForDisplay } from './services/accounts'
 import AccountModal from './components/AccountModal.vue'
 import AppLogo from './components/AppLogo.vue'
@@ -149,7 +150,9 @@ function isNavActive(item) {
     : route.path === item.to
 }
 
-const isWideRoute = computed(() => route.name === 'transactions')
+// Les trois onglets Transactions (Toutes, Périodiques, Doublons) partagent la
+// même largeur : sinon titre et onglets sautent en passant de l'un à l'autre.
+const isWideRoute = computed(() => route.path === '/transactions' || route.path.startsWith('/transactions/'))
 
 /*
  * Barre de progression de navigation : affichée seulement si le changement de
@@ -214,7 +217,7 @@ const sidebarAccounts = computed(() =>
 
 /** Transactions restant à catégoriser : pastille sur l'entrée « Transactions » de la navigation. */
 const uncategorizedCount = computed(() => dataStore.state.transactions.filter(needsCategory).length)
-const uncategorizedLabel = computed(() => `${uncategorizedCount.value} transaction(s) sans catégorie`)
+const uncategorizedLabel = computed(() => pluralize(uncategorizedCount.value, 'transaction sans catégorie', 'transactions sans catégorie'))
 
 /** Somme de tous les soldes (cartes de crédit en négatif : patrimoine NET). */
 const netWorth = computed(() => computeNetWorth(dataStore.state.accounts, balances.value))

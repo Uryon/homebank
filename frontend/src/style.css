@@ -1,102 +1,119 @@
 /*
-  Système de design — itération 1 « Fondations ».
+  Système de design — thème « Abysse ».
 
   Principes :
   - Les noms historiques (--ink-*, --mint, --coral...) sont conservés pour ne
     pas casser les composants existants ; seules leurs VALEURS changent.
     --ink-950 = fond de page, --ink-900 = surface (cartes), etc. : des
     « niveaux de surface », pas des teintes sombres.
+  - Un seul bleu océan profond (barre latérale, carte « Solde total »), fond
+    bleuté, accent cyan réservé aux repères de navigation. Pensé d'abord pour
+    le sombre : toute l'interface y baigne dans ce bleu.
   - Le vert et le rouge sont RÉSERVÉS au sens financier (revenu / dépense).
-    L'action principale utilise --brand (encre bleu nuit), jamais le vert.
+    L'action principale utilise --brand (bleu), jamais le vert.
   - Contrastes vérifiés AA (≥ 4.5:1) pour les textes et montants.
-  - Polices : Inter (axe optique : les titres reçoivent automatiquement le
-    dessin « display »), chiffres tabulaires pour aligner les montants.
+  - Polices : Sora pour les titres, Inter pour le texte, chiffres tabulaires
+    pour aligner les montants.
 */
 :root {
     color-scheme: light;
 
     /* Niveaux de surface */
-    --ink-950: #F6F7F9;   /* fond de page */
+    --ink-950: #E6EEF9;   /* fond de page */
     --ink-900: #FFFFFF;   /* cartes, modales, tableaux */
-    --ink-800: #F1F3F6;   /* survol, fonds discrets */
-    --ink-700: #E7EAEF;   /* pastilles */
-    --ink-600: #CDD3DC;   /* bordures marquées, scrollbar */
-    --line: #E4E7EC;      /* bordures standard */
-    --line-strong: #D3D8E0;
+    --ink-800: #EDF3FB;   /* survol, fonds discrets */
+    --ink-700: #DFE8F5;   /* pastilles */
+    --ink-600: #C3D1E5;   /* bordures marquées, scrollbar */
+    --line: #D6E2F2;      /* bordures standard */
+    --line-strong: #C9D7EA;
 
-    --text-primary: #131722;
-    --text-muted: #566070;
-    --text-faint: #646E7E;  /* ≥ 4,5:1 (WCAG AA) aussi sur le fond de page et les pastilles */
+    --text-primary: #0A1B33;
+    --text-muted: #42577A;
+    --text-faint: #52668A;  /* ≥ 4,5:1 (WCAG AA) aussi sur le fond de page et les pastilles */
 
     /* Sens financier uniquement */
-    --mint: #0F7B57;       /* revenus / positif */
-    --mint-dim: #E3F4EC;
-    --coral: #C2372F;      /* dépenses / négatif */
-    --coral-dim: #FBECEA;
-    --amber: #94600A;      /* alertes / en attente — ≥ 4,5:1 même sur --amber-dim */
-    --amber-dim: #FBF1DC;
-    --azure: #2F5FD0;      /* liens / focus / sélection */
-    --azure-dim: #E6EDFB;
+    --mint: #0B7A55;       /* revenus / positif */
+    --mint-dim: #E1F4EC;
+    --coral: #C4312B;      /* dépenses / négatif */
+    --coral-dim: #FCEBEA;
+    --amber: #915F00;      /* alertes / en attente — ≥ 4,5:1 même sur --amber-dim */
+    --amber-dim: #FFF2D6;
+    --azure: #0B5CD5;      /* liens / focus / sélection */
+    --azure-dim: #E3EEFD;
 
     /* Action principale */
-    --brand: #1B2540;
-    --brand-hover: #2A3860;
+    --brand: #0B5CD5;
+    --brand-hover: #094BB0;
     --brand-text: #FFFFFF;
 
-    --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
-    --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05), 0 0 0 1px rgba(16, 24, 40, 0.02);
-    --shadow-md: 0 4px 14px rgba(16, 24, 40, 0.08);
-    --shadow-lg: 0 16px 40px rgba(16, 24, 40, 0.18);
-    --shadow-popover: 0 8px 20px rgba(23, 32, 46, 0.14);   /* menus déroulants, popovers */
+    --shadow-xs: 0 1px 2px rgba(5, 20, 45, 0.05);
+    --shadow-sm: 0 1px 2px rgba(5, 20, 45, 0.05), 0 4px 14px rgba(5, 20, 45, 0.06);
+    --shadow-md: 0 6px 20px rgba(5, 20, 45, 0.09);
+    --shadow-lg: 0 18px 44px rgba(5, 20, 45, 0.18);
+    --shadow-popover: 0 10px 28px rgba(5, 20, 45, 0.16);   /* menus déroulants, popovers */
 
-    /* Sidebar : reste sombre (identité), plus neutre et plus profonde */
-    --sidebar-bg: #0E1424;
-    --sidebar-border: rgba(255, 255, 255, 0.07);
-    --sidebar-text: #9AA6BA;
+    /* Sidebar : bleu océan, textes clairs, accent cyan */
+    --sidebar-bg: #0B2650;
+    --sidebar-border: rgba(255, 255, 255, 0.08);
+    --sidebar-text: #B4C8E8;
     --sidebar-text-active: #FFFFFF;
-    --sidebar-hover-bg: rgba(255, 255, 255, 0.05);
-    --sidebar-active-bg: rgba(255, 255, 255, 0.09);
-    --sidebar-accent: #E2A76B;       /* cuivre : reprend la couleur du logo */
-    --sidebar-positive: #5FD3A3;
-    --sidebar-negative: #FF8F86;
+    --sidebar-hover-bg: rgba(255, 255, 255, 0.07);
+    --sidebar-active-bg: rgba(79, 195, 247, 0.16);
+    --sidebar-raised-bg: rgba(255, 255, 255, 0.06);    /* bloc « Patrimoine net », champ de recherche */
+    --sidebar-accent: #4FC3F7;
+    --sidebar-badge-bg: rgba(79, 195, 247, 0.18);
+    --sidebar-positive: #7DE8BF;
+    --sidebar-negative: #FFB0A8;
 
-    --radius-sm: 8px;
-    --radius-md: 10px;
+    --radius-sm: 10px;
+    --radius-md: 12px;
     --radius-lg: 14px;
 
     --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    /* Les montants n'utilisent plus de police monospace : Inter + chiffres
-       tabulaires s'alignent aussi bien et se lisent mieux. La variable est
-       conservée car quelques composants la référencent encore. */
+    --font-display: 'Sora', var(--font-ui);   /* titres de page, nom de l'app */
+    /* Les montants n'utilisent pas de police monospace : chiffres tabulaires
+       de la police d'interface. La variable est conservée car quelques
+       composants la référencent encore. */
     --font-mono: var(--font-ui);
 
     /* Rôles sémantiques (à utiliser plutôt que des couleurs en dur : ce sont
        eux que le thème sombre redéfinit). */
-    --surface-sunken: #F7F8FA;     /* en-têtes de tableaux, fonds en creux */
-    --row-hover: #F7F9FC;
-    --row-selected: #EAF0FC;
-    --row-editing: #F0F4FC;
+    --surface-sunken: #EFF4FB;     /* fonds en creux */
+    /* En-têtes de tableaux (thead) : bandeau bleu */
+    --table-head-bg: #DCE7F7;
+    --table-head-text: #1D3F73;
+    --table-head-border: #C6D6EE;
+    --row-hover: #F1F6FD;
+    --row-selected: #E3EEFD;
+    --row-editing: #EDF4FE;
     --on-accent: #FFFFFF;          /* texte posé sur --azure / --amber */
     --violet: #5B3FC4;
     --violet-dim: #EEEAFB;
-    --info-bg: #EEF3FD;
-    --info-border: #C8D6F3;
-    --info-text: #233B70;
-    --placeholder: #6C7686;  /* lisible (≥ 4,5:1), reste nettement plus clair que la saisie (--text-primary) */
-    --input-hover-border: #B9C3D2;
+    --info-bg: #E8F1FD;
+    --info-border: #C2D7F4;
+    --info-text: #123A73;
+    --placeholder: #5F7090;  /* lisible (≥ 4,5:1), reste nettement plus clair que la saisie (--text-primary) */
+    --input-hover-border: #AFC0D8;
     --grid-line: rgba(148, 163, 184, 0.18);
     /* Graphiques Chart.js (canvas) : lus en JS par services/chartTheme.js
        au moment du dessin, donc en couleurs hexadécimales uniquement. */
-    --chart-accent: #3E63DD;       /* série principale (solde) */
+    --chart-accent: #0B5CD5;       /* série principale (solde) */
     --chart-secondary: #E08A1E;    /* série secondaire (capital des prêts) */
-    --chart-positive: #12805C;
-    --chart-negative: #C2372F;
-    --chart-forecast: #9AA3B5;     /* prévisionnel, quelle que soit la série */
-    --chart-tooltip-bg: #172033;
-    --sticky-edge-shadow: -6px 0 8px -6px rgba(23, 32, 46, 0.12);
-    --hero-bg: #17223B;            /* carte « Solde total » du tableau de bord */
-    --hero-positive: #75D6B0;
-    --hero-negative: #FF9B91;
+    --chart-positive: #0B7A55;
+    --chart-negative: #C4312B;
+    --chart-forecast: #97A8C2;     /* prévisionnel, quelle que soit la série */
+    --chart-tooltip-bg: #0A1B33;
+    --sticky-edge-shadow: -6px 0 8px -6px rgba(5, 20, 45, 0.14);
+    /* Carte « Solde total » du tableau de bord : dégradé bleu océan, texte blanc */
+    --hero-bg: radial-gradient(120% 140% at 100% 0%, rgba(79, 195, 247, 0.22) 0%, transparent 55%), linear-gradient(140deg, #0F3B78 0%, #0B2650 100%);
+    --hero-text: #FFFFFF;
+    --hero-label: #A9C2E6;
+    --hero-positive: #8AF0C9;
+    --hero-negative: #FFB3AB;
+    --hero-shadow: 0 10px 26px rgba(11, 38, 80, 0.22);
+    /* Voile derrière modales, confirmations et palette : bleu nuit, commun aux deux thèmes */
+    --scrim: rgba(5, 15, 32, 0.55);
+    --hero-sparkline: #4FC3F7;      /* courbe du solde, même cyan que les repères de la sidebar */
     --toast-bg: #FFFFFF;
     /* Pastilles de catégorie : la teinte vient de la catégorie (--h), le
        thème fixe saturation et luminosité. */
@@ -106,7 +123,7 @@
     --chip-text-lightness: 28%;
     /* Icône des états vides : la couleur du trait est figée dans le SVG, d'où
        une variante par thème (même bleu que --azure). */
-    --empty-state-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%232F5FD0' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9h18M9 9v2h6V9'/%3E%3C/svg%3E");
+    --empty-state-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%230B5CD5' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9h18M9 9v2h6V9'/%3E%3C/svg%3E");
 }
 
 /* ---------------- Thème sombre ----------------
@@ -116,118 +133,156 @@
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
         color-scheme: dark;
-        --ink-950: #0B0F17;
-        --ink-900: #121826;
-        --ink-800: #1A2131;
-        --ink-700: #242C3E;
-        --ink-600: #36415A;
-        --line: #232B3B;
-        --line-strong: #2F394D;
-        --text-primary: #E6EAF2;
-        --text-muted: #A3ADBF;
-        --text-faint: #8A95A8;
-        --mint: #3FCF94;
-        --mint-dim: rgba(63, 207, 148, 0.13);
-        --coral: #FF7D73;
-        --coral-dim: rgba(255, 125, 115, 0.13);
-        --amber: #F0B44C;
-        --amber-dim: rgba(240, 180, 76, 0.14);
-        --azure: #7EA6FF;
-        --azure-dim: rgba(126, 166, 255, 0.15);
-        --brand: #E6EAF2;
-        --brand-hover: #FFFFFF;
-        --brand-text: #0E1424;
+        --ink-950: #071426;
+        --ink-900: #0D1F3A;
+        --ink-800: #13284A;
+        --ink-700: #1A3256;
+        --ink-600: #2A4570;
+        --line: #1A3255;
+        --line-strong: #24406A;
+        --text-primary: #EAF2FF;
+        --text-muted: #A5B8D6;
+        --text-faint: #88A0C2;
+        --mint: #45E0A8;
+        --mint-dim: rgba(69, 224, 168, 0.13);
+        --coral: #FF7B7B;
+        --coral-dim: rgba(255, 123, 123, 0.13);
+        --amber: #FFC857;
+        --amber-dim: rgba(255, 200, 87, 0.14);
+        --azure: #6FD0FA;
+        --azure-dim: rgba(79, 195, 247, 0.14);
+        --brand: #4FC3F7;
+        --brand-hover: #7AD3FA;
+        --brand-text: #04121F;
         --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
         --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.02);
         --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
         --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
         --shadow-popover: 0 10px 28px rgba(0, 0, 0, 0.55);
         --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
-        --sidebar-bg: #080B12;
-        --surface-sunken: #0F1420;
-        --row-hover: #172031;
-        --row-selected: rgba(126, 166, 255, 0.16);
-        --row-editing: rgba(126, 166, 255, 0.10);
-        --on-accent: #0B0F17;
+        --sidebar-bg: #050F1E;
+        --sidebar-border: #0F2240;
+        --sidebar-text: #93A9CC;
+        --sidebar-text-active: #FFFFFF;
+        --sidebar-hover-bg: rgba(255, 255, 255, 0.05);
+        --sidebar-active-bg: rgba(79, 195, 247, 0.14);
+        --sidebar-raised-bg: rgba(255, 255, 255, 0.04);
+        --sidebar-accent: #4FC3F7;
+        --sidebar-badge-bg: rgba(79, 195, 247, 0.18);
+        --sidebar-positive: #5FE3B2;
+        --sidebar-negative: #FF9A9A;
+        --surface-sunken: #0A1930;
+        --table-head-bg: #0F2546;
+        --table-head-text: #B9CBE6;
+        --table-head-border: #1F3B66;
+        --row-hover: #112544;
+        --row-selected: rgba(79, 195, 247, 0.14);
+        --row-editing: rgba(79, 195, 247, 0.09);
+        --on-accent: #04121F;
         --violet: #B9A6FF;
         --violet-dim: rgba(185, 166, 255, 0.14);
-        --info-bg: rgba(126, 166, 255, 0.12);
-        --info-border: rgba(126, 166, 255, 0.30);
-        --info-text: #C9D8FF;
-        --placeholder: #6B7689;
-        --input-hover-border: #45516A;
+        --info-bg: rgba(79, 195, 247, 0.12);
+        --info-border: rgba(79, 195, 247, 0.30);
+        --info-text: #CDEFFF;
+        --placeholder: #6A82A6;
+        --input-hover-border: #3A5680;
         --sticky-edge-shadow: -6px 0 8px -6px rgba(0, 0, 0, 0.6);
-        --hero-bg: #1B2742;
-        --toast-bg: #1A2131;
-        --chart-accent: #7EA6FF;
+        --hero-bg: radial-gradient(120% 140% at 100% 0%, rgba(79, 195, 247, 0.16) 0%, transparent 55%), linear-gradient(140deg, #0F3B78 0%, #0B2650 100%);
+        --hero-text: #FFFFFF;
+        --hero-label: #A9C2E6;
+        --hero-positive: #6EF0C0;
+        --hero-negative: #FF9B91;
+        --hero-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+        --hero-sparkline: #6FD0FA;
+        --toast-bg: #13284A;
+        --chart-accent: #6FD0FA;
         --chart-secondary: #F0A84C;
-        --chart-positive: #3FCF94;
-        --chart-negative: #FF7D73;
-        --chart-forecast: #6B7689;
-        --chart-tooltip-bg: #242C3E;
+        --chart-positive: #45E0A8;
+        --chart-negative: #FF7B7B;
+        --chart-forecast: #6A82A6;
+        --chart-tooltip-bg: #1A3256;
         --chip-bg-saturation: 35%;
         --chip-bg-lightness: 20%;
         --chip-text-saturation: 70%;
         --chip-text-lightness: 80%;
-        --empty-state-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%237EA6FF' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9h18M9 9v2h6V9'/%3E%3C/svg%3E");
+        --empty-state-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%236FD0FA' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9h18M9 9v2h6V9'/%3E%3C/svg%3E");
     }
 }
 :root[data-theme="dark"] {
     color-scheme: dark;
-    --ink-950: #0B0F17;
-    --ink-900: #121826;
-    --ink-800: #1A2131;
-    --ink-700: #242C3E;
-    --ink-600: #36415A;
-    --line: #232B3B;
-    --line-strong: #2F394D;
-    --text-primary: #E6EAF2;
-    --text-muted: #A3ADBF;
-    --text-faint: #8A95A8;
-    --mint: #3FCF94;
-    --mint-dim: rgba(63, 207, 148, 0.13);
-    --coral: #FF7D73;
-    --coral-dim: rgba(255, 125, 115, 0.13);
-    --amber: #F0B44C;
-    --amber-dim: rgba(240, 180, 76, 0.14);
-    --azure: #7EA6FF;
-    --azure-dim: rgba(126, 166, 255, 0.15);
-    --brand: #E6EAF2;
-    --brand-hover: #FFFFFF;
-    --brand-text: #0E1424;
+    --ink-950: #071426;
+    --ink-900: #0D1F3A;
+    --ink-800: #13284A;
+    --ink-700: #1A3256;
+    --ink-600: #2A4570;
+    --line: #1A3255;
+    --line-strong: #24406A;
+    --text-primary: #EAF2FF;
+    --text-muted: #A5B8D6;
+    --text-faint: #88A0C2;
+    --mint: #45E0A8;
+    --mint-dim: rgba(69, 224, 168, 0.13);
+    --coral: #FF7B7B;
+    --coral-dim: rgba(255, 123, 123, 0.13);
+    --amber: #FFC857;
+    --amber-dim: rgba(255, 200, 87, 0.14);
+    --azure: #6FD0FA;
+    --azure-dim: rgba(79, 195, 247, 0.14);
+    --brand: #4FC3F7;
+    --brand-hover: #7AD3FA;
+    --brand-text: #04121F;
     --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.02);
     --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.4);
     --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55);
     --shadow-popover: 0 10px 28px rgba(0, 0, 0, 0.55);
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3);
-    --sidebar-bg: #080B12;
-    --surface-sunken: #0F1420;
-    --row-hover: #172031;
-    --row-selected: rgba(126, 166, 255, 0.16);
-    --row-editing: rgba(126, 166, 255, 0.10);
-    --on-accent: #0B0F17;
+    --sidebar-bg: #050F1E;
+    --sidebar-border: #0F2240;
+    --sidebar-text: #93A9CC;
+    --sidebar-text-active: #FFFFFF;
+    --sidebar-hover-bg: rgba(255, 255, 255, 0.05);
+    --sidebar-active-bg: rgba(79, 195, 247, 0.14);
+    --sidebar-raised-bg: rgba(255, 255, 255, 0.04);
+    --sidebar-accent: #4FC3F7;
+    --sidebar-badge-bg: rgba(79, 195, 247, 0.18);
+    --sidebar-positive: #5FE3B2;
+    --sidebar-negative: #FF9A9A;
+    --surface-sunken: #0A1930;
+    --table-head-bg: #0F2546;
+    --table-head-text: #B9CBE6;
+    --table-head-border: #1F3B66;
+    --row-hover: #112544;
+    --row-selected: rgba(79, 195, 247, 0.14);
+    --row-editing: rgba(79, 195, 247, 0.09);
+    --on-accent: #04121F;
     --violet: #B9A6FF;
     --violet-dim: rgba(185, 166, 255, 0.14);
-    --info-bg: rgba(126, 166, 255, 0.12);
-    --info-border: rgba(126, 166, 255, 0.30);
-    --info-text: #C9D8FF;
-    --placeholder: #6B7689;
-    --input-hover-border: #45516A;
+    --info-bg: rgba(79, 195, 247, 0.12);
+    --info-border: rgba(79, 195, 247, 0.30);
+    --info-text: #CDEFFF;
+    --placeholder: #6A82A6;
+    --input-hover-border: #3A5680;
     --sticky-edge-shadow: -6px 0 8px -6px rgba(0, 0, 0, 0.6);
-    --hero-bg: #1B2742;
-    --toast-bg: #1A2131;
-    --chart-accent: #7EA6FF;
+    --hero-bg: radial-gradient(120% 140% at 100% 0%, rgba(79, 195, 247, 0.16) 0%, transparent 55%), linear-gradient(140deg, #0F3B78 0%, #0B2650 100%);
+    --hero-text: #FFFFFF;
+    --hero-label: #A9C2E6;
+    --hero-positive: #6EF0C0;
+    --hero-negative: #FF9B91;
+    --hero-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+    --hero-sparkline: #6FD0FA;
+    --toast-bg: #13284A;
+    --chart-accent: #6FD0FA;
     --chart-secondary: #F0A84C;
-    --chart-positive: #3FCF94;
-    --chart-negative: #FF7D73;
-    --chart-forecast: #6B7689;
-    --chart-tooltip-bg: #242C3E;
+    --chart-positive: #45E0A8;
+    --chart-negative: #FF7B7B;
+    --chart-forecast: #6A82A6;
+    --chart-tooltip-bg: #1A3256;
     --chip-bg-saturation: 35%;
     --chip-bg-lightness: 20%;
     --chip-text-saturation: 70%;
     --chip-text-lightness: 80%;
-    --empty-state-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%237EA6FF' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9h18M9 9v2h6V9'/%3E%3C/svg%3E");
+    --empty-state-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%236FD0FA' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Cpath d='M3 9h18M9 9v2h6V9'/%3E%3C/svg%3E");
 }
 
 * { box-sizing: border-box; }
@@ -320,6 +375,7 @@ input[type="checkbox"] {
     margin-bottom: 26px;
 }
 .brand-name {
+    font-family: var(--font-display);
     font-size: 17px;
     font-weight: 500;
     letter-spacing: -0.02em;
@@ -365,7 +421,7 @@ input[type="checkbox"] {
     padding: 14px 14px 13px;
     margin-bottom: 8px;
     border-radius: var(--radius-md);
-    background: rgba(255, 255, 255, 0.045);
+    background: var(--sidebar-raised-bg);
     border: 1px solid var(--sidebar-border);
 }
 .sidebar-networth-label {
@@ -404,10 +460,12 @@ input[type="checkbox"] {
     flex-shrink: 0;
     background: var(--sidebar-text);
 }
-.sidebar-account-dot.checking { background: #7AA2FF; }
-.sidebar-account-dot.savings { background: #5FD3A3; }
-.sidebar-account-dot.cash { background: #F2C066; }
-.sidebar-account-dot.credit_card { background: #FF8F86; }
+/* Mêmes teintes que la répartition de la page Comptes, dans leur version
+   pour fond sombre (la barre latérale l'est dans les deux thèmes). */
+.sidebar-account-dot.checking { background: var(--sidebar-accent); }
+.sidebar-account-dot.savings { background: var(--sidebar-positive); }
+.sidebar-account-dot.cash { background: #FFC857; }
+.sidebar-account-dot.credit_card { background: var(--sidebar-negative); }
 .sidebar-account-dot.investment { background: #B9A6FF; }
 .sidebar-account-name {
     flex: 1;
@@ -448,6 +506,7 @@ input[type="checkbox"] {
     padding-bottom: 0;
 }
 .page-header h1 {
+    font-family: var(--font-display);
     font-size: 28px;
     line-height: 1.15;
     font-weight: 650;
@@ -501,11 +560,11 @@ table {
 thead th {
     text-align: left;
     font-size: 12.5px;
-    color: var(--text-muted);
+    color: var(--table-head-text);
     font-weight: 600;
     padding: 11px 12px;
-    border-bottom: 1px solid var(--line);
-    background: var(--surface-sunken);
+    border-bottom: 1px solid var(--table-head-border);
+    background: var(--table-head-bg);
 }
 tbody td {
     padding: 12px;
@@ -660,7 +719,8 @@ table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
     font-weight: 500;
 }
 .form-field input, .form-field select, .form-field textarea,
-table input:not([type="checkbox"]), table select {
+table input:not([type="checkbox"]), table select,
+.inline-edit-fields input:not([type="checkbox"]), .inline-edit-fields select {
     background: var(--ink-900);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-md);
@@ -670,9 +730,12 @@ table input:not([type="checkbox"]), table select {
     box-shadow: var(--shadow-xs);
     transition: border-color 0.12s, box-shadow 0.12s;
 }
-table input:not([type="checkbox"]), table select { padding: 6px 9px; }
+/* Édition en ligne (tableaux, lignes de liste .inline-edit-fields) : version compacte. */
+table input:not([type="checkbox"]), table select,
+.inline-edit-fields input:not([type="checkbox"]), .inline-edit-fields select { padding: 6px 9px; }
 .form-field input:focus, .form-field select:focus, .form-field textarea:focus,
-table input:not([type="checkbox"]):focus, table select:focus {
+table input:not([type="checkbox"]):focus, table select:focus,
+.inline-edit-fields input:not([type="checkbox"]):focus, .inline-edit-fields select:focus {
     outline: none;
     border-color: var(--azure);
     box-shadow: 0 0 0 3px var(--azure-dim);
@@ -681,8 +744,6 @@ table input:not([type="checkbox"]):focus, table select:focus {
 /* ---------------- Modales ---------------- */
 .modal-overlay {
     position: fixed; inset: 0;
-    background: rgba(14, 20, 36, 0.5);
-    backdrop-filter: blur(2px);
     display: flex; align-items: center; justify-content: center;
     z-index: 50;
 }
@@ -756,6 +817,12 @@ table input:not([type="checkbox"]):focus, table select:focus {
     align-items: center;
     margin-bottom: 18px;
     flex-wrap: wrap;
+}
+/* Champ de recherche principal d'une barre d'outils (Catégories, Tiers) :
+   assez large pour une requête à plusieurs critères (« a;b;"c" »). */
+.toolbar-search {
+    width: 420px;
+    max-width: 100%;
 }
 
 code {
@@ -896,29 +963,29 @@ code {
 }
 
 .dashboard-page > .card-grid > .card:nth-child(2)::before {
-    background: #68B99A;
+    background: color-mix(in srgb, var(--mint) 55%, transparent);
 }
 
 .dashboard-page > .card-grid > .card:nth-child(3)::before {
-    background: #E28B83;
+    background: color-mix(in srgb, var(--coral) 55%, transparent);
 }
 
 .dashboard-page > .card-grid > .card:nth-child(4)::before {
-    background: #8A9BC4;
+    background: color-mix(in srgb, var(--azure) 55%, transparent);
 }
 
 .dashboard-page > .card-grid > .card:first-child {
     background: var(--hero-bg);
-    border-color: var(--hero-bg);
-    box-shadow: 0 8px 22px rgba(23, 34, 59, 0.14);
+    border-color: transparent;
+    box-shadow: var(--hero-shadow);
 }
 
 .dashboard-page > .card-grid > .card:first-child .stat-label {
-    color: #B8C2D4;
+    color: var(--hero-label);
 }
 
 .dashboard-page > .card-grid > .card:first-child .stat-value {
-    color: #FFFFFF;
+    color: var(--hero-text);
     font-size: clamp(25px, 2vw, 31px);
 }
 
@@ -968,7 +1035,7 @@ code {
 }
 
 .nav-item.active {
-    background: rgba(255, 255, 255, 0.105);
+    background: var(--sidebar-active-bg);
 }
 
 /* Les contrôles de période ont un rendu plus proche d'une barre d'outils. */
@@ -1089,7 +1156,9 @@ code {
 .form-field select,
 .form-field textarea,
 table input:not([type="checkbox"]),
-table select {
+table select,
+.inline-edit-fields input:not([type="checkbox"]),
+.inline-edit-fields select {
     min-height: 40px;
 }
 
@@ -1123,7 +1192,7 @@ table select {
 
 .modal-overlay {
     padding: 24px;
-    background: rgba(15, 23, 42, 0.58);
+    background: var(--scrim);
     backdrop-filter: blur(5px) saturate(115%);
     -webkit-backdrop-filter: blur(5px) saturate(115%);
     overscroll-behavior: contain;
@@ -1158,6 +1227,14 @@ table select {
 
 .modal .form-field {
     min-width: 0;
+}
+
+/* Bouton carré ne contenant qu'une icône (Enregistrer / Annuler d'une ligne en édition) */
+.btn.btn-icon {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    flex-shrink: 0;
 }
 
 .modal .btn {
@@ -1358,8 +1435,8 @@ button.icon-button {
     }
 
     .nav-item.active {
-        background: rgba(255, 255, 255, 0.12);
-        border-color: rgba(255, 255, 255, 0.08);
+        background: var(--sidebar-active-bg);
+        border-color: transparent;
     }
 
     .nav-item.active::before {
@@ -1525,8 +1602,8 @@ button.icon-button {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(12, 20, 34, .48);
-  backdrop-filter: blur(3px);
+  background: var(--scrim);
+  backdrop-filter: blur(5px) saturate(115%);
 }
 .feedback-dialog {
   width: min(440px, 100%);
@@ -1560,7 +1637,7 @@ button.icon-button {
 
 /* Indicateur de navigation discret, sans bloquer les interactions. */
 .route-progress { position: absolute; z-index: 1200; top: 0; left: 0; right: 0; height: 3px; overflow: hidden; pointer-events: none; }
-.route-progress span { display: block; width: 38%; height: 100%; border-radius: 0 3px 3px 0; background: #16845b; animation: route-progress 1s ease-in-out infinite; }
+.route-progress span { display: block; width: 38%; height: 100%; border-radius: 0 3px 3px 0; background: var(--brand); animation: route-progress 1s ease-in-out infinite; }
 @keyframes route-progress { 0% { transform: translateX(-110%); } 100% { transform: translateX(370%); } }
 .page-enter-active, .page-leave-active { transition: opacity .14s ease, transform .14s ease; }
 .page-enter-from { opacity: 0; transform: translateY(5px); }
@@ -1624,7 +1701,7 @@ button.icon-button {
   min-width: 22px;
   padding: 1px 7px;
   border-radius: 999px;
-  background: rgba(226, 167, 107, 0.16);
+  background: var(--sidebar-badge-bg);
   color: var(--sidebar-accent);
   font-size: 11.5px;
   font-weight: 650;
@@ -1645,7 +1722,7 @@ button.icon-button {
   padding: 8px 10px 8px 12px;
   border: 1px solid var(--sidebar-border);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--sidebar-raised-bg);
   color: var(--sidebar-text);
   font-size: 13px;
   text-align: left;

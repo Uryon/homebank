@@ -220,7 +220,7 @@ import { TransactionsAPI, PayeesAPI } from '../services/api'
 import { notify, askText } from '../services/feedback'
 import { alertApiError } from '../services/errors'
 import { dataStore } from '../services/dataStore'
-import { formatAmount, formatDate } from '../services/format'
+import { formatAmount, formatDate, pluralize } from '../services/format'
 import { matchesPatternField } from '../services/payee'
 import TransactionsSubNav from './TransactionsSubNav.vue'
 
@@ -302,7 +302,7 @@ async function removeDuplicates(group) {
   try {
     await Promise.all(idsToRemove.map(id => TransactionsAPI.remove(id)))
     await dataStore.refreshTransactions()
-    notify(`${idsToRemove.length} doublon(s) supprimé(s).`)
+    notify(`${pluralize(idsToRemove.length, 'doublon supprimé', 'doublons supprimés')}.`)
     await load()
   } catch (error) {
     alertApiError('Erreur lors de la suppression des doublons', error)
@@ -594,22 +594,22 @@ onMounted(load)
 }
 
 .duplicate-row-status.pending {
-  color: var(--coral);
-  background: var(--coral-dim);
+  color: var(--amber);
+  background: var(--amber-dim);
 }
 
 /* Occurrence conservee automatiquement par le bouton du groupe (voir
    keeperId ci-dessus) : légèrement mise en avant pour que l'utilisateur
    voie d'un coup d'œil laquelle restera avant de cliquer. */
 .duplicate-row-keep {
-  background: var(--mint-dim);
-  box-shadow: inset 2px 0 0 var(--mint);
+  background: var(--azure-dim);
+  box-shadow: inset 2px 0 0 var(--azure);
 }
 .duplicate-keep-badge {
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 700;
-  color: var(--mint);
+  color: var(--azure);
 }
 
 .duplicate-actions {

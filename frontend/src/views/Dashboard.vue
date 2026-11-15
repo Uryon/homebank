@@ -43,7 +43,7 @@
         </div>
         <div class="kpi-foot">
           <span v-if="balanceDelta" class="kpi-delta" :class="balanceDelta.tone">{{ balanceDelta.text }}</span>
-          <Sparkline :values="balanceSeries" color="#E2A76B" />
+          <Sparkline :values="balanceSeries" color="var(--hero-sparkline)" />
         </div>
       </div>
       <div class="card kpi">
@@ -102,9 +102,9 @@
       </ul>
     </div>
 
-    <div class="card forecast-card chart-card" style="margin-bottom: 20px;">
+    <div class="card forecast-card chart-card">
       <div class="chart-header">
-        <div class="stat-label" style="margin-bottom: 0;">
+        <div class="stat-label chart-header-title">
           Évolution du solde — historique, présent &amp; prévisionnel
         </div>
         <button
@@ -135,7 +135,7 @@
 
     <div class="top-row-grid">
       <div class="card compact-card savings-card chart-card">
-        <div class="card-title" style="margin-bottom: 8px;">Épargne mensuelle (12 derniers mois)</div>
+        <div class="card-title">Épargne mensuelle (12 derniers mois)</div>
         <div class="savings-chart-wrap">
           <canvas ref="savingsChart"></canvas>
         </div>
@@ -144,7 +144,7 @@
 
       <div class="periodic-grid">
         <div class="card compact-card">
-          <div class="card-title" style="margin-bottom: 10px;">Dépenses périodiques</div>
+          <div class="card-title">Dépenses périodiques</div>
           <div v-if="periodicExpenses.expenses.items.length">
             <div class="periodic-table-wrap">
               <table class="plain-table">
@@ -180,7 +180,7 @@
         </div>
 
         <div class="card compact-card">
-          <div class="card-title" style="margin-bottom: 10px;">Revenus périodiques</div>
+          <div class="card-title">Revenus périodiques</div>
           <div v-if="periodicExpenses.revenues.items.length">
             <div class="periodic-table-wrap">
               <table class="plain-table">
@@ -216,9 +216,9 @@
       </div>
     </div>
 
-    <div class="card compact-card where-money-card" style="margin-bottom: 28px;">
-      <div class="card-title" style="margin-bottom: 4px;">Où va mon argent ?</div>
-      <div style="color: var(--text-muted); font-size: 12px; margin-bottom: 12px;">
+    <div class="card compact-card where-money-card">
+      <div class="card-title has-subtitle">Où va mon argent ?</div>
+      <div class="card-subtitle">
         Répartition des dépenses sur les 12 derniers mois (les virements entre comptes ne sont pas comptés).
       </div>
       <div v-if="whereMoneyData.length" class="where-money-layout">
@@ -234,6 +234,7 @@
             <thead>
               <tr>
                 <th>Catégorie</th>
+                <th class="where-share-col"><span class="sr-only">Part des dépenses</span></th>
                 <th class="num">Montant</th>
                 <th class="num">%</th>
               </tr>
@@ -241,8 +242,13 @@
             <tbody>
               <tr v-for="(row, i) in whereMoneyData" :key="row.category">
                 <td>
-                  <span class="legend-dot" :style="{ background: PALETTE[i % PALETTE.length] }"></span>
+                  <span class="legend-dot" :style="{ background: legendColor(i) }"></span>
                   {{ iconPrefix(row.categoryId) }}{{ row.category }}
+                </td>
+                <td class="where-share-col" aria-hidden="true">
+                  <span class="where-share-track">
+                    <span class="where-share-fill" :style="{ width: row.percentage + '%', background: legendColor(i) }"></span>
+                  </span>
                 </td>
                 <td class="num amount negative"
                     @mouseenter="scheduleHover($event, row.category + ' — 12 derniers mois', () => fetchCellTransactions(whereMoneyRange.from, whereMoneyRange.to, 'expense', row.uncategorized ? { uncategorized: true } : { categoryId: row.categoryId }))"
@@ -255,6 +261,7 @@
             <tfoot>
               <tr>
                 <td>Total</td>
+                <td class="where-share-col"></td>
                 <td class="num amount negative">{{ formatAmount(whereMoneyTotal) }}</td>
                 <td class="num where-pct">{{ formatShare(100) }}</td>
               </tr>
@@ -266,9 +273,9 @@
     </div>
 
     <div class="card monthly-analysis-card monthly-summary-card">
-      <div class="card-title" style="margin-bottom: 4px;">Résumé mensuel — 12 derniers mois</div>
+      <div class="card-title has-subtitle">Résumé mensuel — 12 derniers mois</div>
       <div class="monthly-analysis-subtitle">
-        Revenus, dépenses et solde par mois. Les 12 derniers mois entièrement terminés sont affichés<span v-if="hasForecastMonths">, complétés par un prévisionnel <em>(en italique)</em> sur les mois pas encore terminés</span>.
+        Revenus, dépenses et solde par mois. Les 12 derniers mois entièrement terminés sont affichés<span v-if="hasForecastMonths">, complétés par un prévisionnel <em>(en italique)</em> sur les mois pas encore terminés</span>. Les mois inhabituels sont encadrés : <span class="anomaly-legend favorable">en vert</span> si l'écart est favorable, <span class="anomaly-legend">en corail</span> sinon.
       </div>
 
       <div v-if="monthlyAnalysis" class="monthly-analysis-wrap">
@@ -290,7 +297,7 @@
             <tr>
               <td class="category-sticky summary-label">Revenus</td>
               <td v-for="month in monthlyAnalysis.summary" :key="'summary-income-' + month.key" class="num"
-                  :class="[anomalyClass(month.income, summaryRowValues.income), { 'forecast-cell': month.forecast }]"
+                  :class="[{ 'zero-value': !Number(month.income) }, anomalyClass(month.income, summaryRowValues.income, true), { 'forecast-cell': month.forecast }]"
                   @mouseenter="scheduleMonthHover($event, 'Revenus — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income'), month.forecast)"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(month.income) }}
@@ -309,7 +316,7 @@
             <tr>
               <td class="category-sticky summary-label">Dépenses</td>
               <td v-for="month in monthlyAnalysis.summary" :key="'summary-expense-' + month.key" class="num"
-                  :class="[anomalyClass(month.expenses, summaryRowValues.expenses), { 'forecast-cell': month.forecast }]"
+                  :class="[{ 'zero-value': !Number(month.expenses) }, anomalyClass(month.expenses, summaryRowValues.expenses), { 'forecast-cell': month.forecast }]"
                   @mouseenter="scheduleMonthHover($event, 'Dépenses — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'expense'), month.forecast)"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(month.expenses) }}
@@ -329,20 +336,20 @@
               <td class="category-sticky summary-label"><strong>Solde du mois</strong></td>
               <td v-for="month in monthlyAnalysis.summary" :key="'summary-net-' + month.key"
                   class="num"
-                  :class="[Number(month.net) >= 0 ? 'positive' : 'negative', anomalyClass(month.net, summaryRowValues.net), { 'forecast-cell': month.forecast }]"
+                  :class="[balanceToneClass(month.net), anomalyClass(month.net, summaryRowValues.net, true), { 'forecast-cell': month.forecast }]"
                   @mouseenter="scheduleMonthHover($event, 'Solde — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, null), month.forecast)"
                   @mouseleave="onCellLeave">
                 <strong>{{ formatAmount(month.net) }}</strong>
               </td>
-              <td class="num summary-col"
+              <td class="num summary-col" :class="balanceToneClass(netAverage)"
                   @mouseenter="scheduleHover($event, 'Solde — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, null))"
                   @mouseleave="onCellLeave">
-                <strong>{{ formatAmount(Number(monthlyAnalysis.incomeTotal.average) - Number(monthlyAnalysis.expenseTotal.average)) }}</strong>
+                <strong>{{ formatAmount(netAverage) }}</strong>
               </td>
-              <td class="num summary-col"
+              <td class="num summary-col" :class="balanceToneClass(netTotal)"
                   @mouseenter="scheduleHover($event, 'Solde — 12 derniers mois', () => fetchCellTransactions(monthlyAnalysis.from, monthlyAnalysis.to, null))"
                   @mouseleave="onCellLeave">
-                <strong>{{ formatAmount(Number(monthlyAnalysis.incomeTotal.total) - Number(monthlyAnalysis.expenseTotal.total)) }}</strong>
+                <strong>{{ formatAmount(netTotal) }}</strong>
               </td>
             </tr>
           </tbody>
@@ -352,9 +359,9 @@
     </div>
 
     <div class="card monthly-analysis-card">
-      <div class="card-title" style="margin-bottom: 4px;">Dépenses par catégorie — 12 derniers mois</div>
+      <div class="card-title has-subtitle">Dépenses par catégorie — 12 derniers mois</div>
       <div class="monthly-analysis-subtitle">
-        Évolution mensuelle par catégorie et sous-catégorie. Les 12 derniers mois entièrement terminés sont affichés<span v-if="hasForecastMonths">, complétés par un prévisionnel <em>(en italique)</em> sur les mois pas encore terminés</span>.
+        Évolution mensuelle par catégorie et sous-catégorie. Les 12 derniers mois entièrement terminés sont affichés<span v-if="hasForecastMonths">, complétés par un prévisionnel <em>(en italique)</em> sur les mois pas encore terminés</span>. Les mois inhabituels sont encadrés : <span class="anomaly-legend favorable">en vert</span> si l'écart est favorable, <span class="anomaly-legend">en corail</span> sinon.
       </div>
 
       <div v-if="monthlyAnalysis" class="monthly-analysis-wrap">
@@ -454,9 +461,9 @@
     </div>
 
     <div class="card monthly-analysis-card">
-      <div class="card-title" style="margin-bottom: 4px;">Revenus par catégorie — 12 derniers mois</div>
+      <div class="card-title has-subtitle">Revenus par catégorie — 12 derniers mois</div>
       <div class="monthly-analysis-subtitle">
-        Évolution mensuelle par catégorie et sous-catégorie. Les 12 derniers mois entièrement terminés sont affichés<span v-if="hasForecastMonths">, complétés par un prévisionnel <em>(en italique)</em> sur les mois pas encore terminés</span>.
+        Évolution mensuelle par catégorie et sous-catégorie. Les 12 derniers mois entièrement terminés sont affichés<span v-if="hasForecastMonths">, complétés par un prévisionnel <em>(en italique)</em> sur les mois pas encore terminés</span>. Les mois inhabituels sont encadrés : <span class="anomaly-legend favorable">en vert</span> si l'écart est favorable, <span class="anomaly-legend">en corail</span> sinon.
       </div>
 
       <div v-if="monthlyAnalysis" class="monthly-analysis-wrap">
@@ -486,7 +493,7 @@
                 <strong>{{ iconPrefix(group.categoryId) }}{{ group.name }}</strong>
               </td>
               <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                  :class="[{ 'zero-value': !Number(group.values[month.key]) }, anomalyClass(group.values[month.key], Object.values(group.values)), { 'forecast-cell': month.forecast }]"
+                  :class="[{ 'zero-value': !Number(group.values[month.key]) }, anomalyClass(group.values[month.key], Object.values(group.values), true), { 'forecast-cell': month.forecast }]"
                   @mouseenter="scheduleMonthHover($event, group.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', groupCategoryFilter(group)), month.forecast)"
                   @mouseleave="onCellLeave">
                 {{ formatAmount(group.values[month.key]) }}
@@ -510,7 +517,7 @@
                   └ {{ iconPrefix(child.categoryId) }}{{ child.name }}
                 </td>
                 <td v-for="month in monthlyAnalysis.months" :key="month.key" class="num"
-                    :class="[{ 'zero-value': !Number(child.values[month.key]) }, anomalyClass(child.values[month.key], Object.values(child.values)), { 'forecast-cell': month.forecast }]"
+                    :class="[{ 'zero-value': !Number(child.values[month.key]) }, anomalyClass(child.values[month.key], Object.values(child.values), true), { 'forecast-cell': month.forecast }]"
                     @mouseenter="scheduleMonthHover($event, child.name + ' — ' + monthLabelFor(month.key), () => fetchMonthCellTransactions(month.key, 'income', childCategoryFilter(child)), month.forecast)"
                     @mouseleave="onCellLeave">
                   {{ formatAmount(child.values[month.key]) }}
@@ -564,6 +571,7 @@
       :loading="hover.loading"
       :x="hover.x"
       :y="hover.y"
+      :above="hover.above"
       :title="hover.title"
       :rows="hover.rows"
       :total="hover.total"
@@ -576,13 +584,14 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch } from 'vue'
 import { effectiveTheme } from '../services/theme'
-import { areaGradient, axisOptions, readChartColors, tooltipOptions } from '../services/chartTheme'
+import { areaGradient, axisOptions, barGradient, CHART_FONT_FAMILY, readChartColors, tooltipOptions } from '../services/chartTheme'
 import { ReportsAPI, LoansAPI, ExportAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { formatAmount } from '../services/format'
 import { accountBalanceRows, accountCountLabel, amountToneClass, computeNetWorth, sortAccountsForDisplay } from '../services/accounts'
 import { alertApiError } from '../services/errors'
 import CellTransactionsPopover from '../components/CellTransactionsPopover.vue'
+import { popoverPlacement } from '../services/popoverPlacement'
 import Chart from 'chart.js/auto'
 import Money from '../components/Money.vue'
 import Sparkline from '../components/Sparkline.vue'
@@ -719,16 +728,20 @@ let whereMoneyChart = null
 const HOVER_DELAY_MS = 1000
 const HIDE_GRACE_MS = 150
 const POPOVER_WIDTH = 320
+const POPOVER_MAX_HEIGHT = 320 // max-height de .cell-popover
 
-const hover = ref({ visible: false, loading: false, x: 0, y: 0, title: '', rows: [], total: 0 })
+const hover = ref({ visible: false, loading: false, x: 0, y: 0, above: false, title: '', rows: [], total: 0 })
 let showTimer = null
 let hideTimer = null
 let requestToken = 0
 
+/** Sous la case, ou au-dessus pour une case en bas de l'écran (voir popoverPlacement). */
 function positionFromEvent(event) {
-  const rect = event.currentTarget.getBoundingClientRect()
-  const x = Math.max(8, Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - 12))
-  return { x, y: rect.bottom + 6 }
+  return popoverPlacement(
+    event.currentTarget.getBoundingClientRect(),
+    { width: window.innerWidth, height: window.innerHeight },
+    { width: POPOVER_WIDTH, maxHeight: POPOVER_MAX_HEIGHT }
+  )
 }
 
 /**
@@ -741,10 +754,10 @@ function positionFromEvent(event) {
 function scheduleHover(event, title, loadRows) {
   cancelHideTimer()
   clearTimeout(showTimer)
-  const { x, y } = positionFromEvent(event)
+  const { x, y, above } = positionFromEvent(event)
   const token = ++requestToken
   showTimer = setTimeout(async () => {
-    hover.value = { visible: true, loading: true, x, y, title, rows: [], total: 0 }
+    hover.value = { visible: true, loading: true, x, y, above, title, rows: [], total: 0 }
     try {
       const rows = await loadRows()
       if (token !== requestToken) return
@@ -757,7 +770,7 @@ function scheduleHover(event, title, loadRows) {
       // de "decroissant" au sens ou l'utilisateur l'entend (la plus grosse
       // transaction en premier, quel que soit le sens).
       const sortedRows = mergedRows.sort((a, b) => Math.abs(Number(b.amount)) - Math.abs(Number(a.amount)))
-      hover.value = { visible: true, loading: false, x, y, title, rows: sortedRows, total }
+      hover.value = { visible: true, loading: false, x, y, above, title, rows: sortedRows, total }
     } catch {
       if (token !== requestToken) return
       hover.value = { ...hover.value, loading: false }
@@ -834,7 +847,11 @@ function periodicGroupRows(group, sign) {
 // Palette catégorielle (8 teintes distinguables, y compris pour les daltoniens),
 // volontairement sans vert/rouge « sémantiques » : une catégorie n'est ni un gain ni une perte.
 const PALETTE = ['#3E63DD', '#F76B15', '#12A594', '#D6409F', '#8E4EC6', '#00A2C7', '#E5A400', '#7B8794']
-const SMALL_TICK_FONT = { family: 'Inter, sans-serif', size: 10 }
+/** Couleur de la i-ème part du donut, reprise par la pastille et la barre de sa ligne. */
+function legendColor(index) {
+  return PALETTE[index % PALETTE.length]
+}
+const SMALL_TICK_FONT = { family: CHART_FONT_FAMILY, size: 10 }
 const fmtTick = new Intl.NumberFormat('fr-FR')
 
 // Mêmes calculs partagés que la sidebar (services/accounts.js). Tous les
@@ -910,6 +927,21 @@ function monthLabelFor(key) {
 
 /** Vrai si la fenêtre de 12 mois affichée contient au moins un mois prévisionnel (voir monthlyAnalysis.months[].forecast) : en navigant vers le futur avec les flèches, pas seulement en vue par défaut. */
 const hasForecastMonths = computed(() => (monthlyAnalysis.value?.months || []).some(m => m.forecast))
+
+/** Solde moyen et total sur 12 mois (colonnes Moyenne/Total de la ligne « Solde du mois »). */
+const netAverage = computed(() => Number(monthlyAnalysis.value?.incomeTotal.average) - Number(monthlyAnalysis.value?.expenseTotal.average))
+const netTotal = computed(() => Number(monthlyAnalysis.value?.incomeTotal.total) - Number(monthlyAnalysis.value?.expenseTotal.total))
+
+/**
+ * Teinte d'une case de solde : vert si positif, corail si négatif, et
+ * estompée comme les autres cases vides (.zero-value) si nulle — un mois sans
+ * aucun mouvement n'est pas un « bon » mois.
+ */
+function balanceToneClass(value) {
+  const amount = Number(value)
+  if (!amount) return 'zero-value'
+  return amount > 0 ? 'amount positive' : 'amount negative'
+}
 
 /** Valeurs mensuelles des lignes Revenus/Depenses/Solde du tableau "Resume mensuel", pour anomalyClass. */
 const summaryRowValues = computed(() => {
@@ -1146,7 +1178,7 @@ function renderForecastChart(points, loanOwnedSeries) {
             boxHeight: 8,
             padding: 18,
             color: colors.legend,
-            font: { family: 'Inter, sans-serif', size: 11, weight: '600' },
+            font: { family: CHART_FONT_FAMILY, size: 11, weight: '600' },
             filter: (legendItem, data) => !data.datasets[legendItem.datasetIndex]?.isForecastVariant
           }
         },
@@ -1174,8 +1206,9 @@ function renderForecastChart(points, loanOwnedSeries) {
 }
 
 /**
- * Barres épargne mensuelle : vert si positif (on a épargné), rouge si négatif
- * (on a puisé dans le solde) — gris (--chart-forecast, même teinte que le
+ * Barres épargne mensuelle : couleur d'accent du thème (dégradé) si positif
+ * — l'épargne n'est pas un revenu, d'où le bleu plutôt que le vert —, rouge
+ * si négatif (on a puisé dans le solde), gris (--chart-forecast, même teinte que le
  * prévisionnel du graphique de solde et des tableaux) pour un mois pas
  * encore terminé (p.forecast, voir ServiceRapport#monthlySavings), peu
  * importe son signe : ce n'est jamais une vraie valeur constatée.
@@ -1183,6 +1216,12 @@ function renderForecastChart(points, loanOwnedSeries) {
 function renderSavingsChart(points) {
   lastSavingsPoints = points
   const colors = readChartColors()
+  const savedFill = barGradient(colors.accent)
+  const barFill = (ctx) => {
+    const point = points[ctx.dataIndex]
+    if (point.forecast) return colors.forecast
+    return Number(point.savings) >= 0 ? savedFill(ctx) : colors.negative
+  }
   if (savingsChartInstance) savingsChartInstance.destroy()
   savingsChartInstance = new Chart(savingsChart.value, {
     type: 'bar',
@@ -1191,7 +1230,7 @@ function renderSavingsChart(points) {
       datasets: [{
         label: 'Épargne',
         data: points.map(p => p.savings),
-        backgroundColor: points.map(p => (p.forecast ? colors.forecast : (Number(p.savings) >= 0 ? colors.positive : colors.negative))),
+        backgroundColor: barFill,
         borderRadius: 4,
         maxBarThickness: 34
       }]
@@ -1236,7 +1275,7 @@ function renderWhereMoneyChart(data) {
       labels: data.map(d => d.category),
       datasets: [{
         data: data.map(d => d.total),
-        backgroundColor: data.map((_, i) => PALETTE[i % PALETTE.length]),
+        backgroundColor: data.map((_, i) => legendColor(i)),
         // Séparation entre les parts = couleur de la carte (claire ou sombre selon le thème)
         borderColor: colors.surface,
         borderWidth: 3,
@@ -1300,61 +1339,18 @@ onBeforeUnmount(() => {
 .kpi-delta { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .kpi-delta.good { color: var(--mint); }
 .kpi-delta.bad { color: var(--coral); }
-/* Carte sombre (solde total) : teintes claires lisibles sur fond marine. */
+/* Carte « Solde total » : teintes dédiées, lisibles sur --hero-bg. */
 .kpi:first-child .kpi-delta.good { color: var(--hero-positive); }
 .kpi:first-child .kpi-delta.bad { color: var(--hero-negative); }
 
-.card-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-primary); }
+.card-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-primary); margin-bottom: 10px; }
+/* Titre suivi d'une ligne d'explication (.card-subtitle, .monthly-analysis-subtitle). */
+.card-title.has-subtitle { margin-bottom: 4px; }
+.card-subtitle { color: var(--text-muted); font-size: 12px; margin-bottom: 12px; }
+.chart-header-title { margin-bottom: 0; }
 .chart-note {
   line-height: 1.65;
   max-width: 1050px;
-}
-.savings-card .stat-label,
-.where-money-card > .stat-label {
-  font-size: 13px;
-  letter-spacing: -.01em;
-}
-.where-money-card {
-  padding: 20px 22px;
-}
-.where-money-layout {
-  gap: 32px;
-}
-.donut-wrap {
-  width: 176px;
-  height: 176px;
-}
-.where-money-layout {
-  grid-template-columns: 176px minmax(0, 1fr);
-}
-.donut-center-value {
-  font-size: 17px;
-  letter-spacing: -.035em;
-}
-.donut-center-label {
-  margin-top: 3px;
-  font-size: 10px;
-  letter-spacing: .04em;
-  text-transform: none;
-}
-.where-table {
-  font-size: 12.5px;
-}
-.where-table th {
-  padding: 0 8px 9px;
-  font-size: 10px;
-}
-.where-table tfoot td {
-  padding-top: 12px;
-}
-.monthly-analysis-table .category-sticky {
-  font-weight: 600;
-}
-@media (max-width: 640px) {
-  .forecast-card { padding: 16px; }
-  .where-money-card { padding: 16px; }
-  .where-money-layout { grid-template-columns: 1fr; gap: 16px; }
-  .donut-wrap { width: 164px; height: 164px; }
 }
 
 .chart-note {
@@ -1425,9 +1421,9 @@ onBeforeUnmount(() => {
  * encore a l'ecran, puis defilerait avec lui (teste : les fleches
  * disparaissaient des les premiers pixels de scroll). fixed les maintient
  * ancrees en haut a droite quelle que soit la position de scroll dans la
- * page. Fond + bordure + ombre opaques pour rester lisible par-dessus le
- * contenu qui defile dessous (meme traitement que le thead sticky de
- * .monthly-analysis-table plus bas).
+ * page. Fond translucide flouté (backdrop-filter) + bordure + ombre : reste
+ * lisible par-dessus le contenu qui defile dessous sans le masquer d'un bloc
+ * opaque.
  */
 .month-nav {
   display: flex;
@@ -1435,13 +1431,20 @@ onBeforeUnmount(() => {
   gap: 10px;
   position: fixed;
   top: 24px;
-  right: 40px;
+  /* Calée sur le bord droit du contenu : au-delà de 252 + 1600 px (sidebar +
+     max-width de .main-content, voir style.css), le contenu ne s'élargit plus
+     et 40px depuis le bord de la fenêtre la ferait déborder de la grille.
+     100% = largeur de la fenêtre (bloc conteneur d'un élément fixed),
+     1808px = 252 + 1600 - 44 (padding droit de .main-content). */
+  right: max(40px, calc(100% - 1808px));
   z-index: 50;
-  background: var(--ink-900);
+  background: color-mix(in srgb, var(--ink-900) 78%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
   padding: 6px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-md);
 }
 .month-nav-btn {
   display: flex;
@@ -1599,23 +1602,32 @@ onBeforeUnmount(() => {
 }
 
 /* --- "Où va mon argent ?" : donut compact à gauche + tableau détaillé à droite --- */
+.where-money-card {
+  padding: 20px 22px;
+  margin-bottom: 28px;
+}
 .where-money-layout {
   display: grid;
-  grid-template-columns: 150px 1fr;
-  gap: 24px;
+  grid-template-columns: 176px minmax(0, 1fr);
+  gap: 32px;
   align-items: center;
 }
 @media (max-width: 640px) {
+  .where-money-card { padding: 16px; }
   .where-money-layout {
     grid-template-columns: 1fr;
+    gap: 16px;
     justify-items: center;
   }
+  .donut-wrap { width: 164px; height: 164px; }
+  /* Sur mobile, la barre de proportion prendrait la place du libellé. */
+  .where-share-col { display: none; }
 }
 
 .donut-wrap {
   position: relative;
-  width: 150px;
-  height: 150px;
+  width: 176px;
+  height: 176px;
   margin: 0 auto;
 }
 .donut-center {
@@ -1629,44 +1641,74 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 .donut-center-value {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 800;
+  letter-spacing: -.035em;
+  /* Rend visible l'espace fine des milliers (« 5 065 € » et non « 5065 € »). */
+  font-variant-numeric: tabular-nums;
   color: var(--text-primary);
   line-height: 1.2;
 }
 .donut-center-label {
-  font-size: 10px;
+  font-size: 11px;
+  letter-spacing: .04em;
   color: var(--text-faint);
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
+/* En-tête (25 px) + 5 lignes entières (35,75 px) : la coupure tombe entre
+   deux lignes. À 190 px elle passait sous la ligne de base de la 5e ligne et
+   amputait la queue des virgules (« 199,00 € » se lisait « 199.00 € »). */
 .where-table-wrap {
-  max-height: 190px;
+  max-height: 204px;
   overflow-y: auto;
 }
 .where-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 12.5px;
 }
 .where-table th {
   position: sticky;
   top: 0;
   background: var(--ink-900);
   text-align: left;
-  padding: 0 0 6px;
+  padding: 0 8px 9px;
   font-size: 10px;
   text-transform: none;
   letter-spacing: .06em;
   color: var(--text-faint);
   font-weight: 700;
 }
+/* En-têtes « Montant » et « % » alignés à droite comme leurs chiffres */
+.where-table th.num {
+  text-align: right;
+}
 .where-table td {
-  padding: 5px 0;
-  border-bottom: 1px solid var(--line);
+  padding: 8px;
+  border-bottom: 1px solid var(--grid-line);
 }
 .where-table tbody tr:hover td {
-  background: var(--ink-800);
+  background: var(--row-hover);
+}
+/* Barre de proportion : occupe l'espace libre entre le libellé et le montant,
+   plafonnée pour rester lisible d'un coup d'œil sur grand écran. */
+.where-share-col {
+  width: 34%;
+  max-width: 320px;
+}
+.where-share-track {
+  display: block;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--ink-700);
+  overflow: hidden;
+}
+.where-share-fill {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: inherit;
 }
 .where-table tbody tr:last-child td {
   border-bottom: none;
@@ -1814,7 +1856,8 @@ onBeforeUnmount(() => {
 
 /*
  * Case dont la valeur s'ecarte fortement (voir anomalyClass/ANOMALY_STDDEV_THRESHOLD)
- * de la moyenne des 12 mois de sa ligne : liseret corail pour la reperer d'un
+ * de la moyenne des 12 mois de sa ligne : liseret corail (vert si l'ecart est
+ * favorable, voir anomaly-favorable juste en dessous) pour la reperer d'un
  * coup d'œil au milieu du tableau — box-shadow inset plutot qu'une bordure
  * classique pour ne pas decaler la mise en page des cellules voisines (compte
  * pour l'element sans agrandir sa boite). Pas de fond colore ici : perdrait
@@ -1825,6 +1868,14 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 0 0 2px var(--coral);
   color: var(--coral);
   font-weight: 700;
+}
+/* Légende des encadrés, dans le sous-titre des tableaux */
+.anomaly-legend { color: var(--coral); font-weight: 600; }
+.anomaly-legend.favorable { color: var(--mint); }
+/* Écart dans le bon sens (revenu exceptionnel, dépense au plus bas) : vert */
+.monthly-analysis-table .num.monthly-anomaly.anomaly-favorable {
+  box-shadow: inset 0 0 0 2px var(--mint);
+  color: var(--mint);
 }
 
 /*
@@ -2154,27 +2205,19 @@ onBeforeUnmount(() => {
   border: 1px solid var(--line);
   box-shadow: var(--shadow-card);
 }
-.forecast-card { padding: 22px 24px 18px; }
+.forecast-card { padding: 22px 24px 18px; margin-bottom: 20px; }
 .forecast-card > canvas { max-height: 310px; }
 .chart-note { line-height: 1.65; max-width: 1050px; }
-.where-money-card { padding: 20px 22px; }
-.where-money-layout { grid-template-columns: 176px minmax(0, 1fr); gap: 32px; }
-.donut-wrap { width: 176px; height: 176px; }
-.donut-center-value { font-size: 17px; letter-spacing: -.035em; }
-.donut-center-label { margin-top: 3px; font-size: 11px; text-transform: none; }
-.where-table { font-size: 12.5px; }
-.where-table th { padding: 0 8px 9px; }
-.where-table td { padding: 8px; border-bottom-color: var(--grid-line); }
-.where-table tbody tr:hover td { background: var(--row-hover); }
 .monthly-analysis-wrap { border-color: var(--line); box-shadow: var(--shadow-sm); }
 .monthly-analysis-table { font-variant-numeric: tabular-nums; }
-.monthly-analysis-table thead th { padding-top: 11px; padding-bottom: 11px; background: var(--surface-sunken); color: var(--text-muted); }
+.monthly-analysis-table thead th { padding-top: 11px; padding-bottom: 11px; background: var(--table-head-bg); color: var(--table-head-text); }
+/* Cellules figées de l'en-tête : même bandeau que le reste du thead. */
+.monthly-analysis-table thead th.category-sticky,
+.monthly-analysis-table thead th.num.summary-col { background: var(--table-head-bg); }
 .monthly-analysis-table tbody tr:hover td { background-color: var(--row-hover); }
 .monthly-analysis-table .category-sticky { font-weight: 600; }
 @media (max-width: 640px) {
-  .forecast-card, .where-money-card { padding: 16px; }
-  .where-money-layout { grid-template-columns: 1fr; gap: 16px; }
-  .donut-wrap { width: 164px; height: 164px; }
+  .forecast-card { padding: 16px; }
 }
 
 </style>

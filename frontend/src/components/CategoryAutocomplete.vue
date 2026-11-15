@@ -22,9 +22,10 @@
         type="button"
         class="cat-autocomplete-clear"
         title="Supprimer la catégorie sélectionnée"
+        aria-label="Supprimer la catégorie sélectionnée"
         @mousedown.prevent="clearSelection"
       >
-        ✕
+        <Icon name="x" size="sm" />
       </button>
     </div>
 
@@ -58,6 +59,7 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
 import { normalizeSearch } from '../services/search'
+import Icon from './Icon.vue'
 
 const props = defineProps({
   modelValue: { type: Number, default: null },
@@ -295,13 +297,13 @@ defineExpose({ focus: () => inputEl.value?.focus() })
   transform: translateY(-50%);
   border: none;
   background: transparent;
+  display: inline-flex;
   color: var(--text-faint);
   cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
-  padding: 4px;
+  padding: 3px;
   border-radius: 50%;
 }
+.cat-autocomplete-clear .icon { width: 13px; height: 13px; }
 .cat-autocomplete-clear:hover {
   color: var(--text-primary);
   background: var(--ink-700);

@@ -77,3 +77,47 @@ export function displayMemo(memo) {
   if (memo.trim().toUpperCase() === '(NULL)') return ''
   return memo
 }
+
+/**
+ * Rythmes usuels reconnus, avec leur tolérance en jours : un écart moyen de
+ * 29 à 32 jours se lit « mensuel », etc. Au-delà, on garde la durée brute.
+ */
+const FREQUENCIES = [
+  { days: 7, tolerance: 1, label: 'hebdomadaire' },
+  { days: 14, tolerance: 2, label: 'toutes les deux semaines' },
+  { days: 30.5, tolerance: 2.5, label: 'mensuel' },
+  { days: 61, tolerance: 4, label: 'bimestriel' },
+  { days: 91, tolerance: 6, label: 'trimestriel' },
+  { days: 182, tolerance: 10, label: 'semestriel' },
+  { days: 365, tolerance: 15, label: 'annuel' }
+]
+
+/** Libellé lisible d'un intervalle moyen entre occurrences (en jours). */
+export function formatFrequency(days) {
+  const value = Number(days)
+  if (!Number.isFinite(value) || value <= 0) return ''
+  const known = FREQUENCIES.find(f => Math.abs(value - f.days) <= f.tolerance)
+  return known ? known.label : `tous les ~${Math.round(value)} jours`
+}
+
+/**
+ * Valeur d'un montant telle qu'affichée dans un champ de saisie : virgule
+ * décimale française et deux décimales (« -48,90 »), entier sans décimales
+ * (« 2400 »), sans séparateur de milliers ni symbole pour rester simple à
+ * retoucher. Vide si aucun montant.
+ */
+export function formatAmountForInput(value) {
+  if (value === null || value === undefined || value === '') return ''
+  const number = Number(value)
+  if (!Number.isFinite(number)) return ''
+  return Number.isInteger(number) ? String(number) : number.toFixed(2).replace('.', ',')
+}
+
+/**
+ * Nombre suivi de son libellé accordé (règle française : pluriel au-delà de 1) :
+ * pluralize(3, 'transaction validée', 'transactions validées') → « 3 transactions validées »,
+ * plutôt qu'un « transaction(s) validée(s) » à lire en deux fois.
+ */
+export function pluralize(count, singular, pluralForm) {
+  return `${count} ${Math.abs(Number(count)) >= 2 ? pluralForm : singular}`
+}

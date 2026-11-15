@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatAmount, formatDate, displayMemo, formatRate, toLocalIsoDate } from './format'
+import { formatAmount, formatDate, displayMemo, formatRate, toLocalIsoDate, formatFrequency, formatAmountForInput, pluralize } from './format'
 
 describe('toLocalIsoDate', () => {
   it('formate une date locale en AAAA-MM-JJ avec zeros de tete', () => {
@@ -83,5 +83,56 @@ describe('displayMemo', () => {
     expect(displayMemo('(NULL)')).toBe('')
     expect(displayMemo('(null)')).toBe('')
     expect(displayMemo('  (NULL)  ')).toBe('')
+  })
+})
+
+describe('formatFrequency', () => {
+  it('reconnaît les rythmes usuels malgré de petits écarts', () => {
+    expect(formatFrequency(31)).toBe('mensuel')
+    expect(formatFrequency(29)).toBe('mensuel')
+    expect(formatFrequency(7)).toBe('hebdomadaire')
+    expect(formatFrequency(92)).toBe('trimestriel')
+    expect(formatFrequency(366)).toBe('annuel')
+  })
+
+  it('garde la durée brute pour un rythme inhabituel', () => {
+    expect(formatFrequency(45)).toBe('tous les ~45 jours')
+    expect(formatFrequency(10.4)).toBe('tous les ~10 jours')
+  })
+
+  it('ne renvoie rien pour une valeur absente ou invalide', () => {
+    expect(formatFrequency(null)).toBe('')
+    expect(formatFrequency(0)).toBe('')
+    expect(formatFrequency('abc')).toBe('')
+  })
+})
+
+describe('formatAmountForInput', () => {
+  it('affiche deux décimales avec une virgule', () => {
+    expect(formatAmountForInput(-48.9)).toBe('-48,90')
+    expect(formatAmountForInput(0.5)).toBe('0,50')
+    expect(formatAmountForInput(1234.567)).toBe('1234,57')
+  })
+
+  it('garde un entier sans décimales', () => {
+    expect(formatAmountForInput(2400)).toBe('2400')
+    expect(formatAmountForInput(0)).toBe('0')
+  })
+
+  it('renvoie une chaîne vide sans montant', () => {
+    expect(formatAmountForInput(null)).toBe('')
+    expect(formatAmountForInput(undefined)).toBe('')
+    expect(formatAmountForInput(Number.NaN)).toBe('')
+  })
+})
+
+describe('pluralize', () => {
+  it('garde le singulier pour 0 et 1, comme en français', () => {
+    expect(pluralize(0, 'transaction validée', 'transactions validées')).toBe('0 transaction validée')
+    expect(pluralize(1, 'transaction validée', 'transactions validées')).toBe('1 transaction validée')
+  })
+
+  it('accorde au pluriel à partir de 2', () => {
+    expect(pluralize(2, 'doublon supprimé', 'doublons supprimés')).toBe('2 doublons supprimés')
   })
 })

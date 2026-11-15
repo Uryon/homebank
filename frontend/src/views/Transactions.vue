@@ -80,7 +80,7 @@
         <label for="tx-search" title="Tiers, catégorie, mémo ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Entre guillemets (&quot;CAF&quot;), le critère doit correspondre exactement au lieu de simplement le contenir. Ou &gt; / &lt; / = un montant seul.">Rechercher</label>
         <input id="tx-search" v-model="searchQuery" placeholder="Tiers, catégorie, mémo, montant… ex : > 100" style="min-width: 280px;" />
         <div v-if="amountQuery" class="text-hint">
-          {{ amountSearchLoading ? 'Recherche…' : `${filteredTransactions.length} transaction(s) trouvée(s)` }}
+          {{ amountSearchLoading ? 'Recherche…' : pluralize(filteredTransactions.length, 'transaction trouvée', 'transactions trouvées') }}
         </div>
       </div>
     </div>
@@ -192,7 +192,7 @@
 
     <div v-if="filteredTransactions.length" class="scroll-status">
       <span class="text-hint">
-        {{ pagedTransactions.length }} / {{ filteredTransactions.length }} transaction(s) affichée(s)
+        {{ pagedTransactions.length }} / {{ pluralize(filteredTransactions.length, 'transaction affichée', 'transactions affichées') }}
       </span>
       <!-- Sentinelle observée pour charger le lot suivant en approchant du bas (voir loadMoreObserver) : rootMargin la declenche avant d'etre reellement visible, pour un chargement fluide pendant le scroll. -->
       <div v-if="hasMoreToShow" ref="loadMoreSentinel" class="load-more-sentinel">Chargement…</div>
@@ -203,13 +203,14 @@
     </div>
     <SkeletonRows v-else-if="!transactionsLoaded" label="Chargement des transactions…" :columns="['3%', '10%', '10%', '16%', '20%', '18%', '9%']" :rows="10" />
     <div v-else class="empty-state">
-      {{
+      <span>{{
         !accounts.length
           ? "Créez d'abord un compte pour ajouter des transactions."
           : searchQuery.trim()
             ? "Aucune transaction ne correspond à cette recherche."
             : 'Aucune transaction pour ce filtre.'
-      }}
+      }}</span>
+      <button v-if="accounts.length && searchQuery.trim()" type="button" class="btn secondary" @click="searchQuery = ''">Effacer la recherche</button>
     </div>
 
     <!-- Modal : création uniquement -->
@@ -231,13 +232,27 @@
           </div>
 
           <div class="form-field">
-            <label for="new-tx-payee">Tiers (payee)</label>
+            <label for="new-tx-payee">Tiers</label>
             <PayeeAutocomplete id="new-tx-payee" v-model="form.payee" :payees="payees" placeholder="Ex : Supermarché" />
           </div>
 
           <div class="form-field">
-            <label for="new-tx-amount">Montant (négatif = dépense)</label>
-            <AmountInput id="new-tx-amount" v-model="form.amount" :allow-relative="false" />
+            <div class="amount-label-row">
+              <label for="new-tx-amount">Montant</label>
+              <div class="flow-toggle" role="radiogroup" aria-label="Sens de la transaction">
+                <button
+                  v-for="option in FLOW_OPTIONS"
+                  :key="option.value"
+                  type="button"
+                  role="radio"
+                  class="flow-option"
+                  :class="[option.value.toLowerCase(), { active: entryFlow === option.value }]"
+                  :aria-checked="entryFlow === option.value"
+                  @click="setEntryFlow(option.value)"
+                >{{ option.label }}</button>
+              </div>
+            </div>
+            <AmountInput id="new-tx-amount" v-model="form.amount" placeholder="0,00" />
           </div>
 
           <div class="form-field">
@@ -247,7 +262,7 @@
               v-model="form.categoryId"
               :categories="flatCategories"
               :transaction-type="formAmountType"
-              placeholder="Tapez pour rechercher, ou laissez vide"
+              placeholder="Rechercher (facultatif)"
             />
           </div>
 
@@ -289,8 +304,8 @@
 
     <!-- Modal : édition en masse des transactions sélectionnées -->
     <div v-if="showBulkEditModal" class="modal-overlay" @click.self="showBulkEditModal = false">
-      <div v-dialog="() => (showBulkEditModal = false)" class="modal bulk-edit-modal" role="dialog" aria-modal="true">
-        <h2>Modifier {{ selectedIds.size }} transaction(s)</h2>
+      <div v-dialog="() => (showBulkEditModal = false)" class="modal bulk-edit-modal inline-edit-fields" role="dialog" aria-modal="true">
+        <h2>Modifier {{ selectedCountLabel }}</h2>
         <div class="text-hint" style="margin-bottom: 20px;">
           Modifiez uniquement les champs à changer : un champ non touché reste inchangé sur chaque transaction.
         </div>
@@ -310,7 +325,7 @@
                 placeholder="Ne pas modifier"
               />
             </div>
-            <span v-if="bulkForm.categoryTouched" class="bulk-field-check">✓</span>
+            <span v-if="bulkForm.categoryTouched" class="bulk-field-check"><Icon name="check" /></span>
           </div>
 
           <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.payeeTouched }">
@@ -325,7 +340,7 @@
                 placeholder="Ne pas modifier"
               />
             </div>
-            <span v-if="bulkForm.payeeTouched" class="bulk-field-check">✓</span>
+            <span v-if="bulkForm.payeeTouched" class="bulk-field-check"><Icon name="check" /></span>
           </div>
 
           <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.paymentMode !== null }">
@@ -342,7 +357,7 @@
                 <option value="STANDING_ORDER">Virement permanent</option>
               </select>
             </div>
-            <span v-if="bulkForm.paymentMode !== null" class="bulk-field-check">✓</span>
+            <span v-if="bulkForm.paymentMode !== null" class="bulk-field-check"><Icon name="check" /></span>
           </div>
         </div>
 
@@ -358,7 +373,7 @@
                 <option :value="false">Non</option>
               </select>
             </div>
-            <span v-if="bulkForm.periodicExpense !== null" class="bulk-field-check">✓</span>
+            <span v-if="bulkForm.periodicExpense !== null" class="bulk-field-check"><Icon name="check" /></span>
           </div>
 
           <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.exceptional !== null }">
@@ -370,7 +385,7 @@
                 <option :value="false">Non</option>
               </select>
             </div>
-            <span v-if="bulkForm.exceptional !== null" class="bulk-field-check">✓</span>
+            <span v-if="bulkForm.exceptional !== null" class="bulk-field-check"><Icon name="check" /></span>
           </div>
         </div>
 
@@ -386,7 +401,7 @@
                 <option :value="false">En attente</option>
               </select>
             </div>
-            <span v-if="bulkForm.validated !== null" class="bulk-field-check">✓</span>
+            <span v-if="bulkForm.validated !== null" class="bulk-field-check"><Icon name="check" /></span>
           </div>
         </div>
 
@@ -404,7 +419,7 @@
           <div class="bulk-footer-actions">
             <button class="btn secondary" @click="showBulkEditModal = false">Annuler</button>
             <button class="btn" :disabled="!bulkHasAnyFieldEnabled || bulkSaving" @click="saveBulkEdit">
-              {{ bulkSaving ? 'Application…' : `Appliquer à ${selectedIds.size} transaction(s)` }}
+              {{ bulkSaving ? 'Application…' : `Appliquer à ${selectedCountLabel}` }}
             </button>
           </div>
         </div>
@@ -423,7 +438,7 @@
         <div class="form-grid">
           <div class="form-field">
             <label for="split-first-amount">Montant — 1ère partie {{ splitTransaction?.amount < 0 ? '(négatif = dépense)' : '(positif = revenu)' }}</label>
-            <AmountInput id="split-first-amount" v-model="splitForm.firstAmount" :allow-relative="false" />
+            <AmountInput id="split-first-amount" v-model="splitForm.firstAmount" />
           </div>
           <div class="form-field">
             <label for="split-first-category">Catégorie — 1ère partie</label>
@@ -502,7 +517,7 @@ import SkeletonRows from '../components/SkeletonRows.vue'
 import { formatMonthHeading, monthKey, startsNewMonth, summarizeByMonth } from '../services/monthGroups'
 import Icon from '../components/Icon.vue'
 import TransactionsSubNav from './TransactionsSubNav.vue'
-import { formatAmount, formatDate, toLocalIsoDate } from '../services/format'
+import { formatAmount, formatDate, pluralize, toLocalIsoDate } from '../services/format'
 import { findPayeeByName } from '../services/payee'
 import { accountOptionLabel, activeAccounts } from '../services/accounts'
 import { alertApiError, apiErrorMessage } from '../services/errors'
@@ -653,6 +668,7 @@ const editingId = ref(null)
  * reussie la vide.
  */
 const selectedIds = ref(new Set())
+const selectedCountLabel = computed(() => pluralize(selectedIds.value.size, 'transaction', 'transactions'))
 
 /**
  * Derniere transaction cochee (voir toggleSelect) : utilisee pour recentrer
@@ -796,7 +812,7 @@ async function saveBulkEdit() {
     showBulkEditModal.value = false
     clearSelection()
     await load()
-    setLastAction(`Modification de ${previousSnapshots.length} transaction(s)`, async () => {
+    setLastAction(`Modification de ${pluralize(previousSnapshots.length, 'transaction', 'transactions')}`, async () => {
       await Promise.all(previousSnapshots.map(({ id, before }) =>
         TransactionsAPI.bulkUpdate(bulkUpdatePayload([id], touchedFields, before))
       ))
@@ -814,7 +830,8 @@ function emptyForm() {
     accountId: null,
     date: toLocalIsoDate(),
     payee: '',
-    amount: 0,
+    // Vide plutôt que 0 : on tape directement le montant, sans effacer un zéro.
+    amount: null,
     categoryId: null,
     paymentMode: 'NONE',
     memo: '',
@@ -1077,12 +1094,32 @@ watch([amountQuery, filterAccount], ([query, accountId]) => {
   }, 250)
 })
 
-// Meme logique que TransactionRow.vue : ne proposer dans CategoryAutocomplete
-// que des categories du type correspondant au signe du montant saisi.
-const formAmountType = computed(() => {
-  const amount = form.value.amount
-  if (amount == null || amount === 0 || amount === '') return null
-  return amount < 0 ? 'EXPENSE' : 'INCOME'
+/**
+ * Sens de la transaction en création (Dépense par défaut, le cas courant) :
+ * le montant se tape sans signe et prend celui du sens choisi. Un montant
+ * tapé négatif bascule sur Dépense. CategoryAutocomplete ne propose que les
+ * catégories de ce sens, comme TransactionRow.vue le fait d'après le signe.
+ */
+const FLOW_OPTIONS = [
+  { value: 'EXPENSE', label: 'Dépense' },
+  { value: 'INCOME', label: 'Revenu' }
+]
+const entryFlow = ref('EXPENSE')
+const formAmountType = computed(() => entryFlow.value)
+
+function signedForFlow(amount, flow) {
+  if (!amount) return amount
+  return flow === 'EXPENSE' ? -Math.abs(amount) : Math.abs(amount)
+}
+
+function setEntryFlow(flow) {
+  entryFlow.value = flow
+  form.value.amount = signedForFlow(form.value.amount, flow)
+}
+
+watch(() => form.value.amount, (amount) => {
+  if (amount < 0) entryFlow.value = 'EXPENSE'
+  else if (amount > 0 && entryFlow.value === 'EXPENSE') form.value.amount = -amount
 })
 
 // Index Map (id -> objet) pour accounts/categories, precalcules une seule
@@ -1163,6 +1200,7 @@ watch(() => form.value.payee, applyDefaultCategoryFromPayee)
 
 function openCreate() {
   form.value = emptyForm()
+  entryFlow.value = 'EXPENSE'
   if (entryAccounts.value.length) form.value.accountId = entryAccounts.value[0].id
   showModal.value = true
 }
@@ -1170,6 +1208,10 @@ function openCreate() {
 async function save() {
   if (!form.value.accountId) {
     notify('Veuillez sélectionner un compte.', 'warning')
+    return
+  }
+  if (form.value.amount == null) {
+    notify('Veuillez saisir un montant.', 'warning')
     return
   }
 
@@ -1371,7 +1413,7 @@ function toggleValidated(transaction) {
  */
 async function validateAll() {
   if (pendingCount.value === 0) return
-  if (!(await askConfirm(`Valider les ${pendingCount.value} transaction(s) en attente ?`))) return
+  if (!(await askConfirm(`Valider ${pendingCount.value === 1 ? 'la transaction' : `les ${pendingCount.value} transactions`} en attente ?`))) return
   validating.value = true
   // Valide TOUTES les transactions en attente cote backend (pas seulement
   // celles du compte/filtre courant, voir ServiceTransaction#validateAllPending)
@@ -1382,8 +1424,8 @@ async function validateAll() {
   try {
     await TransactionsAPI.validateAll()
     await load()
-    notify(`${pendingIds.length} transaction(s) validée(s).`, 'success')
-    setLastAction(`Validation de ${pendingIds.length} transaction(s)`, async () => {
+    notify(`${pluralize(pendingIds.length, 'transaction validée', 'transactions validées')}.`, 'success')
+    setLastAction(`Validation de ${pluralize(pendingIds.length, 'transaction', 'transactions')}`, async () => {
       // Remise explicite « en attente » (et non une bascule par transaction) :
       // basculer un côté de virement bascule aussi sa jumelle, si bien que
       // deux bascules successives (une par côté, tous deux en attente)
@@ -1403,7 +1445,7 @@ const deletingPending = ref(false)
 /** Supprime d'un coup toutes les transactions en attente de validation, sans passer par la selection manuelle. */
 async function deletePending() {
   if (pendingCount.value === 0) return
-  if (!(await askConfirm(`Supprimer définitivement les ${pendingCount.value} transaction(s) non validée(s) ?`))) return
+  if (!(await askConfirm(`Supprimer définitivement ${pendingCount.value === 1 ? 'la transaction non validée' : `les ${pendingCount.value} transactions non validées`} ?`))) return
   deletingPending.value = true
   // Supprime TOUTES les transactions en attente cote backend (voir
   // ServiceTransaction#deleteAllPending, pas filtre par compte) : meme
@@ -1421,7 +1463,7 @@ async function deletePending() {
     const stillPresentIds = new Set(dataStore.state.transactions.map(t => t.id))
     const restoreActions = candidateActions.filter(a => !a.ids.some(id => stillPresentIds.has(id)))
     const actuallyDeletedCount = pendingTransactions.filter(t => !stillPresentIds.has(t.id)).length
-    setLastAction(`Suppression de ${actuallyDeletedCount} transaction(s)`, async () => {
+    setLastAction(`Suppression de ${pluralize(actuallyDeletedCount, 'transaction', 'transactions')}`, async () => {
       await restoreAll(restoreActions)
       await load()
     })
@@ -1437,17 +1479,17 @@ const deletingSelection = ref(false)
 /** Supprime d'un coup toutes les transactions actuellement cochees (voir selectedIds). */
 async function deleteSelected() {
   if (!selectedIds.value.size) return
-  if (!(await askConfirm(`Supprimer définitivement les ${selectedIds.value.size} transaction(s) sélectionnée(s) ?`))) return
+  if (!(await askConfirm(`Supprimer définitivement ${selectedIds.value.size === 1 ? 'la transaction sélectionnée' : `les ${selectedIds.value.size} transactions sélectionnées`} ?`))) return
   deletingSelection.value = true
   const ids = Array.from(selectedIds.value)
   const selectedTransactions = selectedTransactionsSnapshot()
   const restoreActions = buildRestoreActions(selectedTransactions)
   try {
     await TransactionsAPI.removeBulk(ids)
-    notify(`${selectedTransactions.length} transaction(s) supprimée(s).`, 'success')
+    notify(`${pluralize(selectedTransactions.length, 'transaction supprimée', 'transactions supprimées')}.`, 'success')
     clearSelection()
     await load()
-    setLastAction(`Suppression de ${selectedTransactions.length} transaction(s)`, async () => {
+    setLastAction(`Suppression de ${pluralize(selectedTransactions.length, 'transaction', 'transactions')}`, async () => {
       await restoreAll(restoreActions)
       await load()
     })
@@ -1515,9 +1557,48 @@ function applyRouteQuery(query) {
 watch(() => route.query, (query) => {
   if (dataStore.state.loaded.transactions) applyRouteQuery(query)
 })
+
+// ?search= ne sert qu'à pré-remplir : dès que la recherche est modifiée ou
+// effacée, on le retire de l'URL pour qu'un rechargement ne la remette pas.
+watch(searchQuery, (query) => {
+  if (route.query.search === undefined || query === route.query.search) return
+  const rest = { ...route.query }
+  delete rest.search
+  router.replace({ query: rest })
+})
 </script>
 
 <style scoped>
+/* Fenêtre « Nouvelle transaction » : bascule Dépense / Revenu sur la ligne
+   du libellé, pour laisser toute la largeur au champ montant. */
+.amount-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* Marges négatives : la bascule (22 px) ne doit pas rendre cette ligne plus
+   haute qu'un libellé simple, sinon le champ Montant se décale de celui de
+   la colonne voisine (Tiers). */
+.flow-toggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-block: -2px;
+  padding: 1px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--ink-800);
+}
+.flow-option {
+  padding: 1px 9px;
+  line-height: 16px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.flow-option:hover:not(.active) { color: var(--text-primary); }
+.flow-option.expense.active { background: var(--coral-dim); color: var(--coral); }
+.flow-option.income.active { background: var(--mint-dim); color: var(--mint); }
 /*
  * Bandeau d'annulation de la derniere action (voir setLastAction/runLastAction) :
  * position fixe en bas de l'ecran pour rester visible quel que soit le
@@ -1573,13 +1654,20 @@ watch(() => route.query, (query) => {
 /* Tiers et Catégorie sont les colonnes qu'on lit : elles prennent la place
    gagnée sur les cases à cocher (en-têtes en icônes) et sur le compte. */
 .col-select { width: 36px; }
-.col-date { width: 110px; }
+/* Assez large pour la date suivie du badge « Prévu » (transactions futures). */
+.col-date { width: 146px; }
 .col-status { width: 40px; }
 .col-account { width: 84px; }
 .col-payee { width: 200px; }
 /* La catégorie prend toute la place restante ; le mémo, peu rempli, reste étroit. */
 .col-category { width: auto; }
 .col-memo { width: 56px; }
+/* Sur grand écran, la catégorie a largement de quoi s'afficher : le mémo et
+   le compte récupèrent de la place pour être lisibles sans troncature. */
+@media (min-width: 1700px) {
+  .col-memo { width: 200px; }
+  .col-account { width: 150px; }
+}
 /* Assez large pour « -100 000,00 € » : jamais de troncature sur un montant. */
 .col-amount { width: 104px; }
 .col-monthly { width: 46px; }
@@ -1813,6 +1901,10 @@ watch(() => route.query, (query) => {
   flex: 1;
   min-width: 0;
 }
+/* Listes déroulantes alignées sur la largeur des champs texte de la modale. */
+.bulk-field-control select {
+  width: 100%;
+}
 .bulk-field-check {
   display: flex;
   align-items: center;
@@ -1823,9 +1915,8 @@ watch(() => route.query, (query) => {
   border-radius: 50%;
   background: var(--azure);
   color: var(--on-accent);
-  font-size: 11px;
-  font-weight: 700;
 }
+.bulk-field-check .icon { width: 12px; height: 12px; stroke-width: 2.6; }
 
 .bulk-footer {
   display: flex;
@@ -1981,13 +2072,13 @@ watch(() => route.query, (query) => {
 .transactions-page .transactions-table thead th {
   height: 43px;
   padding: 10px 8px;
-  background: var(--surface-sunken);
-  color: var(--text-muted);
+  background: var(--table-head-bg);
+  color: var(--table-head-text);
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: .055em;
   text-transform: none;
-  border-bottom: 1px solid var(--line-strong);
+  border-bottom: 1px solid var(--table-head-border);
 }
 
 .transactions-page .transactions-table tbody td {

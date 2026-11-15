@@ -6,8 +6,8 @@
     <circle cx="12" cy="21.5" r="4.4" fill="none" stroke="var(--sidebar-bg)" stroke-width="0.9" opacity="0.55" />
     <defs>
       <linearGradient id="appLogoGradient" x1="5" y1="6" x2="27" y2="29" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#F0AE6E" />
-        <stop offset="1" stop-color="#B0602A" />
+        <stop offset="0" stop-color="#FFE38A" />
+        <stop offset="1" stop-color="#C8921A" />
       </linearGradient>
     </defs>
   </svg>
@@ -16,12 +16,12 @@
 <script setup>
 /**
  * Logomark de l'application : une pile de trois pieces de monnaie en
- * diagonale (degrade cuivre), la plus proche avec sa tranche marquee
+ * diagonale (degrade or), la plus proche avec sa tranche marquee
  * (double cercle) — evoque l'epargne qui s'accumule plutot qu'une piece ou
  * une maison isolee (essais precedents). Pas de badge carre autour : la
- * pile flotte directement sur le fond de la sidebar. Couleurs cuivre
- * dediees a ce logo (pas de var() de la palette existante) : aucun accent
- * "cuivre" n'existait avant, choisi specifiquement pour ce logo.
+ * pile flotte directement sur le fond de la sidebar. Couleurs en dur (pas de
+ * var()) : les stops d'un degrade SVG ne lisent pas les variables CSS de
+ * maniere fiable ; l'or ressort sur le bleu de la sidebar (theme Abysse).
  */
 </script>
 

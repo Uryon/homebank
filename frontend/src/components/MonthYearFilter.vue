@@ -1,7 +1,7 @@
 <template>
   <div class="myf" ref="rootEl">
-    <button type="button" class="myf-trigger" :class="{ active: month != null || year != null }" @click="toggleOpen">
-      <span class="myf-icon">📅</span>
+    <button ref="triggerEl" type="button" class="myf-trigger" :aria-expanded="open" :class="{ active: month != null || year != null }" @click="toggleOpen">
+      <Icon name="calendar" size="sm" class="myf-icon" />
       <span>{{ triggerLabel }}</span>
     </button>
 
@@ -17,6 +17,7 @@
         <button
           type="button"
           class="myf-year-btn"
+          :class="{ active: year === viewYear && month == null }"
           title="Filtrer sur toute l'année"
           @click="selectYearOnly"
         >{{ viewYear }}</button>
@@ -35,7 +36,8 @@
           :key="m.value"
           type="button"
           class="myf-month-btn"
-          :class="{ active: month === m.value && year === viewYear }"
+          :class="{ active: month === m.value && year === viewYear, current: isCurrentMonth(m.value) }"
+          :title="isCurrentMonth(m.value) ? 'Mois en cours' : undefined"
           @click="selectMonth(m.value)"
         >{{ m.short }}</button>
       </div>
@@ -61,6 +63,7 @@
  * naturelle dans un calendrier mois/année.
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import Icon from './Icon.vue'
 
 const props = defineProps({
   month: { type: Number, default: null },
@@ -90,9 +93,17 @@ const MONTHS = [
 const monthLabelByValue = new Map(MONTHS.map(m => [m.value, m.label]))
 
 const rootEl = ref(null)
+const triggerEl = ref(null)
 const open = ref(false)
 
-const currentCalendarYear = new Date().getFullYear()
+const today = new Date()
+const currentCalendarYear = today.getFullYear()
+const currentCalendarMonth = today.getMonth() + 1
+
+/** Repère visuel du mois en cours dans la grille, pour s'orienter d'un coup d'œil. */
+function isCurrentMonth(m) {
+  return viewYear.value === currentCalendarYear && m === currentCalendarMonth
+}
 const sortedYears = computed(() => [...props.availableYears].sort((a, b) => a - b))
 const minYear = computed(() => sortedYears.value.length ? sortedYears.value[0] : currentCalendarYear)
 const maxYear = computed(() => sortedYears.value.length ? sortedYears.value[sortedYears.value.length - 1] : currentCalendarYear)
@@ -139,14 +150,30 @@ function reset() {
   open.value = false
 }
 
+/** Échap ferme le panneau, comme les autres fenêtres de l'appli, et rend le focus au bouton. */
+function closeAndRefocus() {
+  open.value = false
+  triggerEl.value?.focus()
+}
+
+function handleDocumentKeydown(event) {
+  if (open.value && event.key === 'Escape') closeAndRefocus()
+}
+
 function handleDocumentMousedown(event) {
   if (open.value && rootEl.value && !rootEl.value.contains(event.target)) {
     open.value = false
   }
 }
 
-onMounted(() => document.addEventListener('mousedown', handleDocumentMousedown))
-onBeforeUnmount(() => document.removeEventListener('mousedown', handleDocumentMousedown))
+onMounted(() => {
+  document.addEventListener('mousedown', handleDocumentMousedown)
+  document.addEventListener('keydown', handleDocumentKeydown)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', handleDocumentMousedown)
+  document.removeEventListener('keydown', handleDocumentKeydown)
+})
 </script>
 
 <style scoped>
@@ -180,8 +207,11 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleDocumentMo
   background: var(--azure-dim);
 }
 .myf-icon {
-  font-size: 13px;
-  line-height: 1;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.myf-trigger.active .myf-icon {
+  color: inherit;
 }
 
 .myf-panel {
@@ -238,6 +268,10 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleDocumentMo
   background: var(--azure-dim);
   color: var(--azure);
 }
+.myf-year-btn.active {
+  background: var(--azure);
+  color: var(--on-accent);
+}
 
 .myf-months {
   display: grid;
@@ -258,6 +292,10 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', handleDocumentMo
 }
 .myf-month-btn:hover {
   background: var(--azure-dim);
+  color: var(--azure);
+}
+.myf-month-btn.current:not(.active) {
+  border-color: var(--azure);
   color: var(--azure);
 }
 .myf-month-btn.active {

@@ -1,4 +1,5 @@
 import { normalizeSearch } from './search'
+import { flattenCategories } from './categories'
 
 /**
  * Logique de la palette de commandes (Ctrl+K), séparée du composant pour
@@ -48,6 +49,28 @@ export function indexPayees(payees) {
 }
 
 /**
+ * Index des catégories visibles : chacune ouvre ses transactions via la
+ * recherche de la page Transactions, qui compare le libellé « Parent : Enfant »
+ * de flattenCategories. Une catégorie assignable est cherchée à l'identique
+ * (entre guillemets) ; une racine à sous-catégories ne porte elle-même aucune
+ * transaction, on cherche donc le préfixe « Racine : » commun à ses enfants.
+ */
+export function indexCategories(categories) {
+  const byId = new Map(categories.map(c => [c.id, c]))
+  return flattenCategories(categories)
+    .filter(entry => !entry.hidden)
+    .map(entry => {
+      const category = byId.get(entry.id)
+      const parent = category.parentId ? byId.get(category.parentId) : null
+      const search = entry.selectable ? `"${entry.label}"` : `${entry.label} :`
+      return {
+        command: { id: `category-${entry.id}`, group: 'Catégories', label: entry.label, icon: 'categories', to: { path: '/transactions', query: { search } } },
+        haystack: normalizeSearch(parent ? `${parent.name} ${category.name}` : category.name)
+      }
+    })
+}
+
+/**
  * Filtre un index : tous les mots saisis doivent apparaître (ordre libre).
  * Les libellés qui commencent par la saisie passent devant.
  */
@@ -58,6 +81,46 @@ export function filterIndex(index, query, limit) {
   const startsWith = matches.filter(entry => entry.haystack.startsWith(words[0]))
   const others = matches.filter(entry => !entry.haystack.startsWith(words[0]))
   return [...startsWith, ...others].slice(0, limit).map(entry => entry.command)
+}
+
+/**
+ * Découpe un libellé en segments pour surligner les mots saisis :
+ * [{ text, match }]. Insensible à la casse et aux accents, comme le filtrage
+ * (« energie » surligne « Énergie »). Toutes les occurrences de chaque mot
+ * sont surlignées ; les plages qui se chevauchent sont fusionnées.
+ */
+export function highlightSegments(label, query) {
+  const words = normalizeSearch(query).split(/\s+/).filter(Boolean)
+  if (!label || !words.length) return [{ text: label || '', match: false }]
+
+  // Version normalisée du libellé + position d'origine de chaque caractère
+  // normalisé (un caractère d'origine peut en produire plusieurs).
+  let normalized = ''
+  const origins = []
+  for (let i = 0; i < label.length; i++) {
+    const part = normalizeSearch(label[i]) || (label[i].trim() ? '' : ' ')
+    for (const ch of part) {
+      normalized += ch
+      origins.push(i)
+    }
+  }
+
+  const marked = new Array(label.length).fill(false)
+  for (const word of words) {
+    let from = normalized.indexOf(word)
+    while (from !== -1) {
+      for (let k = from; k < from + word.length; k++) marked[origins[k]] = true
+      from = normalized.indexOf(word, from + word.length)
+    }
+  }
+
+  const segments = []
+  for (let i = 0; i < label.length; i++) {
+    const last = segments[segments.length - 1]
+    if (last && last.match === marked[i]) last.text += label[i]
+    else segments.push({ text: label[i], match: marked[i] })
+  }
+  return segments
 }
 
 /** Commande « Rechercher dans les transactions » proposée dès qu'un texte est saisi. */
@@ -74,10 +137,11 @@ export function searchTransactionsCommand(query) {
 }
 
 /** Résultats complets de la palette, dans l'ordre d'affichage. */
-export function buildResults({ staticIndex, payeeIndex, query }) {
+export function buildResults({ staticIndex, payeeIndex, categoryIndex = [], query }) {
   const hasQuery = query.trim().length > 0
   const results = [
     ...filterIndex(staticIndex, query, hasQuery ? 6 : staticIndex.length),
+    ...(hasQuery ? filterIndex(categoryIndex, query, 5) : []),
     ...(hasQuery ? filterIndex(payeeIndex, query, 6) : [])
   ]
   const search = searchTransactionsCommand(query)

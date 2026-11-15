@@ -30,7 +30,8 @@ const CSS_VARIABLES = {
   tooltipBg: '--chart-tooltip-bg'
 }
 
-const CHART_FONT_FAMILY = 'Inter, sans-serif'
+/** Même police que l'interface (--font-ui) : Chart.js dessine sur canvas, sans héritage CSS. */
+export const CHART_FONT_FAMILY = 'Inter, sans-serif'
 
 /** Couleurs du thème courant ; valeurs du thème clair si une variable manque (tests, CSS non chargé). */
 export function readChartColors(root = globalThis.document?.documentElement) {
@@ -59,6 +60,22 @@ export function areaGradient(color, topAlpha) {
     const gradient = ctx.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom)
     gradient.addColorStop(0, withAlpha(color, topAlpha))
     gradient.addColorStop(1, withAlpha(color, 0))
+    return gradient
+  }
+}
+
+/**
+ * Remplissage vertical des barres : couleur pleine en haut de la zone de
+ * dessin, plus légère vers le bas. Couleur unie tant que Chart.js n'a pas
+ * encore calculé la zone de dessin (premier rendu).
+ */
+export function barGradient(color, topAlpha = 1, bottomAlpha = 0.55) {
+  return (ctx) => {
+    const area = ctx.chart.chartArea
+    if (!area) return withAlpha(color, topAlpha)
+    const gradient = ctx.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom)
+    gradient.addColorStop(0, withAlpha(color, topAlpha))
+    gradient.addColorStop(1, withAlpha(color, bottomAlpha))
     return gradient
   }
 }
