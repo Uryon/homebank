@@ -134,56 +134,13 @@
     />
 
     <!-- Modal : virement entre comptes -->
-    <div v-if="showTransferModal" class="modal-overlay" @click.self="showTransferModal = false">
-      <div v-dialog="() => (showTransferModal = false)" class="modal" role="dialog" aria-modal="true">
-        <h2>Transfert entre comptes</h2>
-        <p class="modal-intro">
-          Débite le compte source et crédite le compte destination du même montant.
-          Ce mouvement n'est jamais compté comme une dépense ou un revenu dans les rapports.
-        </p>
-        <div class="form-grid">
-          <div class="form-field">
-            <label for="transfer-from">Compte source</label>
-            <select id="transfer-from" v-model.number="transferForm.fromAccountId" @change="clear('toAccount')">
-              <option v-for="a in transferOptions" :key="a.id" :value="a.id">{{ a.label }}</option>
-            </select>
-          </div>
-          <div class="form-field">
-            <label for="transfer-to">Compte destination</label>
-            <select id="transfer-to" v-model.number="transferForm.toAccountId" v-bind="invalidAttrs('toAccount')" @change="clear('toAccount')">
-              <option
-                v-for="a in transferOptions"
-                :key="a.id"
-                :value="a.id"
-                :disabled="a.id === transferForm.fromAccountId"
-              >
-                {{ a.label }}
-              </option>
-            </select>
-            <FieldError id="transfer-to-error" :message="errors.toAccount" />
-          </div>
-          <div class="form-field">
-            <label for="transfer-amount">Montant</label>
-            <AmountInput id="transfer-amount" v-model="transferForm.amount" placeholder="0,00" v-bind="invalidAttrs('amount')" @input="clear('amount')" />
-            <FieldError id="transfer-amount-error" :message="errors.amount" />
-          </div>
-          <div class="form-field">
-            <label for="transfer-date">Date</label>
-            <input id="transfer-date" v-model="transferForm.date" type="date" :min="MIN_DATE" :max="MAX_DATE" />
-          </div>
-          <div class="form-field span-2">
-            <label for="transfer-memo">Mémo (facultatif)</label>
-            <input id="transfer-memo" v-model="transferForm.memo" maxlength="255" placeholder="Ex : Épargne du mois" />
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button class="btn secondary" @click="showTransferModal = false">Annuler</button>
-          <button class="btn" :disabled="transferring" @click="submitTransfer">
-            {{ transferring ? 'Transfert en cours…' : 'Confirmer le transfert' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <TransferModal
+      v-if="showTransferModal"
+      :accounts="transferableAccounts"
+      :balances="balances"
+      @close="showTransferModal = false"
+      @saved="onTransferred"
+    />
 
     <UndoBar :action="lastAction" :undoing="undoing" @undo="runLastAction" />
   </div>
@@ -194,15 +151,13 @@ import { notify, askConfirm } from '../services/feedback'
 import { ref, computed, onMounted } from 'vue'
 import { useRouteActions } from '../services/routeActions'
 import { AccountsAPI, TransactionsAPI } from '../services/api'
-import { MAX_DATE, MIN_DATE, formatAmount, toLocalIsoDate } from '../services/format'
+import { formatAmount } from '../services/format'
 import { dataStore } from '../services/dataStore'
 import { alertApiError } from '../services/errors'
-import AmountInput from '../components/AmountInput.vue'
-import FieldError from '../components/FieldError.vue'
-import { useFieldErrors } from '../services/fieldErrors'
 import AccountModal from '../components/AccountModal.vue'
 import ReconciliationModal from '../components/ReconciliationModal.vue'
 import BalanceAdjustmentModal from '../components/BalanceAdjustmentModal.vue'
+import TransferModal from '../components/TransferModal.vue'
 import Icon from '../components/Icon.vue'
 import Money from '../components/Money.vue'
 import UndoBar from '../components/UndoBar.vue'
@@ -229,18 +184,6 @@ const showModal = ref(false)
 const editing = ref(null)
 
 const showTransferModal = ref(false)
-const transferring = ref(false)
-const transferForm = ref(emptyTransferForm())
-
-function emptyTransferForm() {
-  return {
-    fromAccountId: null,
-    toAccountId: null,
-    amount: null, // vide plutôt que 0 : on tape directement le montant
-    date: toLocalIsoDate(),
-    memo: ''
-  }
-}
 
 /** Comptes courants en tête de liste, comptes archivés en fin, le reste dans l'ordre reçu de l'API. */
 const accountRows = computed(() => accountBalanceRows(sortAccountsForDisplay(accounts.value), balances.value))
@@ -248,11 +191,6 @@ const accountsCountLabel = computed(() => accountCountLabel(accounts.value.lengt
 
 /** Seuls les comptes non archivés peuvent recevoir un virement (voir ServiceCompte#ensureNotArchived). */
 const transferableAccounts = computed(() => activeAccounts(accounts.value))
-/** Comptes du transfert avec leur solde, pour choisir sans repasser par le tableau. */
-const transferOptions = computed(() => transferableAccounts.value.map(a => ({
-  id: a.id,
-  label: `${a.name} — ${formatAmount(Number(balances.value[a.id] ?? 0), a.currency)}`
-})))
 
 const netWorth = computed(() => computeNetWorth(accounts.value, balances.value))
 const netWorthClass = computed(() => amountToneClass(netWorth.value))
@@ -397,59 +335,23 @@ async function remove(account) {
   }
 }
 
-/* --- Virement entre comptes --- */
-
-const { errors, check, clear, invalidAttrs } = useFieldErrors({ toAccount: 'transfer-to', amount: 'transfer-amount' })
-
-/** Erreur du compte destination (sélection manquante, ou identique au compte source), vide si valide. */
-function transferAccountsError(f) {
-  if (!f.fromAccountId || !f.toAccountId) return 'Choisissez les deux comptes.'
-  if (f.fromAccountId === f.toAccountId) return 'Choisissez un compte différent du compte source.'
-  return ''
-}
+/* --- Virement entre comptes (saisie : TransferModal.vue) --- */
 
 function openTransfer() {
-  clear()
-  transferForm.value = emptyTransferForm()
-  const candidates = transferableAccounts.value
-  if (candidates.length >= 2) {
-    transferForm.value.fromAccountId = candidates[0].id
-    transferForm.value.toAccountId = candidates[1].id
-  }
   showTransferModal.value = true
 }
 
-async function submitTransfer() {
-  const f = transferForm.value
-  const valid = check({
-    toAccount: transferAccountsError(f),
-    amount: f.amount > 0 ? '' : 'Saisissez un montant positif.'
-  })
-  if (!valid) return
-  transferring.value = true
-  try {
-    const [debit] = await TransactionsAPI.transfer({
-      fromAccountId: f.fromAccountId,
-      toAccountId: f.toAccountId,
-      amount: f.amount,
-      date: f.date,
-      memo: f.memo
-    })
-    showTransferModal.value = false
-    // Un virement crée deux transactions : rafraîchit aussi la liste des
-    // transactions du cache partagé, pas seulement les soldes.
+async function onTransferred(debit) {
+  showTransferModal.value = false
+  // Un virement crée deux transactions : rafraîchit aussi la liste des
+  // transactions du cache partagé, pas seulement les soldes.
+  await dataStore.refreshTransactions()
+  notify('Virement effectué.', 'success')
+  // Supprimer un côté du virement supprime aussi sa jumelle (voir ServiceSuppressionTransaction#undoCreation).
+  setLastAction('Virement effectué', async () => {
+    await TransactionsAPI.undoCreation([debit.id])
     await dataStore.refreshTransactions()
-    notify('Virement effectué.', 'success')
-    // Supprimer un côté du virement supprime aussi sa jumelle (voir ServiceTransaction#undoCreation).
-    setLastAction('Virement effectué', async () => {
-      await TransactionsAPI.undoCreation([debit.id])
-      await dataStore.refreshTransactions()
-    })
-  } catch (e) {
-    alertApiError('Erreur lors du transfert', e)
-  } finally {
-    transferring.value = false
-  }
+  })
 }
 
 onMounted(() => {

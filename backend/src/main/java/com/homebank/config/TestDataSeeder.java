@@ -21,7 +21,7 @@ import java.time.ZoneId;
  * Spring "test" est actif (voir application-test.properties, base H2 en
  * memoire). N'a strictement aucun effet sur la base PostgreSQL "reelle"
  * utilisee par le jar en fonctionnement normal.
- *
+ * <p>
  * Lancement depuis IntelliJ : Run > Edit Configurations > selectionner (ou
  * creer) la configuration de l'application Spring Boot > champ
  * "Active profiles" = test. Ou en ligne de commande :
@@ -30,6 +30,12 @@ import java.time.ZoneId;
 @Component
 @Profile("test")
 public class TestDataSeeder implements CommandLineRunner {
+
+    // Tiers de demonstration cites plusieurs fois (regles de reconnaissance, transactions).
+    private static final String TIERS_EMPLOYEUR = "Employeur";
+    private static final String TIERS_BISTROT = "Le Bistrot";
+    private static final String TIERS_BAILLEUR = "Bailleur";
+    private static final String TIERS_PHARMACIE = "Pharmacie";
 
     private static final Logger log = LoggerFactory.getLogger(TestDataSeeder.class);
     private static final String CARREFOUR = "Carrefour";
@@ -96,10 +102,10 @@ public class TestDataSeeder implements CommandLineRunner {
 
         // --- Tiers (auto-catégorisation) ---
         payee(CARREFOUR, CARREFOUR, null, supermarche);
-        payee("Employeur", "Employeur;Virement salaire", null, salaire);
-        payee("Bailleur", "Bailleur;Loyer", null, loyer);
+        payee(TIERS_EMPLOYEUR, "Employeur;Virement salaire", null, salaire);
+        payee(TIERS_BAILLEUR, "Bailleur;Loyer", null, loyer);
         payee(NETFLIX, NETFLIX, new BigDecimal("15.00"), abonnements);
-        payee("Pharmacie", "Pharmacie", null, sante);
+        payee(TIERS_PHARMACIE, TIERS_PHARMACIE, null, sante);
 
         // --- Transactions : 4 derniers mois, revenus + depenses variees ---
         LocalDate today = LocalDate.now(ZoneId.systemDefault());
@@ -112,11 +118,11 @@ public class TestDataSeeder implements CommandLineRunner {
             // voir Transaction#isInternalTransfer) sont exclus des rapports, pas le
             // mode de paiement « Virement » en lui-meme.
             transaction(new TransactionCore(courant, monthStart.withDayOfMonth(28), new BigDecimal("2400.00")),
-                    "Employeur", "Virement salaire", salaire, ModePaiement.STANDING_ORDER, true, false);
+                    TIERS_EMPLOYEUR, "Virement salaire", salaire, ModePaiement.STANDING_ORDER, true, false);
 
             // Loyer, prelevement du 3
             transaction(new TransactionCore(courant, monthStart.plusDays(2), new BigDecimal("-850.00")),
-                    "Bailleur", "Loyer mensuel", loyer, ModePaiement.DIRECT_DEBIT, true, true);
+                    TIERS_BAILLEUR, "Loyer mensuel", loyer, ModePaiement.DIRECT_DEBIT, true, true);
 
             // Courses, plusieurs fois dans le mois
             transaction(new TransactionCore(courant, monthStart.plusDays(5), new BigDecimal("-64.30")),
@@ -128,7 +134,7 @@ public class TestDataSeeder implements CommandLineRunner {
 
             // Restaurant, occasionnel
             transaction(new TransactionCore(courant, monthStart.plusDays(9), new BigDecimal("-38.50")),
-                    "Le Bistrot", "Déjeuner", restaurant, ModePaiement.CARD, true, false);
+                    TIERS_BISTROT, "Déjeuner", restaurant, ModePaiement.CARD, true, false);
 
             // Netflix, abonnement mensuel recurrent
             transaction(new TransactionCore(carte, monthStart.plusDays(1), new BigDecimal("-15.00")),
@@ -207,9 +213,9 @@ public class TestDataSeeder implements CommandLineRunner {
 
         // --- Doublon volontaire (import CSV importe deux fois par erreur), pour demo de l'onglet "Doublons" ---
         transaction(new TransactionCore(courant, today.minusDays(12), new BigDecimal("-18.40")),
-                "Pharmacie", "Ordonnance", sante, ModePaiement.CARD, false, false);
+                TIERS_PHARMACIE, "Ordonnance", sante, ModePaiement.CARD, false, false);
         transaction(new TransactionCore(courant, today.minusDays(12), new BigDecimal("-18.40")),
-                "Pharmacie", "Ordonnance", sante, ModePaiement.CARD, false, false);
+                TIERS_PHARMACIE, "Ordonnance", sante, ModePaiement.CARD, false, false);
 
         // --- Date du "dernier import" (voir ServiceDernierImport), affichee dans l'export PDF du tableau de bord ---
         DernierImport lastImport = new DernierImport();
@@ -223,7 +229,7 @@ public class TestDataSeeder implements CommandLineRunner {
         // la sidebar ni dans les listes de saisie.
         Compte ancienCompte = account("Ancien compte joint", TypeCompte.CHECKING, new BigDecimal("45.00"));
         transaction(new TransactionCore(ancienCompte, today.withDayOfMonth(1).minusMonths(6).plusDays(11), new BigDecimal("-45.00")),
-                "Le Bistrot", "Dîner", restaurant, ModePaiement.CARD, true, false);
+                TIERS_BISTROT, "Dîner", restaurant, ModePaiement.CARD, true, false);
         ancienCompte.setArchived(true);
         accountRepository.save(ancienCompte);
 
@@ -254,15 +260,15 @@ public class TestDataSeeder implements CommandLineRunner {
         for (int monthsAgo = 16; monthsAgo >= 13; monthsAgo--) {
             LocalDate monthStart = today.withDayOfMonth(1).minusMonths(monthsAgo);
             transaction(new TransactionCore(accounts.courant(), monthStart.withDayOfMonth(28), new BigDecimal("2300.00")),
-                    "Employeur", "Virement salaire", categories.salaire(), ModePaiement.STANDING_ORDER, true, false);
+                    TIERS_EMPLOYEUR, "Virement salaire", categories.salaire(), ModePaiement.STANDING_ORDER, true, false);
             transaction(new TransactionCore(accounts.courant(), monthStart.plusDays(2), new BigDecimal("-820.00")),
-                    "Bailleur", "Loyer mensuel", categories.loyer(), ModePaiement.DIRECT_DEBIT, true, true);
+                    TIERS_BAILLEUR, "Loyer mensuel", categories.loyer(), ModePaiement.DIRECT_DEBIT, true, true);
             transaction(new TransactionCore(accounts.courant(), monthStart.plusDays(6), new BigDecimal("-58.20")),
                     CARREFOUR, COURSES_DE_LA_SEMAINE, categories.supermarche(), ModePaiement.CARD, true, false);
             transaction(new TransactionCore(accounts.courant(), monthStart.plusDays(20), new BigDecimal("-99.20")),
                     CARREFOUR, COURSES_DE_LA_SEMAINE, categories.supermarche(), ModePaiement.CARD, true, false);
             transaction(new TransactionCore(accounts.courant(), monthStart.plusDays(9), new BigDecimal("-62.00")),
-                    "Le Bistrot", "Déjeuner", categories.restaurant(), ModePaiement.CARD, true, false);
+                    TIERS_BISTROT, "Déjeuner", categories.restaurant(), ModePaiement.CARD, true, false);
             transaction(new TransactionCore(accounts.carte(), monthStart.plusDays(1), new BigDecimal("-13.49")),
                     NETFLIX, "Abonnement", categories.abonnements(), ModePaiement.DIRECT_DEBIT, true, true);
             transaction(new TransactionCore(accounts.courant(), monthStart.plusDays(10), new BigDecimal("-91.30")),

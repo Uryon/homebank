@@ -34,7 +34,8 @@ export function popoverContent(rows) {
   return { rows: sortRowsByMagnitude(mergeRowsByPayee(rows)), total }
 }
 
-function createCellDetail(router) {
+/** État et actions du détail des cases ; exportée pour les tests (la page passe par provideCellDetail). */
+export function createCellDetail(router) {
   const hover = ref({ visible: false, loading: false, x: 0, y: 0, above: false, title: '', rows: [], total: 0 })
   let showTimer = null
   let hideTimer = null
@@ -84,7 +85,7 @@ function createCellDetail(router) {
 
   /**
    * Comme scheduleHover, sans effet sur une case prévisionnelle : son montant
-   * est une moyenne estimée (voir ServiceRapport#completeAnalysisRow), jamais
+   * est une moyenne estimée (voir ServiceAnalyseMensuelle#completeAnalysisRow), jamais
    * une somme de transactions réelles — un détail serait trompeur.
    */
   function scheduleMonthHover(event, title, loadRows, isForecast) {

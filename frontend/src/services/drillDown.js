@@ -57,7 +57,7 @@ export const DRILL_DOWN_QUERY_KEYS = ['from', 'to', 'flow', 'category', 'rootCat
 
 /**
  * La transaction correspond-elle aux critères ? Mêmes règles que les montants
- * du tableau de bord (voir ServiceRapport#attributedTransactions et
+ * du tableau de bord (voir AttributionTransactions#attributedTransactions et
  * #cellTransactions) : virements, ajustements de solde, transactions
  * exceptionnelles et transactions futures exclus ; sens donné par le signe ;
  * catégorie exacte ou catégorie racine avec ses sous-catégories.
@@ -89,7 +89,7 @@ function matchesCategory(transaction, drill, categoriesById) {
 
 /**
  * Filtre de la liste ouverte depuis un montant du tableau de bord. Comme ce
- * montant (voir ServiceRapport#netByCategoryMonth), le sens se lit sur le net
+ * montant (voir AttributionTransactions#netByCategoryMonth), le sens se lit sur le net
  * de la catégorie dans le mois : un remboursement apparaît avec la dépense
  * dont il est déduit, et le total de la liste retombe sur le montant cliqué.
  */

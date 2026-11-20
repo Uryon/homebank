@@ -166,7 +166,7 @@
 <script setup>
 /**
  * Tableaux d'analyse mensuelle du tableau de bord (voir
- * ServiceRapport#monthlyCategoryAnalysis) : résumé revenus / dépenses / solde,
+ * ServiceAnalyseMensuelle#monthlyCategoryAnalysis) : résumé revenus / dépenses / solde,
  * puis dépenses et revenus par catégorie et sous-catégorie, sur 12 mois, avec
  * moyenne, total et comparaison aux mêmes 12 mois de l'année précédente.
  * Chaque montant donne le détail de ses transactions au survol et ouvre la

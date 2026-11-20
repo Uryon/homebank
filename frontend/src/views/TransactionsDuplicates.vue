@@ -198,24 +198,16 @@
 
 <script setup>
 /**
- * Groupes calcules cote backend (TransactionService#findDuplicateGroups), en
- * trois categories distinguees par group.certain / group.reimbursement :
- * - certains : meme compte, et soit meme identifiant externe fourni par la
- *   banque, soit meme date + montant + tiers canonique (insensible a la
- *   casse) — memes criteres qu'a la detection de doublons a l'import
- *   (ImportService#isDuplicate). Occurrences interchangeables : un seul
- *   bouton "supprimer" par groupe suffit.
- * - probables : meme compte + date + montant seulement, tiers different —
- *   ratees par la detection "certains" (import brut jamais categorise a
- *   cote d'une transaction deja categorisee/renommee pour le meme paiement,
- *   voir ServiceTransaction). Occurrences PAS interchangeables : suppression
- *   ligne par ligne, l'utilisateur doit lui-meme identifier laquelle garder.
- * - remboursements (group.reimbursement) : meme tiers, montants opposes de
- *   meme valeur absolue (ex : achat de 19€ puis remboursement de 19€ par ce
- *   meme tiers) — pas un import en double, donc pas de suppression proposee,
- *   juste un reperage a ignorer une fois verifie.
- * L'utilisateur choisit lui-meme quelle(s) occurrence(s) supprimer : on ne
- * decide jamais automatiquement laquelle garder.
+ * Onglet Doublons : groupes calculés par le backend (voir
+ * ServiceDoublon#findDuplicateGroups et services/duplicateGroups.js).
+ * - certains : occurrences interchangeables, un seul bouton par groupe garde
+ *   une occurrence (voir keeperId) et supprime les autres ;
+ * - probables : occurrences PAS interchangeables (tiers différent, l'une peut
+ *   déjà être catégorisée) : suppression ligne par ligne, l'utilisateur
+ *   identifie lui-même laquelle garder ;
+ * - remboursements : paire dépense/remboursement, supprimée entière ou ignorée.
+ * On ne décide jamais automatiquement laquelle garder. Pas de confirmation :
+ * le bandeau « Annuler » rattrape un clic sur le mauvais groupe ou la mauvaise ligne.
  */
 import { ref, computed, onMounted } from 'vue'
 import { TransactionsAPI, PayeesAPI } from '../services/api'
@@ -223,7 +215,7 @@ import { notify, askText } from '../services/feedback'
 import { alertApiError } from '../services/errors'
 import { dataStore } from '../services/dataStore'
 import { formatAmount, formatDate, pluralize } from '../services/format'
-import { labelToPatternSegment, matchesPatternField } from '../services/payee'
+import { deleteLabel, keeperId, patternSuggestionFor, patternWithLabel, splitDuplicateGroups } from '../services/duplicateGroups'
 import { useLastAction } from '../services/lastAction'
 import { restorationSnapshots } from '../services/undoRestore'
 import TransactionsSubNav from './TransactionsSubNav.vue'
@@ -253,9 +245,10 @@ function prepareRestore(transactionsToDelete) {
 }
 const loading = ref(false)
 const loadError = ref(false)
-const certainGroups = computed(() => groups.value.filter(g => g.certain))
-const probableGroups = computed(() => groups.value.filter(g => !g.certain && !g.reimbursement))
-const reimbursementGroups = computed(() => groups.value.filter(g => g.reimbursement))
+const splitGroups = computed(() => splitDuplicateGroups(groups.value))
+const certainGroups = computed(() => splitGroups.value.certain)
+const probableGroups = computed(() => splitGroups.value.probable)
+const reimbursementGroups = computed(() => splitGroups.value.reimbursement)
 
 // Cle de groupe (id de sa premiere transaction) actuellement en cours de
 // nettoyage, pour desactiver/etiqueter uniquement le bouton concerne.
@@ -285,21 +278,6 @@ function categoryName(categoryId) {
 // Idem pour les tiers (voir suggestPatternUpdate ci-dessous).
 const payeesById = computed(() => new Map(dataStore.state.payees.map(p => [p.id, p])))
 
-/**
- * Occurrence conservee automatiquement dans un groupe : la premiere deja
- * validee (rapprochement bancaire, donc plus probablement la "vraie"
- * transaction) s'il y en a une, sinon simplement la premiere occurrence.
- */
-function keeperId(group) {
-  const validated = group.transactions.find(t => t.validated)
-  return (validated ?? group.transactions[0]).id
-}
-
-function deleteLabel(group) {
-  const extra = group.transactions.length - 1
-  return extra === 1 ? 'Supprimer le doublon' : `Garder 1 occurrence, supprimer ${extra} doublons`
-}
-
 async function load() {
   loading.value = true
   loadError.value = false
@@ -314,34 +292,38 @@ async function load() {
 }
 
 /**
- * Supprime en un clic toutes les occurrences du groupe sauf celle conservee
- * (voir keeperId) : les occurrences d'un meme groupe sont identiques (meme
- * compte, date, montant, tiers), donc un seul bouton par groupe suffit —
- * inutile de faire choisir laquelle supprimer parmi des lignes identiques.
- * Pas de confirm() : action peu risquee (une occurrence identique reste
- * toujours) et frequente sur cette page.
+ * Supprime des transactions d'un groupe en un clic, annulable. Si une
+ * suppression échoue après d'autres (Promise.all), l'écran est resynchronisé
+ * malgré tout pour ne pas afficher un état périmé.
  */
-async function removeDuplicates(group) {
-  const keepId = keeperId(group)
-  const toRemove = group.transactions.filter(t => t.id !== keepId)
+async function removeFromGroup(group, toRemove, label, errorMessage) {
   const undo = prepareRestore(toRemove)
   removingGroupKey.value = group.transactions[0].id
   try {
     await Promise.all(toRemove.map(t => TransactionsAPI.remove(t.id)))
-    const label = pluralize(toRemove.length, 'doublon supprimé', 'doublons supprimés')
-    setLastAction(label.charAt(0).toUpperCase() + label.slice(1), undo, { retryable: true })
+    setLastAction(label, undo, { retryable: true })
     await dataStore.refreshTransactions()
     notify(`${label}.`)
     await load()
   } catch (error) {
-    alertApiError('Erreur lors de la suppression des doublons', error)
-    // Promise.all peut échouer après une suppression partielle : resynchronise
-    // malgré tout l'écran pour ne pas afficher un état périmé.
+    alertApiError(errorMessage, error)
     await dataStore.refreshTransactions().catch(() => {})
     await load()
   } finally {
     removingGroupKey.value = null
   }
+}
+
+/**
+ * Doublons certains : supprime toutes les occurrences sauf celle conservée
+ * (voir keeperId). Les occurrences sont identiques (compte, date, montant,
+ * tiers) : inutile de faire choisir laquelle supprimer.
+ */
+function removeDuplicates(group) {
+  const keepId = keeperId(group)
+  const toRemove = group.transactions.filter(t => t.id !== keepId)
+  const label = pluralize(toRemove.length, 'doublon supprimé', 'doublons supprimés')
+  return removeFromGroup(group, toRemove, label.charAt(0).toUpperCase() + label.slice(1), 'Erreur lors de la suppression des doublons')
 }
 
 /** Annulation d'un marquage « pas un doublon » : le groupe réapparaît. */
@@ -352,7 +334,7 @@ async function unmarkAndReload(ids) {
 
 /**
  * Marque toutes les occurrences d'un groupe "certain" comme n'etant pas des
- * doublons (voir ServiceTransaction#markAsNotDuplicate) : le groupe entier
+ * doublons (voir ServiceDoublon#markAsNotDuplicate) : le groupe entier
  * disparait ensuite de cette page, sans supprimer aucune transaction.
  */
 async function markGroupNotDuplicate(group) {
@@ -373,7 +355,7 @@ async function markGroupNotDuplicate(group) {
 /**
  * Marque une seule occurrence d'un doublon "probable" comme n'etant pas un
  * doublon : suffit a faire disparaitre tout le groupe (qui necessite au
- * moins 2 occurrences restantes, voir ServiceTransaction#findDuplicateGroups),
+ * moins 2 occurrences restantes, voir ServiceDoublon#findDuplicateGroups),
  * sans avoir a marquer chaque ligne separement.
  */
 async function markSingleNotDuplicate(transaction) {
@@ -391,31 +373,14 @@ async function markSingleNotDuplicate(transaction) {
 }
 
 /**
- * Suppression de TOUT le groupe "remboursement" en un clic (voir groups
- * ci-dessus) : contrairement aux doublons "probables", les transactions ne
- * sont pas des occurrences interchangeables mais une paire depense/
- * remboursement indissociable — supprimer l'une sans l'autre laisserait une
- * depense fantome (ou un remboursement sans depense associee) dans
- * l'historique. Pas de suggestPatternUpdate ici (contrairement a
- * removeSingle ci-dessous) : les transactions du groupe partagent deja le
- * meme tiers, il n'y a rien a apprendre pour la reconnaissance automatique.
+ * Remboursements : supprime TOUT le groupe, paire dépense/remboursement
+ * indissociable — supprimer l'une sans l'autre laisserait une dépense
+ * fantôme (ou un remboursement sans dépense) dans l'historique. Rien à
+ * apprendre pour le motif du tiers : la paire partage déjà le même tiers.
  */
-async function removeReimbursementGroup(group) {
-  const undo = prepareRestore(group.transactions)
-  removingGroupKey.value = group.transactions[0].id
-  try {
-    await Promise.all(group.transactions.map(t => TransactionsAPI.remove(t.id)))
-    setLastAction(`${group.transactions.length} transactions supprimées`, undo, { retryable: true })
-    await dataStore.refreshTransactions()
-    notify(`${group.transactions.length} transactions supprimées.`)
-    await load()
-  } catch (error) {
-    alertApiError('Erreur lors de la suppression', error)
-    await dataStore.refreshTransactions().catch(() => {})
-    await load()
-  } finally {
-    removingGroupKey.value = null
-  }
+function removeReimbursementGroup(group) {
+  const count = group.transactions.length
+  return removeFromGroup(group, group.transactions, `${count} transactions supprimées`, 'Erreur lors de la suppression')
 }
 
 /**
@@ -457,27 +422,15 @@ async function removeSingle(transaction, group) {
 }
 
 /**
- * Apres suppression d'une occurrence de doublon probable, propose de mettre
- * a jour le motif du tiers de l'occurrence CONSERVEE (voir
- * ServiceTiers#matchesPatternField) : la prochaine fois qu'un import ramene
- * le libelle de la transaction supprimee (ex : prelevement mensuel dont la
- * reference bancaire change chaque mois), il sera directement reconnu comme
- * ce tiers au lieu de recreer le meme doublon. Si le motif actuel reconnait
- * deja ce libelle (voir matchesPatternField dans services/payee.js), rien n'est propose : ce serait
- * une entree redondante (ex : motif "SOCARES" reconnaissant deja "SOCARES
- * 10.06.2026"). Sinon, la fenêtre de saisie affiche le motif actuel du tiers, modifiable
- * directement (ex : pour le raccourcir avant d'ajouter la nouvelle entree) ;
- * le libelle de la transaction supprimee est ensuite ajoute a la fin du
- * motif ainsi edite. Annuler la saisie ne modifie rien.
+ * Après suppression d'une occurrence de doublon probable, propose d'ajouter
+ * son libellé au motif du tiers de l'occurrence conservée (voir
+ * patternSuggestionFor). La fenêtre affiche le motif actuel, modifiable (ex :
+ * pour le raccourcir) ; le libellé est ajouté à la fin. Annuler ne modifie rien.
  */
 async function suggestPatternUpdate(deletedTransaction, group) {
-  const kept = group?.transactions.find(t => t.id !== deletedTransaction.id && t.payeeId)
-  if (!kept) return
-  const payee = payeesById.value.get(kept.payeeId)
-  if (!payee) return
-
-  const newEntry = (deletedTransaction.payee || '').trim()
-  if (!newEntry || matchesPatternField(payee.pattern, newEntry)) return
+  const suggestion = patternSuggestionFor(deletedTransaction, group, payeesById.value)
+  if (!suggestion) return
+  const { payee, label } = suggestion
 
   const editedPattern = await askText(
     `Motif du tiers « ${payee.name} ». Le libellé de la transaction supprimée sera ajouté à la fin.`,
@@ -486,7 +439,7 @@ async function suggestPatternUpdate(deletedTransaction, group) {
   )
   if (editedPattern === null) return // saisie annulée
 
-  const newPattern = [editedPattern.trim(), labelToPatternSegment(newEntry)].filter(Boolean).join(';')
+  const newPattern = patternWithLabel(editedPattern, label)
   if (!newPattern) return
 
   await PayeesAPI.update(payee.id, {

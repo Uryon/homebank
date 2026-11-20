@@ -295,13 +295,13 @@
 import { notify, askConfirm } from '../services/feedback'
 import { useLastAction } from '../services/lastAction'
 import UndoBar from '../components/UndoBar.vue'
-import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   TransactionsAPI
 } from '../services/api'
 import { dataStore } from '../services/dataStore'
-import { previousTransactionPayload, restorationSnapshots, runOnePerPayee, transactionPayloadFrom } from '../services/undoRestore'
+import { previousTransactionPayload, restorationSnapshots } from '../services/undoRestore'
 import { parseAmountQuery } from '../services/search'
 import { buildSearchIndex, filterByStatusAndPeriod, filterBySearch } from '../services/transactionFilters'
 import { flattenCategories, needsCategory } from '../services/categories'
@@ -311,7 +311,7 @@ import TransactionSelectionBar from '../components/TransactionSelectionBar.vue'
 import TransactionBulkEditModal from '../components/TransactionBulkEditModal.vue'
 import TransactionSplitModal from '../components/TransactionSplitModal.vue'
 import { neighborRowId, restoreFocusToRow } from '../services/rowKeyboard'
-import { idsBetween } from '../services/selection'
+import { useRowSelection } from '../services/rowSelection'
 import { DEFAULT_TRANSACTION_SORT, TRANSACTION_SORT_DIRECTIONS, isChronologicalSort, sortTransactions } from '../services/transactionSort'
 import { ariaSortOf, nextSort, sortIconOf } from '../services/tableSort'
 import MonthYearFilter from '../components/MonthYearFilter.vue'
@@ -320,13 +320,15 @@ import { formatMonthHeading, monthKey, startsNewMonth, summarizeByMonth } from '
 import Icon from '../components/Icon.vue'
 import TransactionsSubNav from './TransactionsSubNav.vue'
 import AccountSummaryBar from '../components/AccountSummaryBar.vue'
-import { formatAmount, formatDate, pluralize, toLocalIsoDate } from '../services/format'
+import { formatAmount, pluralize, toLocalIsoDate } from '../services/format'
 import { downloadCsv, safeFileName, transactionsToCsv } from '../services/csvExport'
-import { findIdenticalTransaction } from '../services/duplicateEntry'
 import { accountOptionLabel, activeAccounts, runningBalanceById } from '../services/accounts'
-import { alertApiError, apiErrorMessage } from '../services/errors'
-import { bulkTouchedFields, bulkUpdatePayload } from '../services/bulkEdit'
+import { alertApiError } from '../services/errors'
 import { useProgressiveList } from '../services/progressiveList'
+import { useElementHeight } from '../services/elementHeight'
+import { useTransactionCreation } from '../services/transactionCreation'
+import { useTransactionBulkActions } from '../services/transactionBulkActions'
+import { useTransactionSplit } from '../services/transactionSplit'
 import { DRILL_DOWN_QUERY_KEYS, drillDownMatcher, hasSmoothedContribution, parseDrillDown } from '../services/drillDown'
 
 const route = useRoute()
@@ -339,18 +341,9 @@ const route = useRoute()
  * étroit) : un ResizeObserver la tient à jour, sans aucun calcul au scroll.
  */
 const toolbarEl = ref(null)
-const toolbarHeight = ref(0)
+const toolbarHeight = useElementHeight(toolbarEl)
 const stickyOffsetStyle = computed(() => ({ '--tx-toolbar-height': `${toolbarHeight.value}px` }))
-let toolbarResizeObserver = null
 
-onMounted(() => {
-  if (!toolbarEl.value || typeof ResizeObserver === 'undefined') return
-  toolbarResizeObserver = new ResizeObserver(([entry]) => {
-    toolbarHeight.value = entry.target.offsetHeight
-  })
-  toolbarResizeObserver.observe(toolbarEl.value)
-})
-onBeforeUnmount(() => toolbarResizeObserver?.disconnect())
 const router = useRouter()
 
 const filterAccount = ref(null)
@@ -412,8 +405,9 @@ function offerRestore(label, snapshots) {
   }, { retryable: true })
 }
 
-/** Valeurs de départ de la fenêtre « Nouvelle transaction » (TransactionCreateModal.vue), null fenêtre fermée. */
-const newTransactionDraft = ref(null)
+/** Nouvelle transaction, vierge ou dupliquée (fenêtre TransactionCreateModal.vue). */
+const { newTransactionDraft, openCreate, duplicateTransaction, save } =
+  useTransactionCreation({ entryAccounts, filterAccount, load, setLastAction })
 
 // --- Édition inline ---
 // L'etat du formulaire d'edition (editForm) vit desormais localement dans
@@ -423,184 +417,26 @@ const newTransactionDraft = ref(null)
 const editingId = ref(null)
 
 /**
- * Sélection multiple (checkboxes) pour l'édition en masse ci-dessous. Un
- * `Set` reactif (plutot qu'un tableau) : `selectedIds.has(id)` passe en O(1)
- * par transaction affichee, sans scan lineaire a chaque rendu, meme sur un
- * grand historique. Persiste volontairement a travers les changements de
- * page/filtre (l'utilisateur peut ainsi selectionner sur plusieurs pages) ;
- * seul un clic explicite sur "Désélectionner tout" ou une édition en masse
- * reussie la vide.
+ * Sélection multiple (cases à cocher) pour l'édition et la suppression en
+ * masse (voir services/rowSelection.js). Persiste volontairement à travers
+ * les filtres : on peut cocher sur plusieurs recherches ; seuls « Désélectionner
+ * tout », Échap ou une action de masse réussie la vident. Lignes affichées lues
+ * à la demande : la liste progressive (pagedTransactions) est déclarée plus bas.
  */
-const selectedIds = ref(new Set())
+const {
+  selectedIds,
+  lastSelectedId,
+  toggleSelect,
+  clearSelection,
+  allVisibleSelected: allPagedSelected,
+  toggleSelectAllVisible: toggleSelectAllPaged,
+  selectedTotal,
+  selectedRows: selectedTransactionsSnapshot
+} = useRowSelection(computed(() => pagedTransactions.value), () => dataStore.state.transactions, {
+  // Échap annule d'abord l'édition d'une ligne.
+  escapeBlocked: () => editingId.value !== null
+})
 const selectedCountLabel = computed(() => pluralize(selectedIds.value.size, 'transaction', 'transactions'))
-
-/**
- * Derniere transaction cochee (voir toggleSelect) : utilisee pour recentrer
- * la page dessus quand la recherche se ferme (voir le watcher de
- * searchQuery plus bas et goToSelectedTransactionPage), pour qu'on retrouve
- * une transaction reperee pendant une recherche avec son contexte (les
- * transactions voisines) une fois la recherche fermee.
- */
-const lastSelectedId = ref(null)
-
-/**
- * Coche / décoche une transaction. Avec `range` (Maj+clic, Maj+Espace),
- * coche toutes les transactions affichées entre la dernière cochée et
- * celle-ci ; sans dernière cochée encore affichée, sélection simple.
- */
-function toggleSelect(transaction, { range = false } = {}) {
-  const rangeIds = range && lastSelectedId.value != null
-    ? idsBetween(pagedTransactions.value, lastSelectedId.value, transaction.id)
-    : null
-  if (rangeIds) {
-    for (const id of rangeIds) selectedIds.value.add(id)
-    lastSelectedId.value = transaction.id
-    return
-  }
-  if (selectedIds.value.has(transaction.id)) {
-    selectedIds.value.delete(transaction.id)
-    if (lastSelectedId.value === transaction.id) lastSelectedId.value = null
-  } else {
-    selectedIds.value.add(transaction.id)
-    lastSelectedId.value = transaction.id
-  }
-}
-
-function clearSelection() {
-  selectedIds.value.clear()
-  lastSelectedId.value = null
-}
-
-/**
- * Échap vide la sélection, sauf si Échap sert déjà ailleurs : saisie en
- * cours, fenêtre ouverte, ligne en édition (Échap annule alors l'édition).
- */
-function onSelectionEscape(event) {
-  if (event.key !== 'Escape' || !selectedIds.value.size || editingId.value !== null) return
-  const target = event.target
-  const typing = target instanceof HTMLElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) && target.type !== 'checkbox'
-  if (typing || document.querySelector('.modal-overlay, .feedback-overlay, .palette-overlay')) return
-  clearSelection()
-}
-
-onMounted(() => window.addEventListener('keydown', onSelectionEscape))
-onBeforeUnmount(() => window.removeEventListener('keydown', onSelectionEscape))
-
-const allPagedSelected = computed(() =>
-  pagedTransactions.value.length > 0 && pagedTransactions.value.every(t => selectedIds.value.has(t.id))
-)
-
-function toggleSelectAllPaged() {
-  if (allPagedSelected.value) {
-    for (const t of pagedTransactions.value) selectedIds.value.delete(t.id)
-  } else {
-    for (const t of pagedTransactions.value) selectedIds.value.add(t.id)
-  }
-}
-
-/**
- * Montant par id sur la liste complete (tous comptes, voir dataStore) plutot
- * que sur `transactions` (potentiellement filtree par compte) : la selection
- * persiste a travers les filtres (voir selectedIds plus haut), le total doit
- * donc rester juste meme si une transaction selectionnee n'appartient plus
- * au compte actuellement filtre.
- */
-const amountById = computed(() => {
-  const map = new Map()
-  for (const t of dataStore.state.transactions) map.set(t.id, Number(t.amount || 0))
-  return map
-})
-
-/**
- * Transactions actuellement selectionnees, lues dans la liste globale (tous
- * comptes, voir dataStore) et non dans `transactions` (potentiellement
- * filtree par compte) : la selection persiste a travers les filtres, et
- * l'action de masse (backend) porte sur TOUS les ids selectionnes — un
- * instantane pris sur la seule liste filtree oubliait les autres comptes,
- * qui n'etaient alors jamais restaures par "Annuler".
- */
-function selectedTransactionsSnapshot() {
-  const byId = new Map(dataStore.state.transactions.map(t => [t.id, t]))
-  return Array.from(selectedIds.value, id => byId.get(id)).filter(Boolean)
-}
-
-/** Somme des transactions selectionnees, affichee dans la barre de selection multiple. */
-const selectedTotal = computed(() => {
-  const amounts = amountById.value
-  let sum = 0
-  for (const id of selectedIds.value) sum += amounts.get(id) || 0
-  return sum
-})
-
-/** Édition en masse des transactions sélectionnées (saisie : TransactionBulkEditModal.vue). */
-const showBulkEditModal = ref(false)
-const bulkSaving = ref(false)
-
-function openBulkEdit() {
-  showBulkEditModal.value = true
-}
-
-async function saveBulkEdit(bulkForm) {
-  if (!selectedIds.value.size) return
-
-  // Champs effectivement touches par cette modification en masse : reutilises
-  // pour ne restaurer que ceux-la lors de l'annulation (voir plus bas), via
-  // bulkUpdate. TransactionsAPI.update() reenverrait TOUS les champs (compte,
-  // date, montant...) et, sur un cote de virement, les repercuterait sur sa
-  // jumelle (voir ServiceTransaction#syncTransferTwin) : l'annulation doit
-  // defaire la modification en masse, rien de plus.
-  const touchedFields = bulkTouchedFields(bulkForm)
-  const payload = bulkUpdatePayload(Array.from(selectedIds.value), touchedFields, bulkForm)
-
-  const previousSnapshots = selectedTransactionsSnapshot()
-    .map(t => ({ id: t.id, before: previousTransactionPayload(t) }))
-
-  bulkSaving.value = true
-  try {
-    await TransactionsAPI.bulkUpdate(payload)
-    showBulkEditModal.value = false
-    clearSelection()
-    await load()
-    setLastAction(`Modification de ${pluralize(previousSnapshots.length, 'transaction', 'transactions')}`, async () => {
-      await runOnePerPayee(
-        previousSnapshots,
-        ({ before }) => (touchedFields.payee ? before.payee : null),
-        ({ id, before }) => TransactionsAPI.bulkUpdate(bulkUpdatePayload([id], touchedFields, before))
-      )
-      await load()
-    })
-  } catch (e) {
-    alertApiError('Erreur lors de la modification en masse', e)
-  } finally {
-    bulkSaving.value = false
-  }
-}
-
-function emptyForm() {
-  return {
-    accountId: null,
-    date: toLocalIsoDate(),
-    payee: '',
-    // Vide plutôt que 0 : on tape directement le montant, sans effacer un zéro.
-    amount: null,
-    categoryId: null,
-    paymentMode: 'NONE',
-    memo: '',
-    transferTransactionId: null,
-    periodicExpense: false,
-    exceptional: false,
-    validated: true
-  }
-}
-
-/**
- * Transactions en attente de la liste courante : celles du compte filtré, ou
- * de tous les comptes. « Tout valider » et « Supprimer les non validées »
- * portent sur ce même périmètre, pour que le nombre annoncé soit le bon.
- */
-const pendingCount = computed(() =>
-  transactions.value.filter(t => !t.validated).length
-)
 
 /** Compte filtré (en-tête AccountSummaryBar), null sur « Tous les comptes ». */
 const selectedAccount = computed(() => (filterAccount.value != null ? accountsById.value.get(filterAccount.value) ?? null : null))
@@ -613,12 +449,6 @@ const oldestPendingDate = computed(() => {
     if (!t.validated && t.date && (oldest === null || t.date < oldest)) oldest = t.date
   }
   return oldest
-})
-
-/** Précision ajoutée aux confirmations quand la liste est filtrée sur un compte. */
-const pendingScopeLabel = computed(() => {
-  const account = filterAccount.value !== null ? accountsById.value.get(filterAccount.value) : null
-  return account ? ` du compte « ${account.name} »` : ''
 })
 
 const uncategorizedCount = computed(() =>
@@ -808,6 +638,28 @@ const runningBalances = computed(() =>
 )
 const categoriesById = computed(() => new Map(categories.value.map(c => [c.id, c])))
 
+/** Validation et suppression des transactions en attente, édition et suppression des transactions cochées. */
+const {
+  pendingCount,
+  showBulkEditModal, bulkSaving, openBulkEdit, saveBulkEdit,
+  validating, validateAll,
+  deletingPending, deletePending,
+  deletingSelection, deleteSelected
+} = useTransactionBulkActions({
+  transactions,
+  filterAccount,
+  accountsById,
+  selection: { selectedIds, clearSelection, selectedRows: selectedTransactionsSnapshot },
+  load,
+  setLastAction,
+  offerRestore,
+  snapshotsBeforeDeletion
+})
+
+/** Division d'une transaction en deux (saisie : TransactionSplitModal.vue). */
+const { splitTransaction, splitSaving, splitError, splitCurrency, openSplit, closeSplitModal, saveSplit } =
+  useTransactionSplit({ accountsById, load, setLastAction })
+
 /**
  * Une transaction est "future" si sa date est strictement postérieure à
  * aujourd'hui : elle est prévue mais n'a pas encore réellement eu lieu
@@ -861,77 +713,6 @@ const payeeByNormalizedName = computed(() => {
   }
   return map
 })
-
-/**
- * Compte proposé pour une nouvelle transaction : le compte filtré, quand on
- * consulte un compte précis (sauf s'il est archivé, donc fermé à la saisie),
- * sinon le premier compte actif.
- */
-const defaultEntryAccountId = computed(() => {
-  const accounts = entryAccounts.value
-  return accounts.find(a => a.id === filterAccount.value)?.id ?? accounts[0]?.id ?? null
-})
-
-function openCreate() {
-  newTransactionDraft.value = { ...emptyForm(), accountId: defaultEntryAccountId.value }
-}
-
-/**
- * Ouvre la création pré-remplie avec une transaction existante (tiers,
- * montant, catégorie, mode de paiement, mémo...), datée d'aujourd'hui : pour
- * une dépense qui revient sans être assez régulière pour une suggestion
- * périodique. Rien n'est créé avant « Enregistrer ». Le compte d'origine
- * est repris s'il est encore actif, sinon le compte par défaut.
- */
-function duplicateTransaction(transaction) {
-  if (transaction.transferTransactionId || transaction.balanceAdjustment) {
-    notify('Un virement ou un ajustement de solde se crée depuis la page Comptes.', 'warning')
-    return
-  }
-  const accountIsActive = entryAccounts.value.some(a => a.id === transaction.accountId)
-  newTransactionDraft.value = {
-    ...emptyForm(),
-    accountId: accountIsActive ? transaction.accountId : defaultEntryAccountId.value,
-    payee: transaction.payee || '',
-    amount: transaction.amount,
-    categoryId: transaction.categoryId,
-    paymentMode: transaction.paymentMode || 'NONE',
-    memo: transaction.memo || '',
-    periodicExpense: !!transaction.periodicExpense,
-    exceptional: !!transaction.exceptional
-  }
-}
-
-/** Enregistre le formulaire validé par TransactionCreateModal.vue. */
-async function save(form) {
-  const payload = transactionPayloadFrom(form)
-  // Double saisie probable : confirmation explicite plutôt que refus (deux
-  // achats identiques le même jour restent possibles).
-  const identical = findIdenticalTransaction(payload, dataStore.state.transactions)
-  if (identical) {
-    const label = `${identical.payee || 'sans tiers'}, ${formatAmount(identical.amount)}, ${formatDate(identical.date)}`
-    const confirmed = await askConfirm(`Une transaction identique existe déjà sur ce compte (${label}). L'enregistrer quand même ?`, {
-      title: 'Transaction en double ?',
-      confirmLabel: 'Enregistrer quand même',
-      destructive: false
-    })
-    if (!confirmed) return
-  }
-
-  try {
-    const created = await TransactionsAPI.create(payload)
-    notify('Transaction créée.', 'success')
-    newTransactionDraft.value = null
-    dataStore.showSavedTransaction(created)
-    await load()
-    setLastAction('Transaction créée', async () => {
-      await TransactionsAPI.undoCreation([created.id])
-      await load()
-    })
-  } catch (e) {
-    alertApiError('Erreur lors de la création de la transaction', e)
-  }
-}
 
 /* --- Édition inline : clic sur une ligne --- */
 
@@ -990,58 +771,6 @@ async function remove(transaction) {
   }
 }
 
-/* --- Division d'une transaction en deux --- */
-
-/** Transaction en cours de division (saisie : TransactionSplitModal.vue), null modale fermée. */
-const splitTransaction = ref(null)
-const splitSaving = ref(false)
-/** Erreur renvoyée par le serveur, affichée dans la modale. */
-const splitError = ref('')
-
-/** Devise du compte de la transaction divisée, pour afficher ses montants dans la bonne monnaie. */
-const splitCurrency = computed(() => accountsById.value.get(splitTransaction.value?.accountId)?.currency)
-
-function openSplit(transaction) {
-  // Seul un virement interne (lié à sa jumelle) est indivisible ; un paiement
-  // par virement ordinaire (loyer…) se divise comme une autre dépense.
-  if (transaction.transferTransactionId) {
-    notify('Un virement entre comptes ne peut pas être divisé.', 'warning')
-    return
-  }
-  if (transaction.balanceAdjustment) {
-    notify('Un ajustement de solde ne peut pas être divisé.', 'warning')
-    return
-  }
-  splitError.value = ''
-  splitTransaction.value = transaction
-}
-
-function closeSplitModal() {
-  splitTransaction.value = null
-}
-
-async function saveSplit(parts) {
-  splitError.value = ''
-  splitSaving.value = true
-  // Transaction d'origine telle qu'avant la division, pour « Annuler ».
-  const original = splitTransaction.value
-  const originalState = { ...previousTransactionPayload(original), splitFromAmount: original.splitFromAmount ?? null }
-  try {
-    const [, second] = await TransactionsAPI.split(original.id, parts)
-    closeSplitModal()
-    await load()
-    // Annuler : supprime la 2e partie et rend à la 1re son état d'origine.
-    setLastAction('Transaction divisée', async () => {
-      await TransactionsAPI.undoSplit(original.id, { secondPartId: second.id, original: originalState })
-      await load()
-    }, { retryable: true })
-  } catch (e) {
-    splitError.value = apiErrorMessage(e)
-  } finally {
-    splitSaving.value = false
-  }
-}
-
 /**
  * Bascule d'un drapeau booleen d'une transaction (une bascule etant sa propre
  * inverse, l'annulation rejoue simplement le meme appel). Aucun solde ne
@@ -1068,103 +797,9 @@ function toggleExceptional(transaction) {
   return toggleFlag(TransactionsAPI.toggleExceptional, transaction, 'Statut "exceptionnelle" modifié')
 }
 
-/* --- Validation / rapprochement (façon "reconcile" YNAB) --- */
-
-const validating = ref(false)
-
 /** Bascule le statut validée/en attente d'une seule transaction. */
 function toggleValidated(transaction) {
   return toggleFlag(TransactionsAPI.toggleValidated, transaction, 'Statut "validée" modifié')
-}
-
-/**
- * Valide en une fois toutes les transactions en attente : à utiliser une fois
- * que le solde du compte dans l'app correspond au solde réel de la banque,
- * comme le "reconcile" de YNAB. Permet ensuite de repérer d'un coup d'œil
- * les transactions ajoutées depuis la dernière validation (pastille orange).
- */
-async function validateAll() {
-  if (pendingCount.value === 0) return
-  if (!(await askConfirm(`Valider ${pendingCount.value === 1 ? 'la transaction' : `les ${pendingCount.value} transactions`} en attente${pendingScopeLabel.value} ?`))) return
-  validating.value = true
-  // Même périmètre que pendingCount (compte filtré ou tous les comptes, voir
-  // ServiceTransaction#validateAllPending). L'annulation remet ces ids en
-  // attente ; bulkUpdate y joint la jumelle d'un virement sur un autre compte.
-  const pendingIds = transactions.value.filter(t => !t.validated).map(t => t.id)
-  try {
-    await TransactionsAPI.validateAll(filterAccount.value ?? undefined)
-    await load()
-    notify(`${pluralize(pendingIds.length, 'transaction validée', 'transactions validées')}.`, 'success')
-    setLastAction(`Validation de ${pluralize(pendingIds.length, 'transaction', 'transactions')}`, async () => {
-      // Remise explicite « en attente » (et non une bascule par transaction) :
-      // basculer un côté de virement bascule aussi sa jumelle, si bien que
-      // deux bascules successives (une par côté, tous deux en attente)
-      // laissaient le virement validé après l'annulation.
-      await TransactionsAPI.bulkUpdate({ ids: pendingIds, validatedProvided: true, validated: false })
-      await load()
-    })
-  } catch (e) {
-    alertApiError('Erreur lors de la validation des transactions', e)
-  } finally {
-    validating.value = false
-  }
-}
-
-const deletingPending = ref(false)
-
-/** Supprime d'un coup toutes les transactions en attente de validation, sans passer par la selection manuelle. */
-async function deletePending() {
-  if (pendingCount.value === 0) return
-  if (!(await askConfirm(`Supprimer ${pendingCount.value === 1 ? 'la transaction non validée' : `les ${pendingCount.value} transactions non validées`}${pendingScopeLabel.value} ?`))) return
-  deletingPending.value = true
-  // Même périmètre que pendingCount et validateAll ci-dessus (voir
-  // ServiceTransaction#deleteAllPending) ; snapshotsBeforeDeletion retrouve la
-  // jumelle d'un virement, supprimée avec lui, dans la liste globale.
-  const pendingTransactions = transactions.value.filter(t => !t.validated)
-  const candidateSnapshots = snapshotsBeforeDeletion(pendingTransactions)
-  try {
-    await TransactionsAPI.removePending(filterAccount.value ?? undefined)
-    await load()
-    notify('Transactions en attente supprimées.', 'success')
-    // Un cote de virement en attente dont la jumelle est deja validee est
-    // ignore par le backend (voir ServiceTransaction#deleteAllPending) : il
-    // est donc toujours present apres le rechargement, et ne doit pas etre
-    // "restaure" (il n'a jamais ete supprime, ca creerait un doublon). Lu
-    // dans `transactions`, rechargee par load() que le compte soit filtre
-    // ou non.
-    const stillPresentIds = new Set(transactions.value.map(t => t.id))
-    const snapshots = candidateSnapshots.filter(t => !stillPresentIds.has(t.id))
-    const actuallyDeletedCount = pendingTransactions.filter(t => !stillPresentIds.has(t.id)).length
-    offerRestore(`Suppression de ${pluralize(actuallyDeletedCount, 'transaction', 'transactions')}`, snapshots)
-  } catch (e) {
-    alertApiError('Erreur lors de la suppression des transactions en attente', e)
-  } finally {
-    deletingPending.value = false
-  }
-}
-
-const deletingSelection = ref(false)
-
-/** Supprime d'un coup toutes les transactions actuellement cochees (voir selectedIds). */
-async function deleteSelected() {
-  if (!selectedIds.value.size) return
-  if (!(await askConfirm(`Supprimer ${selectedIds.value.size === 1 ? 'la transaction sélectionnée' : `les ${selectedIds.value.size} transactions sélectionnées`} ?`))) return
-  deletingSelection.value = true
-  const ids = Array.from(selectedIds.value)
-  const selectedTransactions = selectedTransactionsSnapshot()
-  const snapshots = snapshotsBeforeDeletion(selectedTransactions)
-  try {
-    await TransactionsAPI.removeBulk(ids)
-    notify(`${pluralize(selectedTransactions.length, 'transaction supprimée', 'transactions supprimées')}.`, 'success')
-    clearSelection()
-    dataStore.hideDeletedTransactions(ids)
-    await load()
-    offerRestore(`Suppression de ${pluralize(selectedTransactions.length, 'transaction', 'transactions')}`, snapshots)
-  } catch (e) {
-    alertApiError('Erreur lors de la suppression des transactions sélectionnées', e)
-  } finally {
-    deletingSelection.value = false
-  }
 }
 
 onMounted(async () => {

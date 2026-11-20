@@ -5,7 +5,7 @@ import java.util.List;
 
 /**
  * Analyse des revenus/depenses par categorie et par mois sur [from, to]
- * (voir ServiceRapport#monthlyCategoryAnalysis).
+ * (voir ServiceAnalyseMensuelle#monthlyCategoryAnalysis).
  * <p>
  * Comparaison avec l'annee precedente : [previousFrom, previousTo] est la
  * meme fenetre de 12 mois decalee d'un an, calculee avec les memes regles

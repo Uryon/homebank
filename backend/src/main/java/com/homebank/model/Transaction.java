@@ -76,7 +76,7 @@ public class Transaction {
 
     /**
      * Vrai pour un cote de virement INTERNE entre deux comptes de l'appli
-     * (voir ServiceTransaction#createTransfer) : c'est la liaison avec l'autre
+     * (voir ServiceOperationsCompte#createTransfer) : c'est la liaison avec l'autre
      * cote qui le caracterise, pas le mode de paiement. « Virement » reste un
      * mode de paiement ordinaire (loyer, salaire...), compte normalement dans
      * les rapports. Le test de nullite ne charge pas la jumelle (proxy LAZY).
@@ -168,7 +168,7 @@ public class Transaction {
     private boolean periodicSuggestionIgnored = false;
 
     /**
-     * Ajustement de solde (voir ServiceTransaction#adjustAccountBalance) :
+     * Ajustement de solde (voir ServiceOperationsCompte#adjustAccountBalance) :
      * ecart entre la valeur reelle d'un compte saisie par l'utilisateur (ex :
      * placement dont la valeur suit la bourse) et le solde calcule. Compte
      * dans le solde, mais ce n'est ni une depense ni un revenu : exclu des

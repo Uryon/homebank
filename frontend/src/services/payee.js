@@ -31,7 +31,7 @@ export function findPayeeByName(payeeIndex, name, amount) {
 
 /**
  * Découpe le motif de reconnaissance d'un tiers en ses segments (séparés par
- * ";", voir ServiceTiers#matchesPatternField côté backend), espaces multiples
+ * ";", voir MotifsTiers#matchesPatternField côté backend), espaces multiples
  * réduits comme au moment de la comparaison, segments vides ignorés.
  */
 export function splitPatternSegments(pattern) {
@@ -45,7 +45,7 @@ export function splitPatternSegments(pattern) {
 /**
  * Segment de motif tiré d'un libellé : un « ; » y devient « * », sinon il
  * couperait le libellé en motifs indépendants, trop larges (miroir de
- * ServiceTiers#defaultPattern).
+ * MotifsTiers#defaultPattern).
  */
 export function labelToPatternSegment(label) {
   return label.trim().replaceAll(';', '*')
@@ -56,7 +56,7 @@ function escapeRegexChars(text) {
   return text.replace(/[.+?^${}()|[\]\\]/g, String.raw`\$&`)
 }
 
-/** Motif « joker » (avec *) converti en expression régulière (miroir de ServiceTiers#wildcardToRegex). */
+/** Motif « joker » (avec *) converti en expression régulière (miroir de MotifsTiers#wildcardToRegex). */
 function wildcardToRegex(wildcardPattern) {
   return wildcardPattern
     .split('*')
@@ -66,7 +66,7 @@ function wildcardToRegex(wildcardPattern) {
 
 /**
  * Le motif d'un tiers (un ou plusieurs segments séparés par « ; ») reconnaît-il
- * ce libellé ? Miroir de ServiceTiers#matchesPatternField côté backend : un
+ * ce libellé ? Miroir de MotifsTiers#matchesPatternField côté backend : un
  * segment sans étoile est cherché n'importe où dans le libellé (« contient »),
  * sans tenir compte de la casse ni des espaces multiples ; un segment avec
  * étoile est un motif avancé (ex : « Carrefour*Paris »).

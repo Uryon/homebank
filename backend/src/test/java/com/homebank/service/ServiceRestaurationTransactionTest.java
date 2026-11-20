@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -96,7 +97,7 @@ class ServiceRestaurationTransactionTest {
                 .bankLabel("CB CARREFOUR").duplicateIgnored(true).periodicSuggestionIgnored(true)
                 .splitFromAmount(new BigDecimal("-80.00")).build()));
 
-        Transaction t = enregistrees.get(0);
+        Transaction t = enregistrees.getFirst();
         assertThat(t.getMemo()).isEqualTo("courses");
         assertThat(t.getPaymentMode()).isEqualTo(ModePaiement.CARD);
         assertThat(t.isValidated()).isTrue();
@@ -114,14 +115,14 @@ class ServiceRestaurationTransactionTest {
 
         service.restore(List.of(instantane(5L, 1L, "0.00").build()));
 
-        assertThat(enregistrees.get(0).getAccount()).isSameAs(compte1);
+        assertThat(enregistrees.getFirst().getAccount()).isSameAs(compte1);
     }
 
     @Test
     void restore_ajustementSansTiers_neCreeAucunTiersDepuisSonLibelle() {
         service.restore(List.of(instantane(5L, 1L, "120.00").payee("Ajustement de solde").balanceAdjustment(true).build()));
 
-        Transaction t = enregistrees.get(0);
+        Transaction t = enregistrees.getFirst();
         assertThat(t.getPayee()).isNull();
         assertThat(t.isBalanceAdjustment()).isTrue();
         verify(payeeService, never()).resolveOrCreate(any(), any(), anyList());
@@ -134,21 +135,24 @@ class ServiceRestaurationTransactionTest {
 
         service.restore(List.of(instantane(5L, 1L, "-3.00").payeeId(7L).payee("Carrefour").build()));
 
-        assertThat(enregistrees.get(0).getPayee()).isSameAs(origine);
+        assertThat(enregistrees.getFirst().getPayee()).isSameAs(origine);
         verify(payeeService, never()).resolveOrCreate(any(), any(), anyList());
+        verify(payeeService, never()).findOrCreateByExactName(any(), anyList());
     }
 
     @Test
     void restore_recreeUneSeuleFoisUnTiersDisparuPartageParPlusieursTransactions() {
         Tiers recree = payee(9L, "Kiosque");
-        when(payeeService.resolveOrCreate(eq("Kiosque"), any(), anyList())).thenReturn(recree);
+        when(payeeService.findOrCreateByExactName(eq("Kiosque"), anyList())).thenReturn(recree);
 
         service.restore(List.of(
                 instantane(5L, 1L, "-3.00").payeeId(7L).payee("Kiosque").build(),
                 instantane(6L, 1L, "-4.00").payeeId(7L).payee("Kiosque").build()));
 
         assertThat(enregistrees).extracting(Transaction::getPayee).containsOnly(recree);
-        verify(payeeService, org.mockito.Mockito.times(1)).resolveOrCreate(eq("Kiosque"), any(), anyList());
+        verify(payeeService, times(1)).findOrCreateByExactName(eq("Kiosque"), anyList());
+        // Jamais par les motifs : un autre tiers dont le motif contient ce nom l'aurait capte.
+        verify(payeeService, never()).resolveOrCreate(any(), any(), anyList());
     }
 
     @Test
@@ -166,13 +170,13 @@ class ServiceRestaurationTransactionTest {
                 instantane(2L, 1L, "-50.00").transferTransactionId(3L).paymentMode(ModePaiement.TRANSFER).exceptional(true).build(),
                 instantane(3L, 2L, "50.00").transferTransactionId(2L).paymentMode(ModePaiement.TRANSFER).build()));
 
-        Transaction debit = enregistrees.get(0);
+        Transaction debit = enregistrees.getFirst();
         Transaction credit = enregistrees.get(1);
         assertThat(debit.getTransferTransaction()).isSameAs(credit);
         assertThat(credit.getTransferTransaction()).isSameAs(debit);
         assertThat(debit.isExceptional()).isTrue();
         assertThat(credit.isExceptional()).isFalse();
-        assertThat(restaurees.get(0).getTransferTransactionId()).isEqualTo(credit.getId());
+        assertThat(restaurees.getFirst().getTransferTransactionId()).isEqualTo(credit.getId());
     }
 
     @Test
@@ -188,7 +192,7 @@ class ServiceRestaurationTransactionTest {
     void restore_coteSansJumelle_estRecreeSansAppariement() {
         service.restore(List.of(instantane(2L, 1L, "-50.00").transferTransactionId(3L).build()));
 
-        assertThat(enregistrees.get(0).getTransferTransaction()).isNull();
+        assertThat(enregistrees.getFirst().getTransferTransaction()).isNull();
     }
 
     @Test

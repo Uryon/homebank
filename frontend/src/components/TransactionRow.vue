@@ -182,6 +182,7 @@ import { accountOptionLabel } from '../services/accounts'
 import { categoryChipInfo, needsCategory } from '../services/categories'
 import { useFieldErrors } from '../services/fieldErrors'
 import { transactionRowAction } from '../services/rowKeyboard'
+import { duplicateBlockedReason as duplicateBlocked, splitBlockedReason as splitBlocked } from '../services/transactionRules'
 
 const props = defineProps({
   transaction: { type: Object, required: true },
@@ -200,7 +201,7 @@ const props = defineProps({
   payeeIndex: { type: Map, required: true },
   todayIso: { type: String, required: true },
   selected: { type: Boolean, default: false },
-  // Colonne « Solde » (liste filtrée sur un compte, voir Transactions.vue#runningBalanceById).
+  // Colonne « Solde » (liste filtrée sur un compte, voir services/accounts.js#runningBalanceById).
   showBalance: { type: Boolean, default: false },
   // Solde du compte juste après cette transaction (ordre chronologique), null si inconnu.
   balanceAfter: { type: Number, default: null }
@@ -323,23 +324,13 @@ function accountName(id) {
 const awaitsCategory = computed(() => needsCategory(props.transaction))
 
 /**
- * Raison pour laquelle la transaction ne peut pas être divisée (mêmes règles
- * que openSplit dans Transactions.vue), vide sinon : le bouton reste
- * cliquable — le clic explique le refus, utile sans info-bulle (tactile) —
- * mais apparaît désactivé, avec la raison en info-bulle.
+ * Raisons pour lesquelles la transaction ne peut pas être divisée ou
+ * dupliquée (voir services/transactionRules.js), vides sinon : le bouton
+ * reste cliquable — le clic explique le refus, utile sans info-bulle
+ * (tactile) — mais apparaît désactivé, avec la raison en info-bulle.
  */
-const splitBlockedReason = computed(() => {
-  if (props.transaction.transferTransactionId) return 'Un virement entre comptes ne peut pas être divisé'
-  if (props.transaction.balanceAdjustment) return 'Un ajustement de solde ne peut pas être divisé'
-  return ''
-})
-
-/** Raison pour laquelle la transaction ne peut pas être dupliquée (même règle que Transactions.vue#duplicateTransaction), vide sinon. */
-const duplicateBlockedReason = computed(() => {
-  if (props.transaction.transferTransactionId) return 'Un virement entre comptes se crée depuis la page Comptes'
-  if (props.transaction.balanceAdjustment) return 'Un ajustement de solde se crée depuis la page Comptes'
-  return ''
-})
+const splitBlockedReason = computed(() => splitBlocked(props.transaction))
+const duplicateBlockedReason = computed(() => duplicateBlocked(props.transaction))
 
 /** Devise du compte de la transaction : le montant s'affiche dans la monnaie réelle du compte. */
 const accountCurrency = computed(() => props.accountsById.get(props.transaction.accountId)?.currency)
@@ -375,7 +366,7 @@ function onActionKey(event) {
 }
 
 /**
- * Clic sur la case de sélection (Maj : plage, voir Transactions.vue#toggleSelect).
+ * Clic sur la case de sélection (Maj : plage, voir services/rowSelection.js#toggleSelect).
  * La case est ensuite recalée sur l'état réel : un Maj+clic sur une case déjà
  * cochée la décoche nativement alors que la plage la garde sélectionnée, et
  * Vue ne la corrigerait pas (la prop `selected` n'a pas changé).
@@ -414,19 +405,8 @@ function confirmEdit() {
     amount: amountFieldError(editForm.value.amount, props.transaction.amount)
   })
   if (!valid) return
-  emit('confirm-edit', {
-    accountId: editForm.value.accountId,
-    date: editForm.value.date,
-    payee: editForm.value.payee,
-    amount: editForm.value.amount,
-    categoryId: editForm.value.categoryId,
-    paymentMode: editForm.value.paymentMode,
-    memo: editForm.value.memo,
-    transferTransactionId: editForm.value.transferTransactionId,
-    periodicExpense: editForm.value.periodicExpense,
-    exceptional: editForm.value.exceptional,
-    validated: editForm.value.validated
-  })
+  // Copie : exactement les champs de buildEditForm, sans lien avec l'état local de la ligne.
+  emit('confirm-edit', { ...editForm.value })
 }
 </script>
 

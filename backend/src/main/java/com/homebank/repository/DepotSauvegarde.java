@@ -41,6 +41,13 @@ public class DepotSauvegarde {
         return new Colonne(nom, type);
     }
 
+    /**
+     * Registre des lignes de relevé importées (voir LigneImportee), apparu
+     * après les premières sauvegardes : absent d'une sauvegarde plus ancienne,
+     * il est reconstitué à partir des transactions restaurées.
+     */
+    public static final String LIGNES_IMPORTEES = "lignes_importees";
+
     /** Ordre d'insertion : une table n'est insérée qu'après celles qu'elle référence. */
     public static final List<Table> TABLES = List.of(
             new Table("comptes", List.of(c("id", TypeColonne.ID), c("archived", TypeColonne.BOOLEEN),
@@ -65,6 +72,9 @@ public class DepotSauvegarde {
             new Table("transactions_supprimees", List.of(c("id", TypeColonne.ID), c("account_id", TypeColonne.ID),
                     c("amount", TypeColonne.DECIMAL), c("bank_label", TypeColonne.TEXTE), c("date", TypeColonne.DATE),
                     c("deleted_at", TypeColonne.DATE), c("payee_name", TypeColonne.TEXTE)), null, true),
+            new Table(LIGNES_IMPORTEES, List.of(c("id", TypeColonne.ID), c("account_id", TypeColonne.ID),
+                    c("date", TypeColonne.DATE), c("amount", TypeColonne.DECIMAL), c("label", TypeColonne.TEXTE),
+                    c("transaction_id", TypeColonne.ID)), null, true),
             new Table("dernier_import", List.of(c("id", TypeColonne.ID), c("date_heure", TypeColonne.HORODATAGE)), null, false)
     );
 
@@ -97,11 +107,26 @@ public class DepotSauvegarde {
             inserer(table, lignes);
             if (table.autoReference() != null) relier(table, lignes);
         }
+        if (!donnees.containsKey(LIGNES_IMPORTEES)) reconstituerLignesImportees();
         // En dernier, une fois toutes les lignes acceptées : sous H2, un ALTER
         // TABLE valide la transaction en cours, qui ne pourrait plus être annulée.
         for (Table table : TABLES) {
             if (table.identite()) recalerIdentite(table);
         }
+    }
+
+    /** Même reprise de l'existant que la migration Flyway V2 (transactions importées, puis supprimées). */
+    private void reconstituerLignesImportees() {
+        jdbc.update("""
+                insert into lignes_importees (account_id, date, amount, label, transaction_id)
+                select account_id, date, coalesce(split_from_amount, amount), bank_label, id
+                from transactions where bank_label is not null and bank_label <> ''""");
+        jdbc.update("""
+                insert into lignes_importees (account_id, date, amount, label, transaction_id)
+                select account_id, date, amount, coalesce(nullif(bank_label, ''), payee_name), null
+                from transactions_supprimees
+                where coalesce(nullif(bank_label, ''), payee_name) is not null
+                  and coalesce(nullif(bank_label, ''), payee_name) <> ''""");
     }
 
     private void viderTout() {

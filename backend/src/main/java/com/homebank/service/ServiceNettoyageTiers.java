@@ -48,7 +48,7 @@ public class ServiceNettoyageTiers {
 
     private record FauxTiers(Tiers payee, List<Transaction> transactions, long otherTransactions) {
         boolean deletable() {
-            return otherTransactions == 0 && ServiceTiers.isAutoCreatedState(payee);
+            return otherTransactions == 0 && MotifsTiers.isAutoCreatedState(payee);
         }
     }
 

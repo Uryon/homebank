@@ -11,9 +11,9 @@ import java.time.ZoneId;
 /**
  * Empreinte d'une transaction supprimee manuellement (compte, date, montant,
  * tiers, libelle bancaire), conservee apres suppression pour que
- * ServiceImport#isAlreadyKnown la reconnaisse et ne la reimporte pas si le
+ * ServiceImport#processOperation la reconnaisse et ne la reimporte pas si le
  * releve bancaire source la contient encore lors d'un futur import (voir
- * ServiceTransaction#delete). Sans cette trace, une transaction supprimee
+ * ServiceSuppressionTransaction#delete). Sans cette trace, une transaction supprimee
  * (ex : paire "depense remboursee" totalement effacee, voir
  * ServiceDoublon#findReimbursementGroups) disparaissait bien de la base,
  * mais reapparaissait au prochain import faute d'un doublon deja en base

@@ -216,7 +216,7 @@ class ServicePretTest {
 
         List<LigneAmortissementDTO> schedule = service.computeSchedule(loan);
 
-        LigneAmortissementDTO row = schedule.get(0);
+        LigneAmortissementDTO row = schedule.getFirst();
         assertThat(row.getInterest()).isEqualByComparingTo("10.00");
         assertThat(row.getPrincipal()).isEqualByComparingTo("90.00");
         assertThat(row.getRemainingBalance()).isEqualByComparingTo("910.00");
@@ -296,13 +296,16 @@ class ServicePretTest {
 
     @Test
     void create_exigeUnNomUnTauxPositifEtUneDateDeDepart() {
-        assertThatThrownBy(() -> service.create(validPayload().name("   ").build()))
+        PretDTO sansNom = validPayload().name("   ").build();
+        PretDTO tauxNegatif = validPayload().annualRate(new BigDecimal("-1.5")).build();
+        PretDTO sansDate = validPayload().startDate(null).build();
+        assertThatThrownBy(() -> service.create(sansNom))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Le nom du prêt est obligatoire.");
-        assertThatThrownBy(() -> service.create(validPayload().annualRate(new BigDecimal("-1.5")).build()))
+        assertThatThrownBy(() -> service.create(tauxNegatif))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Le taux annuel ne peut pas être négatif.");
-        assertThatThrownBy(() -> service.create(validPayload().startDate(null).build()))
+        assertThatThrownBy(() -> service.create(sansDate))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("La date de première mensualité est obligatoire.");
         verify(loanRepository, never()).save(any());
@@ -326,7 +329,7 @@ class ServicePretTest {
 
         List<LigneAmortissementDTO> schedule = service.computeSchedule(loan);
 
-        assertThat(schedule.get(0).isPaid()).isTrue();
+        assertThat(schedule.getFirst().isPaid()).isTrue();
         assertThat(schedule.get(1).isPaid()).isTrue();
         assertThat(schedule.get(3).isPaid()).isFalse();
     }

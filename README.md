@@ -30,7 +30,9 @@ avec un backend **Java / Spring Boot** et un frontend **Vue.js 3**.
   cartes repliables (état mémorisé), couleur fixe par catégorie (la même dans les puces, la
   répartition et les tableaux),
   analyse mensuelle par catégorie avec comparaison aux mêmes 12 mois de l'année précédente (colonnes
-  « 12 mois préc. » et « Évol. », ligne « vs … » des cartes du haut), export PDF automatique (à chaque rapprochement validé et à la fermeture de l'appli)
+  « 12 mois préc. » et « Évol. », ligne « vs … » des cartes du haut), export PDF automatique (à chaque rapprochement validé et à la fermeture de l'appli) en deux fichiers :
+  `tableau-de-bord.pdf` (A4, avec les tableaux de 12 mois) et `tableau-de-bord-telephone.pdf` (une seule page
+  à la largeur d'un téléphone, à faire défiler)
 - **Sauvegarde complète** (page Importer, ou `Ctrl+K` « Télécharger une sauvegarde ») : un fichier JSON
   de toutes les données, restaurable tel quel (les données remplacées sont d'abord sauvegardées, et
   « Annuler » les remet en place). Une sauvegarde est aussi écrite automatiquement au premier démarrage

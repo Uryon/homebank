@@ -44,7 +44,7 @@ public class ServiceDoublon {
      * Regroupe les transactions deja en base qui semblent doublonnees, en
      * deux categories (voir GroupeDoublonDTO#certain) :
      * - "certains" : meme definition que la detection a l'import (voir
-     *   ServiceImport#isAlreadyKnown) — meme compte, meme date + montant +
+     *   ServiceImport#processOperation) — meme compte, meme date + montant +
      *   tiers canonique (insensible a la casse). Occurrences interchangeables.
      * - "probables" : meme compte + date + montant, mais tiers different —
      *   ratees par la detection ci-dessus car elle exige le meme tiers. Cas
@@ -69,7 +69,7 @@ public class ServiceDoublon {
         Stream<GroupeDoublonDTO> reimbursements = findReimbursementGroups(all).stream();
 
         return Stream.concat(Stream.concat(certain, probable), reimbursements)
-                .sorted(Comparator.comparing((GroupeDoublonDTO g) -> g.getTransactions().get(0).getDate()).reversed())
+                .sorted(Comparator.comparing((GroupeDoublonDTO g) -> g.getTransactions().getFirst().getDate()).reversed())
                 .toList();
     }
 
@@ -187,7 +187,7 @@ public class ServiceDoublon {
     }
 
     private boolean samePayeeForAll(List<Transaction> group) {
-        String first = canonicalPayee(group.get(0));
+        String first = canonicalPayee(group.getFirst());
         return group.stream().allMatch(t -> canonicalPayee(t).equals(first));
     }
 
@@ -219,8 +219,8 @@ public class ServiceDoublon {
 
     private static boolean mayBeSameMerchant(Tiers first, Tiers second) {
         if (first == null || second == null) return true;
-        return ServiceTiers.matchesPatternField(first.getPattern(), second.getName())
-                || ServiceTiers.matchesPatternField(second.getPattern(), first.getName());
+        return MotifsTiers.matchesPatternField(first.getPattern(), second.getName())
+                || MotifsTiers.matchesPatternField(second.getPattern(), first.getName());
     }
 
     /**

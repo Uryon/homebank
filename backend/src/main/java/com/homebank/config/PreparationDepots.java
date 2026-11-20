@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
  * L'analyse de leurs requetes, de loin l'etape la plus longue du demarrage, se
  * repartit ainsi entre les coeurs du processeur au lieu de s'enchainer. Le
  * comptage ne sert qu'a declencher cette preparation.
- *
+ * <p>
  * Seuls les NOMS des depots sont lus sur le fil principal : demander les depots
  * eux-memes (getBeansOfType) les construisait tous, l'un apres l'autre, avant
  * meme de lancer les fils (vu dans un vidage des fils : ~0,6 s d'analyse de

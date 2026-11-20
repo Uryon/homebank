@@ -107,7 +107,7 @@ public class ServiceRestaurationTransaction {
         transaction.setAccount(accountService.findById(snapshot.getAccountId()));
         transaction.setDate(snapshot.getDate());
         transaction.setAmount(amount);
-        transaction.setPayee(restoredPayee(snapshot, amount, payeesById, knownPayees));
+        transaction.setPayee(restoredPayee(snapshot, payeesById, knownPayees));
         transaction.setMemo(ServiceTransaction.sanitizeMemo(snapshot.getMemo()));
         transaction.setCategory(snapshot.getCategoryId() != null
                 ? categoryService.findById(snapshot.getCategoryId())
@@ -126,18 +126,19 @@ public class ServiceRestaurationTransaction {
 
     /**
      * Le tiers d'origine s'il existe encore ; sinon (supprime avec sa derniere
-     * transaction), retrouve ou recree d'apres son nom. Sans payeeId, le champ
-     * payee n'est qu'un libelle calcule (« Virement vers... », « Ajustement de
-     * solde ») : le prendre pour un nom creerait un faux tiers.
+     * transaction), retrouve ou recree sous son nom EXACT (voir
+     * ServiceTiers#findOrCreateByExactName) : reconnu par les motifs, « Fleuriste
+     * Rose » revenait sous le tiers « Rose ». Sans payeeId, le champ payee n'est
+     * qu'un libelle calcule (« Virement vers... », « Ajustement de solde ») : le
+     * prendre pour un nom creerait un faux tiers.
      */
-    private Tiers restoredPayee(TransactionDTO snapshot, BigDecimal amount,
-                                Map<Long, Tiers> payeesById, List<Tiers> knownPayees) {
-        if (snapshot.getPayeeId() == null) return null;
+    private Tiers restoredPayee(TransactionDTO snapshot, Map<Long, Tiers> payeesById, List<Tiers> knownPayees) {
+        if (snapshot.getPayeeId() == null || snapshot.getPayee() == null || snapshot.getPayee().isBlank()) return null;
         return payeesById.computeIfAbsent(snapshot.getPayeeId(),
-                id -> payeeService.resolveOrCreate(snapshot.getPayee(), amount, knownPayees));
+                id -> payeeService.findOrCreateByExactName(snapshot.getPayee(), knownPayees));
     }
 
-    /** Relie les deux cotes de chaque virement restaure (voir ServiceTransaction#createTransfer). */
+    /** Relie les deux cotes de chaque virement restaure (voir ServiceOperationsCompte#createTransfer). */
     private static void linkTransfers(Map<Long, TransactionDTO> snapshotsById, Map<Long, Transaction> restoredById) {
         snapshotsById.forEach((id, snapshot) -> {
             Long twinId = snapshot.getTransferTransactionId();
@@ -163,7 +164,7 @@ public class ServiceRestaurationTransaction {
 
     /**
      * Retire l'empreinte laissee par la suppression (voir
-     * ServiceTransaction#recordDeletion) : restee en place, elle ferait passer
+     * ServiceSuppressionTransaction#recordDeletion) : restee en place, elle ferait passer
      * pour deja supprimee une autre ligne identique d'un prochain releve.
      */
     private void forgetDeletions(Collection<TransactionDTO> snapshots) {

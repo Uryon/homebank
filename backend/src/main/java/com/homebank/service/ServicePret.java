@@ -131,6 +131,17 @@ public class ServicePret {
      * pour un champ sans rapport (nom, notes...).
      */
     private void validate(PretDTO payload, Pret existing) {
+        validateFields(payload);
+        if (existing != null && sameFinancialTerms(existing, payload)) return;
+
+        BigDecimal monthlyRate = payload.getAnnualRate()
+                .divide(BigDecimal.valueOf(1200), RATE_DIVISION_SCALE, RoundingMode.HALF_UP);
+        ensureFirstMonthInterestCovered(payload, monthlyRate);
+        ensureFinalPaymentIsReasonable(payload, monthlyRate);
+    }
+
+    /** Champs obligatoires et bornes de chaque valeur saisie. */
+    private static void validateFields(PretDTO payload) {
         if (payload.getName() == null || payload.getName().isBlank()) {
             throw new IllegalArgumentException("Le nom du prêt est obligatoire.");
         }
@@ -158,25 +169,24 @@ public class ServicePret {
         if (payload.getMonthlyInsurance() != null && payload.getMonthlyInsurance().signum() < 0) {
             throw new IllegalArgumentException("L'assurance mensuelle ne peut pas être négative.");
         }
+    }
 
-        if (existing != null
-                && existing.getPrincipal().compareTo(payload.getPrincipal()) == 0
+    /** Capital, taux, mensualite et duree inchanges : pas de nouveau controle de l'echeancier (voir validate). */
+    private static boolean sameFinancialTerms(Pret existing, PretDTO payload) {
+        return existing.getPrincipal().compareTo(payload.getPrincipal()) == 0
                 && existing.getAnnualRate().compareTo(payload.getAnnualRate()) == 0
                 && existing.getMonthlyPayment().compareTo(payload.getMonthlyPayment()) == 0
-                && existing.getTermMonths().equals(payload.getTermMonths())) {
-            return;
-        }
+                && existing.getTermMonths().equals(payload.getTermMonths());
+    }
 
-        BigDecimal monthlyRate = payload.getAnnualRate()
-                .divide(BigDecimal.valueOf(1200), RATE_DIVISION_SCALE, RoundingMode.HALF_UP);
+    /** La mensualite doit au moins couvrir les interets du premier mois, sinon le capital ne baisse jamais. */
+    private static void ensureFirstMonthInterestCovered(PretDTO payload, BigDecimal monthlyRate) {
         BigDecimal firstMonthInterest = payload.getPrincipal().multiply(monthlyRate).setScale(SCALE, RoundingMode.HALF_UP);
         if (payload.getMonthlyPayment().compareTo(firstMonthInterest) <= 0) {
             throw new IllegalArgumentException(
                     "La mensualité (" + euros(payload.getMonthlyPayment()) + ") ne couvre même pas les intérêts du "
                             + "premier mois (" + euros(firstMonthInterest) + ") : le capital ne serait jamais remboursé.");
         }
-
-        ensureFinalPaymentIsReasonable(payload, monthlyRate);
     }
 
     /**
@@ -193,7 +203,7 @@ public class ServicePret {
         simulated.setStartDate(payload.getStartDate());
         simulated.setMonthlyPayment(payload.getMonthlyPayment());
         List<LigneAmortissementDTO> schedule = computeSchedule(simulated);
-        BigDecimal finalPayment = schedule.get(schedule.size() - 1).getPayment();
+        BigDecimal finalPayment = schedule.getLast().getPayment();
         if (finalPayment.compareTo(payload.getMonthlyPayment().multiply(MAX_FINAL_PAYMENT_RATIO)) > 0) {
             throw new IllegalArgumentException("La mensualité (" + euros(payload.getMonthlyPayment())
                     + ") est trop faible pour rembourser le prêt en " + payload.getTermMonths()
@@ -289,6 +299,6 @@ public class ServicePret {
 
     public LocalDate payoffDate(List<LigneAmortissementDTO> schedule) {
         if (schedule.isEmpty()) return null;
-        return schedule.get(schedule.size() - 1).getDate();
+        return schedule.getLast().getDate();
     }
 }

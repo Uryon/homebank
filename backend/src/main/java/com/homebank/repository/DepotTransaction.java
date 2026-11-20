@@ -57,7 +57,7 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
      * ajustements de solde, qui ne sont pas des operations : debut de
      * l'historique, pour savoir si la comparaison avec l'annee precedente du
      * tableau d'analyse mensuelle porte sur des donnees reelles (voir
-     * ServiceRapport#monthlyCategoryAnalysis).
+     * ServiceAnalyseMensuelle#monthlyCategoryAnalysis).
      */
     @Query("select min(t.date) from Transaction t where t.balanceAdjustment = false")
     LocalDate findEarliestDate();
@@ -79,7 +79,7 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
      * Transactions demandees, avec tiers, categorie et jumelle de virement
      * deja charges (fetch joins de SELECT_FOR_DISPLAY) : la suppression et la
      * modification en masse lisent la jumelle et le tiers de chaque transaction
-     * (voir ServiceTransaction#unlinkTransferPairs, #recordDeletion et la
+     * (voir ServiceSuppressionTransaction#unlinkTransferPairs, #recordDeletion et la
      * reponse DTO), soit sinon une requete par ligne selectionnee.
      */
     @Query(SELECT_FOR_DISPLAY + " where t.id in :ids")
@@ -97,7 +97,7 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
     /**
      * Transactions en attente de validation (rapprochement bancaire), pour la
      * suppression en masse, avec leur eventuelle jumelle de virement deja
-     * chargee (fetch join) : ServiceTransaction#deleteAllPending verifie le
+     * chargee (fetch join) : ServiceSuppressionTransaction#deleteAllPending verifie le
      * statut valide de cette jumelle pour chacune (voir sa javadoc), sans quoi
      * chaque transaction en attente declencherait sa propre requete au
      * premier acces (LAZY).
@@ -108,7 +108,7 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
     /**
      * Transactions dont la categorie est marquee "annuelle" (lissees sur 12
      * mois dans les rapports, voir Categorie#annualized /
-     * ServiceRapport#attributedTransactions). Chargees a part de
+     * AttributionTransactions#attributedTransactions). Chargees a part de
      * findByDateBetween : une transaction annuelle doit compter dans un
      * rapport meme sur un mois different de sa date reelle de paiement, tant
      * que ce mois appartient a la fenetre glissante de 12 mois qui demarre a
@@ -124,7 +124,7 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
     /**
      * Toutes les transactions, tiers et categorie deja charges (fetch join) :
      * utilise par la categorisation automatique en masse (voir
-     * ServiceTiers#autoCategorize), qui doit lire le tiers et la categorie de
+     * ServiceCategorisationAuto#autoCategorize), qui doit lire le tiers et la categorie de
      * CHAQUE transaction pour les regrouper par tiers — un simple findAll()
      * les chargerait un par un a l'acces (LAZY), soit potentiellement des
      * milliers de requetes N+1.

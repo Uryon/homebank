@@ -17,12 +17,19 @@
 // generation du PDF, voir ServiceDernierImport cote backend) et la date de
 // generation en pied de chaque page (Playwright numeroterait chaque partie
 // independamment si on utilisait son displayHeaderFooter).
+//
+// Un second fichier, tableau-de-bord-telephone.pdf, est fait pour l'ecran
+// d'un telephone : une seule longue page a la largeur d'un telephone (on la
+// fait defiler sans zoomer, sans coupure de page), dans la mise en page
+// mobile de l'appli, avec le contenu de la partie portrait (les grands
+// tableaux de 12 mois restent dans le PDF A4).
 
 import { chromium } from 'playwright'
 // Version ESM de pdf-lib en un seul fichier : « pdf-lib » seul est resolu vers
 // sa version CommonJS (139 fichiers), chargee en ~0,75 s au lieu de ~0,1 s
 // (mesure ; PDF produit identique octet pour octet, verifie).
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib/dist/pdf-lib.esm.min.js'
+import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -38,6 +45,11 @@ const url = urlTableauDeBord || 'http://127.0.0.1:5173/'
 // Nom fixe (pas d'horodatage) : chaque export remplace le precedent, plutot
 // que d'accumuler un fichier par export dans le dossier synchronise.
 const cheminSortie = path.join(dossierSortie, 'tableau-de-bord.pdf')
+const cheminTelephone = path.join(dossierSortie, 'tableau-de-bord-telephone.pdf')
+
+/** Largeur de la page du PDF telephone (px CSS) : celle d'un telephone courant. */
+const LARGEUR_TELEPHONE = 412
+const MARGE_TELEPHONE = { haut: 30, bas: 30, cote: 12 }
 
 await mkdir(dossierSortie, { recursive: true })
 
@@ -65,7 +77,7 @@ async function attendreTableauDeBord(page) {
   // Document deja marque et rendu par la capture precedente : rien a attendre.
   const dejaPret = await page.evaluate(() => window.__exportHomebank)
   if (dejaPret) return dejaPret
-  const jeton = `${Date.now()}-${Math.random()}`
+  const jeton = randomUUID()
   await page.evaluate((valeur) => { window.__exportHomebank = valeur }, jeton)
   await attendreGraphiquesDessines(page)
   return jeton
@@ -109,12 +121,88 @@ async function capturer(page, classe, options) {
       }, [classe, CLASSES_EXPORT])
       const pdf = await page.pdf(options)
       if (await memeDocument(page, jeton)) return pdf
-    } catch (erreur) {
-      if (essai === ESSAIS_MAX) throw erreur
+    } catch (error_) {
+      if (essai === ESSAIS_MAX) throw error_
     }
     console.error(`Page rechargee pendant l'export (essai ${essai}/${ESSAIS_MAX}) : nouvelle capture.`)
   }
   throw new Error(`Page rechargee pendant chacun des ${ESSAIS_MAX} essais d'export : PDF non ecrit.`)
+}
+
+/**
+ * PDF telephone : la page est mise a la largeur imprimable du telephone (mise
+ * en page mobile, graphiques redessines a cette largeur), sa hauteur mesuree
+ * en mode impression, puis imprimee sur une page unique de cette hauteur.
+ */
+async function capturerTelephone(page) {
+  const largeurUtile = LARGEUR_TELEPHONE - 2 * MARGE_TELEPHONE.cote
+  for (let essai = 1; essai <= ESSAIS_MAX; essai++) {
+    try {
+      const jeton = await attendreTableauDeBord(page)
+      await page.evaluate(([toutes]) => {
+        document.documentElement.classList.remove(...toutes)
+        document.documentElement.classList.add('pdf-cacher-tableaux-larges')
+      }, [CLASSES_EXPORT])
+      await page.setViewportSize({ width: largeurUtile, height: 900 })
+      await page.emulateMedia({ media: 'print' })
+      // Graphiques redimensionnes a la nouvelle largeur (ResizeObserver de Chart.js).
+      await page.evaluate(() => new Promise((fin) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(fin, 150)))))
+      const hauteur = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight))
+      const pdf = await page.pdf({
+        width: `${LARGEUR_TELEPHONE}px`,
+        // +2 px : un arrondi de mise en page ne doit jamais creer une seconde page presque vide.
+        height: `${hauteur + MARGE_TELEPHONE.haut + MARGE_TELEPHONE.bas + 2}px`,
+        printBackground: true,
+        margin: {
+          top: `${MARGE_TELEPHONE.haut}px`,
+          bottom: `${MARGE_TELEPHONE.bas}px`,
+          left: `${MARGE_TELEPHONE.cote}px`,
+          right: `${MARGE_TELEPHONE.cote}px`
+        }
+      })
+      if (await memeDocument(page, jeton)) return pdf
+    } catch (error_) {
+      if (essai === ESSAIS_MAX) throw error_
+    }
+    console.error(`Page rechargee pendant l'export telephone (essai ${essai}/${ESSAIS_MAX}) : nouvelle capture.`)
+  }
+  throw new Error(`Page rechargee pendant chacun des ${ESSAIS_MAX} essais d'export telephone : PDF non ecrit.`)
+}
+
+/** En-tete (date du dernier import, premiere page) et pied (date de generation, numero de page) de chaque page. */
+async function annoter(documentPdf, dateDernierImport, dateGeneration) {
+  const police = await documentPdf.embedFont(StandardFonts.Helvetica)
+  const nombreTotalPages = documentPdf.getPageCount()
+  documentPdf.getPages().forEach((p, i) => {
+    const { width, height } = p.getSize()
+    const taille = 8
+
+    if (i === 0) {
+      // Date du dernier import de fichier en haut de la premiere page, pour
+      // la voir sans avoir a faire defiler (le pied de page ci-dessous,
+      // present sur chaque page, garde lui la date de generation du PDF —
+      // utile pour verifier une page isolee/imprimee).
+      const texteEntete = dateDernierImport
+        ? `Dernier import de fichier : ${dateDernierImport}`
+        : 'Dernier import de fichier : aucun'
+      p.drawText(texteEntete, { x: 24, y: height - 16, size: taille, font: police, color: rgb(0.55, 0.55, 0.55) })
+    }
+
+    // Page unique (PDF telephone) : pas de numero de page.
+    const textePied = nombreTotalPages > 1
+      ? `Genere le ${dateGeneration} — page ${i + 1}/${nombreTotalPages}`
+      : `Genere le ${dateGeneration}`
+    p.drawText(textePied, {
+      x: Math.max(24, width - police.widthOfTextAtSize(textePied, taille) - 24),
+      y: 18,
+      size: taille,
+      font: police,
+      color: rgb(0.55, 0.55, 0.55)
+    })
+  })
+  documentPdf.setTitle('Tableau de bord Homebank')
+  documentPdf.setProducer('Homebank export-dashboard.mjs')
+  documentPdf.setCreationDate(new Date())
 }
 
 const browser = await chromium.launch()
@@ -133,51 +221,21 @@ try {
     pages.forEach((p) => documentFinal.addPage(p))
   }
 
-  const police = await documentFinal.embedFont(StandardFonts.Helvetica)
   const dateGeneration = new Date().toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' })
   // LocalDateTime cote backend (pas de fuseau) : interprete en heure locale,
   // coherent avec dateGeneration ci-dessus (meme machine).
   const dateDernierImport = dateDernierImportIso
     ? new Date(dateDernierImportIso).toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' })
     : null
-  const nombreTotalPages = documentFinal.getPageCount()
-  documentFinal.getPages().forEach((p, i) => {
-    const { width, height } = p.getSize()
-    const taille = 8
-
-    if (i === 0) {
-      // Date du dernier import de fichier en haut de la premiere page, pour
-      // la voir sans avoir a faire defiler (le pied de page ci-dessous,
-      // present sur chaque page, garde lui la date de generation du PDF —
-      // utile pour verifier une page isolee/imprimee).
-      const texteEntete = dateDernierImport
-        ? `Dernier import de fichier : ${dateDernierImport}`
-        : 'Dernier import de fichier : aucun'
-      p.drawText(texteEntete, {
-        x: 24,
-        y: height - 16,
-        size: taille,
-        font: police,
-        color: rgb(0.55, 0.55, 0.55)
-      })
-    }
-
-    const textePied = `Genere le ${dateGeneration} — page ${i + 1}/${nombreTotalPages}`
-    p.drawText(textePied, {
-      x: width - police.widthOfTextAtSize(textePied, taille) - 24,
-      y: 18,
-      size: taille,
-      font: police,
-      color: rgb(0.55, 0.55, 0.55)
-    })
-  })
-
-  documentFinal.setTitle('Tableau de bord Homebank')
-  documentFinal.setProducer('Homebank export-dashboard.mjs')
-  documentFinal.setCreationDate(new Date())
+  await annoter(documentFinal, dateDernierImport, dateGeneration)
 
   await writeFile(cheminSortie, await documentFinal.save())
-  console.log(cheminSortie)
+
+  // Apres le PDF A4 : la largeur de la page change pour le telephone.
+  const documentTelephone = await PDFDocument.load(await capturerTelephone(page))
+  await annoter(documentTelephone, dateDernierImport, dateGeneration)
+  await writeFile(cheminTelephone, await documentTelephone.save())
+  console.log(`${cheminSortie} ; ${cheminTelephone}`)
 } finally {
   await browser.close()
 }

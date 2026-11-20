@@ -198,46 +198,14 @@
       </div>
     </div>
 
-    <!-- Modal création uniquement -->
-    <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
-      <div v-dialog="() => (showModal = false)" class="modal" role="dialog" aria-modal="true">
-        <h2>Nouvelle catégorie</h2>
-        <div class="form-grid">
-          <div class="form-field">
-            <label for="new-category-icon">Icône</label>
-            <input id="new-category-icon" v-model="form.icon" placeholder="🙂" maxlength="4" class="icon-field icon-field-full" />
-          </div>
-          <div class="form-field">
-            <label for="new-category-name">Nom</label>
-            <input id="new-category-name" v-model="form.name" maxlength="255" placeholder="Ex : Alimentation" v-bind="invalidAttrs('name')" @input="clear('name')" />
-            <FieldError id="new-category-name-error" :message="errors.name" />
-          </div>
-          <div class="form-field">
-            <label for="new-category-parent">Catégorie parente</label>
-            <select id="new-category-parent" v-model.number="form.parentId">
-              <option :value="null">Aucune (catégorie racine)</option>
-              <option v-for="r in roots" :key="r.id" :value="r.id">{{ iconPrefix(r.icon) }}{{ r.name }}</option>
-            </select>
-          </div>
-          <div class="form-field" v-if="!form.parentId">
-            <label for="new-category-type">Type</label>
-            <select id="new-category-type" v-model="form.type">
-              <option v-for="option in CATEGORY_TYPE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
-            </select>
-          </div>
-          <div class="form-field" v-else>
-            <span class="form-field-label">Type</span>
-            <div class="inherited-type inherited-type-modal">
-              {{ typeLabel(rootTypeById.get(form.parentId)) }} (hérité de la catégorie parente)
-            </div>
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button class="btn secondary" @click="showModal = false">Annuler</button>
-          <button class="btn" @click="save">Enregistrer</button>
-        </div>
-      </div>
-    </div>
+    <CategoryCreateModal
+      v-if="newCategoryParentId !== undefined"
+      :roots="roots"
+      :root-type-by-id="rootTypeById"
+      :initial-parent-id="newCategoryParentId"
+      @save="save"
+      @cancel="newCategoryParentId = undefined"
+    />
 
     <!-- Modal fusion -->
     <MergeModal
@@ -277,21 +245,22 @@
 import { notify, askConfirm } from '../services/feedback'
 import { ref, onMounted, computed, nextTick } from 'vue'
 import { useRouteActions } from '../services/routeActions'
-import { CategoriesAPI, PayeesAPI, TransactionsAPI } from '../services/api'
-import { isEmptyRestorePlan, planCategoryStateRestore, restoreCategoryState, snapshotCategoryState } from '../services/categoryRestore'
+import { CategoriesAPI } from '../services/api'
+import { snapshotCategoryState } from '../services/categoryRestore'
 import { dataStore } from '../services/dataStore'
-import { normalizeSearch, parseSearchTerms } from '../services/search'
+import { parseSearchTerms } from '../services/search'
 import { alertApiError } from '../services/errors'
-import { pluralize } from '../services/format'
-import { CATEGORY_TYPE_OPTIONS, categoryIconPrefix as iconPrefix, categoryTypeLabel as typeLabel, childrenByRootId, flattenCategories, transactionSearchForCategory } from '../services/categories'
+import { categoryIconPrefix as iconPrefix, categoryTypeLabel as typeLabel, childrenByRootId, flattenCategories, transactionSearchForCategory } from '../services/categories'
 import { handleRowEnter, restoreFocusToRow } from '../services/rowKeyboard'
 import MergeModal from '../components/MergeModal.vue'
+import CategoryCreateModal from '../components/CategoryCreateModal.vue'
 import Icon from '../components/Icon.vue'
-import FieldError from '../components/FieldError.vue'
 import CategoryInlineEditor from '../components/CategoryInlineEditor.vue'
 import { useFieldErrors } from '../services/fieldErrors'
 import { useLastAction } from '../services/lastAction'
 import { useIdSelection } from '../services/selection'
+import { categoryFullLabel as fullLabelOf, filterCategoryRoots, hiddenCategoriesMatching, visibleChildrenByRoot } from '../services/categoryFilters'
+import { useCategoryStructureActions } from '../services/categoryStructureActions'
 import UndoBar from '../components/UndoBar.vue'
 
 /*
@@ -301,32 +270,15 @@ import UndoBar from '../components/UndoBar.vue'
  */
 const categories = computed(() => dataStore.state.categories)
 const roots = computed(() => categories.value.filter(c => !c.parentId))
-const showModal = ref(false)
 const searchQuery = ref('')
-const form = ref(emptyForm())
+/** Fenêtre « Nouvelle catégorie » (CategoryCreateModal.vue) : parente pré-choisie (null = racine), undefined fenêtre fermée. */
+const newCategoryParentId = ref(undefined)
 
 const editingId = ref(null)
 const editForm = ref(null)
 const firstEditField = ref(null)
 
 const { selectedIds, selectedIdSet, allSelectedIn, toggleAllIn, keepExisting, clearSelection } = useIdSelection()
-const showMergeModal = ref(false)
-const mergeTargetId = ref(null)
-const merging = ref(false)
-
-const showReparentModal = ref(false)
-const reparentTargetId = ref(null)
-const reparenting = ref(false)
-
-// Id de la sous-catégorie en cours de glissement (drag-and-drop), et id de la
-// catégorie racine actuellement survolée par ce glissement (pour son
-// surlignage, voir .cat-row-dropzone).
-const draggedCategoryId = ref(null)
-const dragOverRootId = ref(null)
-
-function emptyForm() {
-  return { name: '', parentId: null, type: 'EXPENSE', icon: '' }
-}
 
 // Index Map (parentId -> enfants), precalcule une seule fois quand
 // `categories` change, pour eviter un scan lineaire de toute la liste a
@@ -348,33 +300,13 @@ function children(rootId) {
 }
 
 /**
- * Un critère matche un nom de catégorie : en mode "contient" (défaut) il
- * suffit que le terme soit inclus dans le nom normalisé ; en mode "exact"
- * (terme entre guillemets, ex : "CAF") il faut une égalité stricte, pour
- * retrouver "CAF" sans remonter aussi une catégorie contenant "caf".
- */
-function nameMatchesTerm(name, { term, exact }) {
-  const normalized = normalizeSearch(name)
-  return exact ? normalized === term : normalized.includes(term)
-}
-
-/**
  * Plusieurs critères séparés par ";" sont tous exigés à la fois (ET) — même
  * logique que la recherche de Transactions.vue/Payees.vue, voir
  * parseSearchTerms dans services/search.js.
  */
 const searchTerms = computed(() => parseSearchTerms(searchQuery.value))
 
-const filteredRoots = computed(() => {
-  const terms = searchTerms.value
-  if (!terms.length) return roots.value
-  return roots.value.filter(root =>
-    terms.every(criterion =>
-      nameMatchesTerm(root.name, criterion) ||
-      children(root.id).some(child => nameMatchesTerm(child.name, criterion))
-    )
-  )
-})
+const filteredRoots = computed(() => filterCategoryRoots(roots.value, searchTerms.value, children))
 
 /**
  * Répartition en deux colonnes : Dépenses à gauche, Revenus à droite.
@@ -396,39 +328,18 @@ const incomeRoots = computed(() =>
 )
 
 /**
- * Sous-catégories visibles de chaque racine (id racine -> enfants), pour les
- * colonnes Dépenses/Revenus : les masquées en sont exclues (elles apparaissent
- * dans l'encart dédié). Calculé une fois par changement de catégories ou de
- * recherche, et non à chaque rendu pour chaque racine affichée.
+ * Sous-catégories visibles de chaque racine (voir visibleChildrenByRoot) :
+ * calculé une fois par changement de catégories ou de recherche, et non à
+ * chaque rendu pour chaque racine affichée.
  */
-const visibleChildrenByRootId = computed(() => {
-  const terms = searchTerms.value
-  const matchesAllTerms = name => terms.every(criterion => nameMatchesTerm(name, criterion))
-  const map = new Map()
-  for (const root of roots.value) {
-    const kids = children(root.id).filter(child => !child.hidden)
-    const keepAllKids = !terms.length || matchesAllTerms(root.name)
-    map.set(root.id, keepAllKids ? kids : kids.filter(child => matchesAllTerms(child.name)))
-  }
-  return map
-})
+const visibleChildrenByRootId = computed(() => visibleChildrenByRoot(roots.value, searchTerms.value, children))
 
 function filteredChildren(rootId) {
   return visibleChildrenByRootId.value.get(rootId) || []
 }
 
 /** Catégories masquées (racines et sous-catégories), regroupées dans un encart à part sous les colonnes Dépenses/Revenus. */
-const hiddenCategories = computed(() => {
-  const terms = searchTerms.value
-  // Libelle complet calcule une seule fois par categorie, jamais dans le
-  // comparateur du tri (appele O(n log n) fois).
-  return categories.value
-    .filter(c => c.hidden)
-    .map(category => ({ category, label: categoryFullLabel(category) }))
-    .filter(({ label }) => !terms.length || terms.every(criterion => nameMatchesTerm(label, criterion)))
-    .sort((a, b) => a.label.localeCompare(b.label, 'fr'))
-    .map(({ category }) => category)
-})
+const hiddenCategories = computed(() => hiddenCategoriesMatching(categories.value, searchTerms.value, categoryById.value))
 
 /**
  * Ids des catégories (racines + enfants) actuellement affichées dans une
@@ -490,10 +401,7 @@ function typeBadgeStyle(type) {
 }
 
 function categoryFullLabel(category) {
-  if (!category.parentId) return `${iconPrefix(category.icon)}${category.name}`
-  const parent = categoryById.value.get(category.parentId)
-  const ownLabel = `${iconPrefix(category.icon)}${category.name}`
-  return parent ? `${iconPrefix(parent.icon)}${parent.name} : ${ownLabel}` : ownLabel
+  return fullLabelOf(category, categoryById.value)
 }
 
 /**
@@ -506,27 +414,16 @@ async function load(...also) {
   keepExisting(categories.value.map(c => c.id))
 }
 
-const { errors, check, clear, invalidAttrs } = useFieldErrors({ name: 'new-category-name' })
-
 function openCreate(parent) {
-  form.value = emptyForm()
-  clear()
-  if (parent) form.value.parentId = parent.id
-  showModal.value = true
+  newCategoryParentId.value = parent?.id ?? null
 }
 
-async function save() {
-  if (!check({ name: form.value.name.trim() ? '' : 'Saisissez le nom de la catégorie.' })) return
-  const payload = {
-    name: form.value.name,
-    type: form.value.type,
-    parentId: form.value.parentId,
-    icon: form.value.icon || null
-  }
+/** Enregistre la catégorie saisie dans CategoryCreateModal.vue (nom déjà contrôlé). */
+async function save(payload) {
   try {
     await CategoriesAPI.create(payload)
     notify('Catégorie créée.', 'success')
-    showModal.value = false
+    newCategoryParentId.value = undefined
     await load()
   } catch (e) {
     alertApiError('Erreur lors de la création de la catégorie', e)
@@ -535,6 +432,21 @@ async function save() {
 
 /** Annulation de la dernière suppression ou modification (voir services/lastAction.js). */
 const { lastAction, undoing, setLastAction, runLastAction } = useLastAction()
+
+/** Fusion, changement groupé de parente et glisser-déposer (voir services/categoryStructureActions.js). */
+const {
+  offerStateRestore,
+  showMergeModal, mergeTargetId, merging, mergeableTargets, openMergeModal, confirmMerge,
+  showReparentModal, reparentTargetId, reparenting, reparentableIds, openReparentModal, confirmReparent,
+  draggedCategoryId, dragOverRootId, onDragStart, onDragEnd, onRootDragOver, onRootDragLeave, onRootDrop
+} = useCategoryStructureActions({
+  roots,
+  categoryById,
+  children,
+  selection: { selectedIds, selectedIdSet, clearSelection },
+  load,
+  setLastAction
+})
 
 async function remove(category) {
   // Les sous-catégories partent avec leur parent (cascade côté backend, voir
@@ -577,7 +489,7 @@ async function toggleHidden(category) {
 /**
  * Bascule le caractere "annuel" d'une categorie : toute transaction qui lui
  * est affectee sera desormais (ou ne sera plus) lissee sur 12 mois dans les
- * rapports du tableau de bord (voir ServiceRapport#attributedTransactions),
+ * rapports du tableau de bord (voir AttributionTransactions#attributedTransactions),
  * sans avoir a le cocher transaction par transaction.
  */
 async function toggleAnnualized(category) {
@@ -675,164 +587,6 @@ async function confirmEdit() {
       await CategoriesAPI.update(id, previous)
       await load()
     })
-  }
-}
-
-/* --- Fusion --- */
-
-const selectedCategoryObjects = computed(() => {
-  const ids = selectedIdSet.value
-  return categories.value.filter(c => ids.has(c.id))
-})
-
-/**
- * Une categorie selectionnee ne peut pas etre choisie comme cible de fusion
- * si l'une de ses categories ancetres est elle-meme selectionnee : elle
- * deviendrait alors source ET descendante de la cible, ce que le backend
- * rejette desormais (cycle parent/enfant, voir ServiceCategorie#merge).
- */
-function isDescendantOfSelected(category, selectedIdSet, byId) {
-  let current = byId.get(category.parentId)
-  while (current) {
-    if (selectedIdSet.has(current.id)) return true
-    current = byId.get(current.parentId)
-  }
-  return false
-}
-
-/** Une catégorie qui a des sous-catégories ne se fusionne que dans une racine (deux niveaux au plus). */
-const mergeableTargets = computed(() => {
-  const ids = selectedIdSet.value
-  const selection = selectedCategoryObjects.value
-  const rootOnly = selection.some(c => !c.parentId && children(c.id).length > 0)
-  return selection.filter(c => !isDescendantOfSelected(c, ids, categoryById.value) && (!rootOnly || !c.parentId))
-})
-
-function openMergeModal() {
-  mergeTargetId.value = mergeableTargets.value[0]?.id ?? null
-  showMergeModal.value = true
-}
-
-/**
- * Propose d'annuler une opération de masse (fusion, changement de catégorie
- * parente) en revenant à la photographie `before` prise juste avant (voir
- * services/categoryRestore.js). À appeler une fois le cache rechargé.
- */
-function offerStateRestore(label, before) {
-  const plan = planCategoryStateRestore(before, dataStore.state)
-  if (isEmptyRestorePlan(plan)) return
-  setLastAction(label, async () => {
-    await restoreCategoryState(plan, { categories: CategoriesAPI, transactions: TransactionsAPI, payees: PayeesAPI })
-    await load(dataStore.refreshTransactions, dataStore.refreshPayees)
-  })
-}
-
-async function confirmMerge() {
-  if (!mergeTargetId.value) return
-  merging.value = true
-  const before = snapshotCategoryState(dataStore.state)
-  try {
-    const sourceIds = selectedIds.value.filter(id => id !== mergeTargetId.value)
-    await CategoriesAPI.merge(sourceIds, mergeTargetId.value)
-    showMergeModal.value = false
-    clearSelection()
-    // Transactions et tiers des catégories sources passent sur la cible
-    // (voir ServiceCategorie#merge).
-    await load(dataStore.refreshTransactions, dataStore.refreshPayees)
-    const targetName = categoryById.value.get(mergeTargetId.value)?.name ?? ''
-    notify(`${pluralize(sourceIds.length, 'catégorie fusionnée', 'catégories fusionnées')} dans « ${targetName} ».`, 'success')
-    offerStateRestore('Fusion de catégories', before)
-  } catch (e) {
-    alertApiError('Erreur lors de la fusion', e)
-  } finally {
-    merging.value = false
-  }
-}
-
-/* --- Changement groupé de catégorie parente ---
- * Comme pour l'édition inline d'une sous-catégorie (seule ligne qui expose
- * déjà un sélecteur de parent), seules les sous-catégories sélectionnées
- * sont concernées : une catégorie racine n'a pas de parent à changer ici
- * (elle a ses propres sous-catégories, la reparenter les laisserait
- * orphelines de niveau). Les racines éventuellement cochées en même temps
- * (ex. via "sélectionner tout") sont simplement ignorées par cette action.
- */
-const reparentableIds = computed(() =>
-  selectedCategoryObjects.value.filter(c => c.parentId != null).map(c => c.id)
-)
-
-function openReparentModal() {
-  reparentTargetId.value = roots.value[0]?.id ?? null
-  showReparentModal.value = true
-}
-
-async function confirmReparent() {
-  if (!reparentTargetId.value) return
-  reparenting.value = true
-  const before = snapshotCategoryState(dataStore.state)
-  try {
-    await Promise.all(reparentableIds.value.map(id => {
-      const category = categoryById.value.get(id)
-      return CategoriesAPI.update(id, { name: category.name, type: category.type, parentId: reparentTargetId.value, icon: category.icon })
-    }))
-    showReparentModal.value = false
-    clearSelection()
-    await load()
-    offerStateRestore('Catégorie parente changée', before)
-  } catch (e) {
-    alertApiError('Erreur lors du changement de catégorie parente', e)
-  } finally {
-    reparenting.value = false
-  }
-}
-
-/* --- Glisser-déposer une sous-catégorie vers une autre catégorie racine ---
- * Seules les sous-catégories sont glissables (même limitation que le
- * changement groupé ci-dessus : une racine avec ses propres sous-catégories
- * ne peut pas devenir une sous-catégorie sans les rendre orphelines
- * d'affichage). Les racines sont uniquement des cibles de dépôt.
- */
-function onDragStart(event, child) {
-  draggedCategoryId.value = child.id
-  event.dataTransfer.effectAllowed = 'move'
-  // Certains navigateurs exigent des données pour autoriser le drop ; la
-  // valeur elle-meme n'est pas relue, draggedCategoryId suffit cote appli.
-  event.dataTransfer.setData('text/plain', String(child.id))
-}
-
-function onDragEnd() {
-  draggedCategoryId.value = null
-  dragOverRootId.value = null
-}
-
-function onRootDragOver(event, root) {
-  if (draggedCategoryId.value == null) return
-  event.preventDefault() // necessaire pour autoriser le drop (comportement par defaut = refus)
-  event.dataTransfer.dropEffect = 'move'
-  dragOverRootId.value = root.id
-}
-
-function onRootDragLeave(root) {
-  if (dragOverRootId.value === root.id) dragOverRootId.value = null
-}
-
-async function onRootDrop(event, root) {
-  event.preventDefault()
-  const id = draggedCategoryId.value
-  dragOverRootId.value = null
-  draggedCategoryId.value = null
-  if (id == null) return
-
-  const category = categoryById.value.get(id)
-  if (!category || category.parentId === root.id) return // pas de sous-categorie, ou deja sous cette racine
-
-  const before = snapshotCategoryState(dataStore.state)
-  try {
-    await CategoriesAPI.update(id, { name: category.name, type: category.type, parentId: root.id, icon: category.icon })
-    await load()
-    offerStateRestore('Sous-catégorie déplacée', before)
-  } catch (e) {
-    alertApiError('Erreur lors du déplacement', e)
   }
 }
 
@@ -934,12 +688,6 @@ useRouteActions({ 'new-category': () => openCreate() })
   box-shadow: inset 3px 0 0 var(--azure);
   padding: 6px 8px;
 }
-/* Champ icône (emoji) de la fenêtre de création : gabarit court et centré (voir aussi CategoryInlineEditor.vue). */
-.icon-field {
-  width: 44px;
-  flex: 0 0 auto;
-  text-align: center;
-}
 .cat-row:has(input[type="checkbox"]:checked) {
   background: var(--azure-dim);
   border-radius: var(--radius-sm);
@@ -968,9 +716,6 @@ useRouteActions({ 'new-category': () => openCreate() })
   padding: 8px 0;
 }
 .cat-row-main-child { color: var(--text-muted); }
-.icon-field-full { width: 100%; }
-.inherited-type { color: var(--text-muted); font-size: 12px; }
-.inherited-type-modal { padding-top: 8px; font-size: 13px; }
 .badge-annual { background: var(--amber-dim); color: var(--amber); }
 
 </style>

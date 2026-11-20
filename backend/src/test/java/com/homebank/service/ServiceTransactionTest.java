@@ -2,7 +2,6 @@ package com.homebank.service;
 
 import com.homebank.dto.DemandeAnnulationDivisionDTO;
 import com.homebank.dto.DemandeDivisionDTO;
-import com.homebank.dto.DemandeVirementDTO;
 import com.homebank.dto.TransactionBulkUpdateDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.mapper.MappeurTransaction;
@@ -18,15 +17,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
-import java.util.concurrent.atomic.AtomicLong;
 
 import static com.homebank.service.FabriqueTransactions.*;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,10 +33,11 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * Verifie ServiceTransaction : saisie, division, virements (les deux cotes
- * restent toujours synchronises), edition et suppression en masse, ajustement
- * de solde et recherche. Detection des periodiques et des doublons : voir
- * ServiceSuggestionPeriodiqueTest et ServiceDoublonTest.
+ * Verifie ServiceTransaction : saisie, division, modification d'un virement
+ * (les deux cotes restent toujours synchronises), edition en masse et
+ * bascules. Suppressions : voir ServiceSuppressionTransactionTest ; virements
+ * et ajustements de solde : ServiceOperationsCompteTest ; periodiques et
+ * doublons : ServiceSuggestionPeriodiqueTest et ServiceDoublonTest.
  */
 @ExtendWith(MockitoExtension.class)
 class ServiceTransactionTest {
@@ -60,7 +57,9 @@ class ServiceTransactionTest {
 
     @BeforeEach
     void setUp() {
-        service = new ServiceTransaction(transactionRepository, deletedTransactionRepository, accountService, categoryService, payeeService, new MappeurTransaction());
+        ElagageTiersOrphelins elagageTiers = new ElagageTiersOrphelins(payeeService);
+        MappeurTransaction mapper = new MappeurTransaction();
+        service = new ServiceTransaction(transactionRepository, accountService, categoryService, payeeService, mapper, elagageTiers);
     }
 
     // --- splitTransaction : la somme des deux parties doit toujours egaler le montant d'origine ---
@@ -187,18 +186,6 @@ class ServiceTransactionTest {
 
     // --- createTransfer ---
 
-    @Test
-    void createTransfer_refuseUnMontantNulUneFoisArrondi() {
-        DemandeVirementDTO payload = new DemandeVirementDTO();
-        payload.setFromAccountId(1L);
-        payload.setToAccountId(2L);
-        payload.setAmount(new BigDecimal("0.004"));
-
-        assertThatThrownBy(() -> service.createTransfer(payload))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("positif");
-    }
-
     private TransactionDTO saisie(String amount) {
         return TransactionDTO.builder()
                 .accountId(1L)
@@ -250,131 +237,6 @@ class ServiceTransactionTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Le montant");
         verify(transactionRepository, never()).save(any());
-    }
-
-    @Test
-    void createTransfer_leveUneExceptionSiUnCompteManque() {
-        DemandeVirementDTO payload = new DemandeVirementDTO();
-        payload.setFromAccountId(1L);
-        payload.setAmount(new BigDecimal("50.00"));
-
-        assertThatThrownBy(() -> service.createTransfer(payload)).isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void createTransfer_leveUneExceptionSiMemeCompteSourceEtDestination() {
-        DemandeVirementDTO payload = new DemandeVirementDTO();
-        payload.setFromAccountId(1L);
-        payload.setToAccountId(1L);
-        payload.setAmount(new BigDecimal("50.00"));
-
-        assertThatThrownBy(() -> service.createTransfer(payload)).isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void createTransfer_leveUneExceptionSiMontantNulOuNegatifOuZero() {
-        DemandeVirementDTO payload = new DemandeVirementDTO();
-        payload.setFromAccountId(1L);
-        payload.setToAccountId(2L);
-        payload.setAmount(BigDecimal.ZERO);
-
-        assertThatThrownBy(() -> service.createTransfer(payload)).isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
-    void createTransfer_refuseDesComptesDansDesDevisesDifferentes() {
-        Compte euro = compte(1L);
-        euro.setCurrency("EUR");
-        Compte dollar = compte(2L);
-        dollar.setCurrency("USD");
-        when(accountService.findById(1L)).thenReturn(euro);
-        when(accountService.findById(2L)).thenReturn(dollar);
-
-        DemandeVirementDTO payload = new DemandeVirementDTO();
-        payload.setFromAccountId(1L);
-        payload.setToAccountId(2L);
-        payload.setAmount(new BigDecimal("50.00"));
-
-        assertThatThrownBy(() -> service.createTransfer(payload))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("devises différentes");
-        verify(transactionRepository, never()).save(any(Transaction.class));
-    }
-
-    @Test
-    void createTransfer_accepteDesCodesDeviseIdentiquesSansTenirCompteDeLaCasse() {
-        Compte source = compte(1L);
-        source.setCurrency("EUR");
-        Compte destination = compte(2L);
-        destination.setCurrency("eur");
-        when(accountService.findById(1L)).thenReturn(source);
-        when(accountService.findById(2L)).thenReturn(destination);
-        AtomicLong idSeq = new AtomicLong(1);
-        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> {
-            Transaction t = inv.getArgument(0);
-            if (t.getId() == null) t.setId(idSeq.getAndIncrement());
-            return t;
-        });
-
-        DemandeVirementDTO payload = new DemandeVirementDTO();
-        payload.setFromAccountId(1L);
-        payload.setToAccountId(2L);
-        payload.setAmount(new BigDecimal("50.00"));
-
-        assertThat(service.createTransfer(payload)).hasSize(2);
-    }
-
-    @Test
-    void createTransfer_creeUnDebitEtUnCreditLiesEtValidesEtExclusDesRapports() {
-        when(accountService.findById(1L)).thenReturn(compte(1L));
-        when(accountService.findById(2L)).thenReturn(compte(2L));
-        AtomicLong idSeq = new AtomicLong(1);
-        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> {
-            Transaction t = inv.getArgument(0);
-            if (t.getId() == null) t.setId(idSeq.getAndIncrement());
-            return t;
-        });
-
-        DemandeVirementDTO payload = new DemandeVirementDTO();
-        payload.setFromAccountId(1L);
-        payload.setToAccountId(2L);
-        payload.setAmount(new BigDecimal("50.00"));
-        payload.setDate(LocalDate.of(2026, 1, 10));
-
-        List<TransactionDTO> result = service.createTransfer(payload);
-
-        assertThat(result).hasSize(2);
-        TransactionDTO debit = result.get(0);
-        TransactionDTO credit = result.get(1);
-        assertThat(debit.getAmount()).isEqualByComparingTo("-50.00");
-        assertThat(credit.getAmount()).isEqualByComparingTo("50.00");
-        assertThat(debit.getAccountId()).isEqualTo(1L);
-        assertThat(credit.getAccountId()).isEqualTo(2L);
-        assertThat(debit.getPaymentMode()).isEqualTo(ModePaiement.TRANSFER);
-        assertThat(credit.getPaymentMode()).isEqualTo(ModePaiement.TRANSFER);
-        assertThat(debit.isValidated()).isTrue();
-        assertThat(credit.isValidated()).isTrue();
-        assertThat(debit.getTransferTransactionId()).isEqualTo(credit.getId());
-        assertThat(credit.getTransferTransactionId()).isEqualTo(debit.getId());
-    }
-
-    /** Annulation de la suppression d'un virement en attente : il est recree en attente, pas valide. */
-    @Test
-    void createTransfer_recreeUnVirementEnAttenteQuandLaDemandeLePrecise() {
-        when(accountService.findById(1L)).thenReturn(compte(1L));
-        when(accountService.findById(2L)).thenReturn(compte(2L));
-        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        DemandeVirementDTO payload = new DemandeVirementDTO();
-        payload.setFromAccountId(1L);
-        payload.setToAccountId(2L);
-        payload.setAmount(new BigDecimal("25.00"));
-        payload.setDate(LocalDate.of(2026, 1, 10));
-        payload.setValidated(false);
-
-        List<TransactionDTO> result = service.createTransfer(payload);
-
-        assertThat(result).extracting(TransactionDTO::isValidated).containsExactly(false, false);
     }
 
     @Test
@@ -498,27 +360,6 @@ class ServiceTransactionTest {
         assertThatThrownBy(() -> service.update(1L, modificationVirement(3L, "-50.00").build()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("devises différentes");
-    }
-
-    @Test
-    void delete_supprimeAussiLaTransactionJumelleDunVirementEtCasseLaReferenceMutuelleAvant() {
-        Transaction debit = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-50.00");
-        debit.setId(1L);
-        debit.setPaymentMode(ModePaiement.TRANSFER);
-        Transaction credit = transaction(compte(2L), null, LocalDate.of(2026, 1, 10), "50.00");
-        credit.setId(2L);
-        credit.setPaymentMode(ModePaiement.TRANSFER);
-        debit.setTransferTransaction(credit);
-        credit.setTransferTransaction(debit);
-        when(transactionRepository.findById(1L)).thenReturn(Optional.of(debit));
-        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
-
-        service.delete(1L);
-
-        assertThat(debit.getTransferTransaction()).isNull();
-        assertThat(credit.getTransferTransaction()).isNull();
-        verify(transactionRepository).deleteAll(List.of(debit, credit));
-        verify(deletedTransactionRepository, times(2)).save(any());
     }
 
     /**
@@ -669,27 +510,6 @@ class ServiceTransactionTest {
     // --- Contrôles de saisie côté serveur (le frontend les fait aussi, mais l'API doit les garantir) ---
 
     @Test
-    void adjustAccountBalance_exigeUneDateEtUnSoldeReel() {
-        LocalDate hier = LocalDate.now().minusDays(1);
-
-        assertThatThrownBy(() -> service.adjustAccountBalance(1L, null, new BigDecimal("100.00")))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("La date est obligatoire.");
-        assertThatThrownBy(() -> service.adjustAccountBalance(1L, hier, null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Le solde réel est obligatoire.");
-        verifyNoInteractions(accountService, transactionRepository);
-    }
-
-    @Test
-    void undoCreation_refuseUneSelectionVide() {
-        assertThatThrownBy(() -> service.undoCreation(List.of()))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("Aucune transaction sélectionnée.");
-        verifyNoInteractions(transactionRepository);
-    }
-
-    @Test
     void undoSplit_exigeLaTransactionDOrigineEtUneDeuxiemePartieDistincte() {
         DemandeAnnulationDivisionDTO sansOrigine = new DemandeAnnulationDivisionDTO();
         sansOrigine.setSecondPartId(2L);
@@ -714,67 +534,6 @@ class ServiceTransactionTest {
         assertThatThrownBy(() -> ServiceTransaction.verifierChampsObligatoires(sansCompte))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Le compte est obligatoire");
-    }
-
-    // --- deleteAllPending ---
-
-    @Test
-    void deleteAllPending_supprimeUnCoteDeVirementEnAttenteDontLaJumelleEstAussiEnAttente() {
-        Transaction debit = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-50.00");
-        debit.setId(1L);
-        debit.setPaymentMode(ModePaiement.TRANSFER);
-        Transaction credit = transaction(compte(2L), null, LocalDate.of(2026, 1, 10), "50.00");
-        credit.setId(2L);
-        credit.setPaymentMode(ModePaiement.TRANSFER);
-        debit.setTransferTransaction(credit);
-        credit.setTransferTransaction(debit);
-        when(transactionRepository.findByValidatedFalseWithTransferTransaction()).thenReturn(List.of(debit));
-        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L))).thenReturn(List.of(debit));
-        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
-
-        int count = service.deleteAllPending(null);
-
-        assertThat(count).isEqualTo(2);
-        verify(transactionRepository).deleteAll(List.of(debit, credit));
-    }
-
-    @Test
-    void deleteAllPending_ignoreUnCoteDeVirementEnAttenteDontLaJumelleEstDejaValidee() {
-        // Cas limite : un cote d'un virement a ete manuellement remis "en attente"
-        // (toggleValidated), sa jumelle restant validee. Le nettoyage global ne
-        // doit pas emporter cette jumelle validee, que l'utilisateur n'a jamais
-        // demande a supprimer (voir ServiceTransaction#deleteAllPending).
-        Transaction debit = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-50.00");
-        debit.setId(1L);
-        debit.setPaymentMode(ModePaiement.TRANSFER);
-        debit.setValidated(false);
-        Transaction credit = transaction(compte(2L), null, LocalDate.of(2026, 1, 10), "50.00");
-        credit.setId(2L);
-        credit.setPaymentMode(ModePaiement.TRANSFER);
-        credit.setValidated(true);
-        debit.setTransferTransaction(credit);
-        credit.setTransferTransaction(debit);
-        when(transactionRepository.findByValidatedFalseWithTransferTransaction()).thenReturn(List.of(debit));
-
-        int count = service.deleteAllPending(null);
-
-        assertThat(count).isZero();
-        verify(transactionRepository, never()).deleteAll(anyList());
-        verify(transactionRepository, never()).findAllByIdWithTransferTransaction(anyList());
-    }
-
-    @Test
-    void deleteAllPending_avecCompte_neSupprimeQueLesTransactionsEnAttenteDeCeCompte() {
-        Transaction pending = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-12.00");
-        pending.setId(1L);
-        when(transactionRepository.findPendingByAccountIdWithTransferTransaction(1L)).thenReturn(List.of(pending));
-        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L))).thenReturn(List.of(pending));
-
-        int count = service.deleteAllPending(1L);
-
-        assertThat(count).isEqualTo(1);
-        verify(transactionRepository).deleteAll(List.of(pending));
-        verify(transactionRepository, never()).findByValidatedFalseWithTransferTransaction();
     }
 
     // --- validateAllPending ---
@@ -811,42 +570,6 @@ class ServiceTransactionTest {
     }
 
     // --- adjustAccountBalance ---
-
-    @Test
-    void adjustAccountBalance_creeUnAjustementValideDuMontantDeLEcart() {
-        Compte placement = compte(3L);
-        placement.setInitialBalance(new BigDecimal("15000.00"));
-        LocalDate date = LocalDate.of(2026, 11, 1);
-        when(accountService.findById(3L)).thenReturn(placement);
-        when(transactionRepository.sumAmountByAccountIdAsOf(3L, date)).thenReturn(new BigDecimal("1666.74"));
-        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
-
-        TransactionDTO result = service.adjustAccountBalance(3L, date, new BigDecimal("17250.00"));
-
-        assertThat(result.getAmount()).isEqualByComparingTo("583.26");
-        assertThat(result.isBalanceAdjustment()).isTrue();
-        assertThat(result.isValidated()).isTrue();
-        assertThat(result.getPayee()).isEqualTo("Ajustement de solde");
-        assertThat(result.getDate()).isEqualTo(date);
-    }
-
-    @Test
-    void adjustAccountBalance_refuseSansEcartOuALaDateFuture() {
-        Compte compte = compte(1L);
-        LocalDate date = LocalDate.of(2026, 11, 1);
-        when(accountService.findById(1L)).thenReturn(compte);
-        when(transactionRepository.sumAmountByAccountIdAsOf(1L, date)).thenReturn(new BigDecimal("100.00"));
-        BigDecimal memeSolde = new BigDecimal("100.00");
-        LocalDate demain = LocalDate.now().plusDays(1);
-
-        assertThatThrownBy(() -> service.adjustAccountBalance(1L, date, memeSolde))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("aucun ajustement");
-        assertThatThrownBy(() -> service.adjustAccountBalance(1L, demain, memeSolde))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("futur");
-        verify(transactionRepository, never()).save(any(Transaction.class));
-    }
 
     @Test
     void splitTransaction_refuseUnAjustementDeSolde() {
@@ -1089,20 +812,6 @@ class ServiceTransactionTest {
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
 
-    @Test
-    void createTransfer_refuseUnCompteDestinationArchive() {
-        when(accountService.findById(1L)).thenReturn(compte(1L));
-        when(accountService.findById(2L)).thenReturn(compteArchive(2L));
-
-        DemandeVirementDTO payload = new DemandeVirementDTO();
-        payload.setFromAccountId(1L);
-        payload.setToAccountId(2L);
-        payload.setAmount(new BigDecimal("50.00"));
-
-        assertThatThrownBy(() -> service.createTransfer(payload)).isInstanceOf(IllegalStateException.class);
-        verify(transactionRepository, never()).save(any(Transaction.class));
-    }
-
     // --- sanitizeMemo ---
 
     @Test
@@ -1124,80 +833,6 @@ class ServiceTransactionTest {
         verify(transactionRepository).findAllByOrderByDateDescIdDesc();
     }
 
-    // --- nettoyage des tiers orphelins : jamais dans la transaction de la suppression ---
-
-    private Transaction transactionAvecTiers(Long id, Tiers payee) {
-        Transaction t = transaction(compte(1L), payee, LocalDate.of(2026, 3, 1), "-12.00");
-        t.setId(id);
-        when(transactionRepository.findById(id)).thenReturn(Optional.of(t));
-        return t;
-    }
-
-    @Test
-    void delete_sansTransactionActive_nettoieLAncienTiersImmediatement() {
-        transactionAvecTiers(10L, payee(5L, "SUMUP CAFE"));
-
-        service.delete(10L);
-
-        verify(payeeService).deleteIfOrphan(5L);
-    }
-
-    @Test
-    void delete_virement_nettoieAussiLeTiersDeLaJumelle() {
-        Transaction[] virement = virementDe50();
-        virement[0].setPayee(payee(7L, "Virement vers Livret A"));
-        virement[1].setPayee(payee(8L, "Virement depuis Compte courant"));
-        when(transactionRepository.findById(1L)).thenReturn(Optional.of(virement[0]));
-        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
-
-        service.delete(1L);
-
-        verify(payeeService).deleteOrphans(List.of(7L, 8L));
-        verify(payeeService, never()).deleteIfOrphan(any());
-    }
-
-    @Test
-    void delete_echecDuNettoyageGroupe_reprendTiersParTiers() {
-        Transaction[] virement = virementDe50();
-        virement[0].setPayee(payee(7L, "Virement vers Livret A"));
-        virement[1].setPayee(payee(8L, "Virement depuis Compte courant"));
-        when(transactionRepository.findById(1L)).thenReturn(Optional.of(virement[0]));
-        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
-        doThrow(new IllegalStateException("contrainte")).when(payeeService).deleteOrphans(any());
-        doThrow(new IllegalStateException("contrainte")).when(payeeService).deleteIfOrphan(7L);
-
-        service.delete(1L);
-
-        verify(payeeService).deleteIfOrphan(7L);
-        verify(payeeService).deleteIfOrphan(8L);
-    }
-
-    @Test
-    void delete_echecDuNettoyageDuTiers_nEmpechePasLaSuppression() {
-        Transaction t = transactionAvecTiers(10L, payee(5L, "SUMUP CAFE"));
-        doThrow(new IllegalStateException("contrainte")).when(payeeService).deleteIfOrphan(5L);
-
-        service.delete(10L);
-
-        verify(transactionRepository).deleteAll(List.of(t));
-    }
-
-    @Test
-    void delete_dansUneTransaction_reporteLeNettoyageApresLeCommit() {
-        transactionAvecTiers(10L, payee(5L, "SUMUP CAFE"));
-        TransactionSynchronizationManager.initSynchronization();
-        try {
-            service.delete(10L);
-            verify(payeeService, never()).deleteIfOrphan(any());
-
-            TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
-
-            verify(payeeService).deleteIfOrphan(5L);
-        } finally {
-            TransactionSynchronizationManager.clearSynchronization();
-        }
-    }
-
     // --- bulkUpdate : changement de tiers en masse ---
 
     private TransactionBulkUpdateDTO bulkPayee(String payee, Long... ids) {
@@ -1206,20 +841,6 @@ class ServiceTransactionTest {
         payload.setPayeeProvided(true);
         payload.setPayee(payee);
         return payload;
-    }
-
-    @Test
-    void undoCreation_supprimeSansEmpreinteDeSuppression() {
-        Transaction importee = transaction(compte(1L), null, LocalDate.of(2026, 3, 1), "-12.00");
-        importee.setId(5L);
-        importee.setBankLabel("CB CARREFOUR");
-        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(5L))).thenReturn(List.of(importee));
-
-        int deleted = service.undoCreation(List.of(5L));
-
-        assertThat(deleted).isEqualTo(1);
-        verify(transactionRepository).deleteAll(List.of(importee));
-        verify(deletedTransactionRepository, never()).save(any());
     }
 
     // --- undoSplit : retour a la transaction d'avant division, en une operation ---
@@ -1459,5 +1080,4 @@ class ServiceTransactionTest {
 
         verify(payeeService, never()).deleteIfOrphan(any());
     }
-
 }

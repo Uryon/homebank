@@ -26,8 +26,8 @@ export function saveCollapsed(storageKey, ids, storage = globalThis.localStorage
   }
 }
 
-/** À appeler dans la page : crée l'état partagé par ses sections. */
-export function provideCollapsibleSections(storageKey, storage = globalThis.localStorage) {
+/** Sections repliées (relues du stockage) et bascule qui les enregistre ; exportée pour les tests. */
+export function createCollapsibleSections(storageKey, storage = globalThis.localStorage) {
   const collapsed = ref(new Set(readCollapsed(storageKey, storage)))
   function toggle(id) {
     const next = new Set(collapsed.value)
@@ -36,7 +36,12 @@ export function provideCollapsibleSections(storageKey, storage = globalThis.loca
     collapsed.value = next
     saveCollapsed(storageKey, [...next], storage)
   }
-  const sections = { collapsed, toggle }
+  return { collapsed, toggle }
+}
+
+/** À appeler dans la page : crée l'état partagé par ses sections. */
+export function provideCollapsibleSections(storageKey, storage = globalThis.localStorage) {
+  const sections = createCollapsibleSections(storageKey, storage)
   provide(SECTIONS_KEY, sections)
   return sections
 }

@@ -223,7 +223,7 @@ public class ServiceSuggestionPeriodique {
                 .divide(BigDecimal.valueOf(sorted.size()), 2, RoundingMode.HALF_UP);
 
         return SuggestionPeriodiqueDTO.builder()
-                .payee(sorted.get(sorted.size() - 1).getPayee().getName())
+                .payee(sorted.getLast().getPayee().getName())
                 .count(sorted.size())
                 .averageAmount(averageAmount)
                 .averageIntervalDays(averageIntervalDays)

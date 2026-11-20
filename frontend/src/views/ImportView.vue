@@ -257,7 +257,7 @@ const undoingImport = ref(false)
 
 /**
  * Supprime les transactions créées par le dernier import, sans empreinte de
- * suppression (voir ServiceTransaction#undoCreation) : le relevé peut ensuite
+ * suppression (voir ServiceSuppressionTransaction#undoCreation) : le relevé peut ensuite
  * être réimporté, par exemple sur le bon compte. Les catégories créées par
  * l'import restent.
  */

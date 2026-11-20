@@ -81,8 +81,8 @@ class ServiceNettoyageTiersTest {
         List<ApercuFauxTiersDTO> apercu = service.preview();
 
         assertThat(apercu).hasSize(1);
-        assertThat(apercu.get(0).willBeDeleted()).isTrue();
-        assertThat(apercu.get(0).examples().get(0).newLabel()).isEqualTo("Virement vers Livret");
+        assertThat(apercu.getFirst().willBeDeleted()).isTrue();
+        assertThat(apercu.getFirst().examples().getFirst().newLabel()).isEqualTo("Virement vers Livret");
         assertThat(t.getPayee()).isSameAs(faux);
         verify(payeeRepository, never()).delete(any());
     }
@@ -107,7 +107,7 @@ class ServiceNettoyageTiersTest {
         Transaction t = virement(1L, faux);
         total(faux, 3);
 
-        assertThat(service.preview().get(0).otherTransactions()).isEqualTo(2);
+        assertThat(service.preview().getFirst().otherTransactions()).isEqualTo(2);
         ResultatNettoyageTiersDTO resultat = service.clean(List.of(7L));
 
         assertThat(t.getPayee()).isNull();
@@ -122,7 +122,7 @@ class ServiceNettoyageTiersTest {
         virement(1L, faux);
         total(faux, 1);
 
-        assertThat(service.preview().get(0).willBeDeleted()).isFalse();
+        assertThat(service.preview().getFirst().willBeDeleted()).isFalse();
         service.clean(List.of(7L));
 
         verify(payeeRepository, never()).delete(any());
@@ -160,7 +160,8 @@ class ServiceNettoyageTiersTest {
         incomplete.add(null);
 
         assertThatThrownBy(() -> service.undo(incomplete)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.undo(List.of(new ResultatNettoyageTiersDTO.TiersNettoye(null, "x", "x", null))))
+        List<ResultatNettoyageTiersDTO.TiersNettoye> sansId = List.of(new ResultatNettoyageTiersDTO.TiersNettoye(null, "x", "x", null));
+        assertThatThrownBy(() -> service.undo(sansId))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

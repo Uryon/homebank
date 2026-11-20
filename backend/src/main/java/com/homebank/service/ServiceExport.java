@@ -6,11 +6,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Export du tableau de bord en PDF, via un script Node/Playwright (voir
@@ -26,6 +28,8 @@ import java.util.concurrent.TimeUnit;
 public class ServiceExport {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceExport.class);
+    /** Une fois le script termine, sa sortie est disponible presque aussitot. */
+    private static final long DELAI_LECTURE_SORTIE_SECONDES = 5;
 
     private final String dossierSortie;
     private final String urlTableauDeBord;
@@ -73,14 +77,12 @@ public class ServiceExport {
         ProcessBuilder pb = new ProcessBuilder(
                 cheminNode, cheminScript, dossierSortie, urlTableauDeBord, argDateDernierImport)
                 .redirectErrorStream(true);
-        Path journal = null;
         try {
-            // Sortie du script redirigee vers un fichier, jamais lue en direct :
-            // lire le flux du processus bloque jusqu'a ce qu'il se termine, ce
-            // qui rendait le delai maximal inoperant (un script Node fige
-            // bloquait la requete indefiniment).
-            journal = Files.createTempFile("homebank-export-", ".log");
-            Process process = pb.redirectOutput(journal.toFile()).start();
+            Process process = pb.start();
+            // Sortie lue en parallele, jamais sur ce fil : lire le flux attend
+            // la fin du processus, ce qui rendait le delai maximal inoperant
+            // (un script Node fige bloquait la requete indefiniment).
+            CompletableFuture<String> sortie = lireSortieEnParallele(process);
             boolean termine = process.waitFor(delaiMaxSecondes, TimeUnit.SECONDS);
             if (!termine) {
                 // Le navigateur lance par Playwright est un processus enfant de
@@ -89,11 +91,11 @@ public class ServiceExport {
                 process.destroyForcibly();
                 throw new IllegalStateException("Export PDF : délai dépassé (" + delaiMaxSecondes + "s)");
             }
-            String sortie = new String(Files.readAllBytes(journal), StandardCharsets.UTF_8).trim();
+            String texte = sortieTerminee(sortie);
             if (process.exitValue() != 0) {
-                throw new IllegalStateException("Export PDF échoué : " + sortie);
+                throw new IllegalStateException("Export PDF échoué : " + texte);
             }
-            log.info("Export PDF du tableau de bord termine : {}", sortie);
+            log.info("Export PDF du tableau de bord termine : {}", texte);
         } catch (IOException e) {
             throw new IllegalStateException(
                     "Impossible de lancer l'export PDF (node installé et dans le PATH ? "
@@ -101,17 +103,29 @@ public class ServiceExport {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Export PDF interrompu", e);
-        } finally {
-            supprimerJournal(journal);
         }
     }
 
-    private static void supprimerJournal(Path journal) {
-        if (journal == null) return;
+    /** Lit toute la sortie du script sur un fil virtuel ; termine quand le processus ferme sa sortie. */
+    private static CompletableFuture<String> lireSortieEnParallele(Process process) {
+        CompletableFuture<String> sortie = new CompletableFuture<>();
+        Thread.startVirtualThread(() -> {
+            try (InputStream flux = process.getInputStream()) {
+                sortie.complete(new String(flux.readAllBytes(), StandardCharsets.UTF_8).trim());
+            } catch (IOException e) {
+                sortie.complete("(sortie du script illisible : " + e.getMessage() + ")");
+            }
+        });
+        return sortie;
+    }
+
+    /** Sortie d'un script deja termine : quelques instants au plus pour finir de la lire. */
+    private static String sortieTerminee(CompletableFuture<String> sortie) throws InterruptedException {
         try {
-            Files.deleteIfExists(journal);
-        } catch (IOException e) {
-            log.warn("Fichier temporaire d'export non supprime : {}", journal, e);
+            return sortie.get(DELAI_LECTURE_SORTIE_SECONDES, TimeUnit.SECONDS);
+        } catch (ExecutionException | TimeoutException e) {
+            return "(sortie du script indisponible)";
         }
     }
+
 }

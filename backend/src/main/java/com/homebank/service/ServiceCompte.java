@@ -58,9 +58,9 @@ public class ServiceCompte {
     }
 
     public Compte create(CompteDTO payload) {
+        ensureUniqueName(trimmedName(payload), null);
         Compte account = new Compte();
         applyPayload(account, payload);
-        ensureUniqueName(account.getName(), null);
         Compte saved = accountRepository.save(account);
         log.info("Compte cree : {} ({})", saved.getName(), saved.getId());
         return saved;
@@ -75,15 +75,18 @@ public class ServiceCompte {
         } else {
             log.info("Compte modifie : {}", id);
         }
+        // Controle AVANT de modifier l'entite : dans une transaction, la requete
+        // de controle ecrirait d'abord le nouveau nom, et le compte se
+        // trouverait lui-meme (tout renommage etait alors refuse).
+        ensureUniqueName(trimmedName(payload), previousName);
         applyPayload(existing, payload);
-        ensureUniqueName(existing.getName(), previousName);
         ensureCurrencyCanChange(existing, previousCurrency);
         return accountRepository.save(existing);
     }
 
     /**
      * Un virement relie deux comptes de meme devise (voir
-     * ServiceTransaction#ensureSameCurrency) : changer celle d'un seul cote
+     * ServiceOperationsCompte#ensureSameCurrency) : changer celle d'un seul cote
      * rendait ses virements existants impossibles a modifier.
      */
     private void ensureCurrencyCanChange(Compte account, String previousCurrency) {
@@ -102,6 +105,7 @@ public class ServiceCompte {
      * null en creation.
      */
     private void ensureUniqueName(String name, String previousName) {
+        if (name.isEmpty()) return; // nom obligatoire : refuse par applyPayload
         boolean renamed = previousName == null || !previousName.equalsIgnoreCase(name);
         if (renamed && accountRepository.existsByNameIgnoreCase(name)) {
             throw new IllegalArgumentException("Un compte « " + name + " » existe déjà.");
@@ -114,8 +118,13 @@ public class ServiceCompte {
      * NOT NULL), avec le message generique de DataIntegrityViolationException
      * ("Impossible de supprimer...") — hors de propos pour une creation.
      */
+    /** Nom saisi sans espaces autour ("" s'il manque). */
+    private static String trimmedName(CompteDTO payload) {
+        return payload.getName() != null ? payload.getName().trim() : "";
+    }
+
     private static void applyPayload(Compte account, CompteDTO payload) {
-        String name = payload.getName() != null ? payload.getName().trim() : "";
+        String name = trimmedName(payload);
         if (name.isEmpty()) {
             throw new IllegalArgumentException("Le nom du compte est obligatoire.");
         }

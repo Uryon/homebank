@@ -10,6 +10,8 @@ import com.homebank.dto.DemandeVirementDTO;
 import com.homebank.service.ServiceDoublon;
 import com.homebank.service.ServiceRestaurationTransaction;
 import com.homebank.service.ServiceSuggestionPeriodique;
+import com.homebank.service.ServiceOperationsCompte;
+import com.homebank.service.ServiceSuppressionTransaction;
 import com.homebank.service.ServiceTransaction;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -25,15 +27,21 @@ public class ControleurTransaction {
     private final ServiceSuggestionPeriodique periodicSuggestionService;
     private final ServiceDoublon duplicateService;
     private final ServiceRestaurationTransaction restorationService;
+    private final ServiceSuppressionTransaction deletionService;
+    private final ServiceOperationsCompte operationsCompteService;
 
     public ControleurTransaction(ServiceTransaction transactionService,
                                  ServiceSuggestionPeriodique periodicSuggestionService,
                                  ServiceDoublon duplicateService,
-                                 ServiceRestaurationTransaction restorationService) {
+                                 ServiceRestaurationTransaction restorationService,
+                                 ServiceSuppressionTransaction deletionService,
+                                 ServiceOperationsCompte operationsCompteService) {
         this.transactionService = transactionService;
         this.periodicSuggestionService = periodicSuggestionService;
         this.duplicateService = duplicateService;
         this.restorationService = restorationService;
+        this.deletionService = deletionService;
+        this.operationsCompteService = operationsCompteService;
     }
 
     @GetMapping
@@ -131,7 +139,7 @@ public class ControleurTransaction {
      */
     @PostMapping("/transfer")
     public List<TransactionDTO> createTransfer(@RequestBody DemandeVirementDTO request) {
-        return transactionService.createTransfer(request);
+        return operationsCompteService.createTransfer(request);
     }
 
     @PostMapping
@@ -170,14 +178,14 @@ public class ControleurTransaction {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
-        transactionService.delete(id);
+        deletionService.delete(id);
         return ResponseEntity.noContent().build();
     }
 
-    /** Annule une creation ou un import : suppression sans empreinte (voir ServiceTransaction#undoCreation). */
+    /** Annule une creation ou un import : suppression sans empreinte (voir ServiceSuppressionTransaction#undoCreation). */
     @PostMapping("/undo-creation")
     public Map<String, Integer> undoCreation(@RequestBody List<Long> ids) {
-        return Map.of("deleted", transactionService.undoCreation(ids));
+        return Map.of("deleted", deletionService.undoCreation(ids));
     }
 
     /** Annule une suppression (voir ServiceRestaurationTransaction#restore). */
@@ -192,7 +200,7 @@ public class ControleurTransaction {
      */
     @DeleteMapping("/bulk")
     public Map<String, Integer> deleteBulk(@RequestBody List<Long> ids) {
-        return Map.of("deleted", transactionService.deleteBulk(ids));
+        return Map.of("deleted", deletionService.deleteBulk(ids));
     }
 
     /**
@@ -201,6 +209,6 @@ public class ControleurTransaction {
      */
     @DeleteMapping("/pending")
     public Map<String, Integer> deletePending(@RequestParam(required = false) Long accountId) {
-        return Map.of("deleted", transactionService.deleteAllPending(accountId));
+        return Map.of("deleted", deletionService.deleteAllPending(accountId));
     }
 }

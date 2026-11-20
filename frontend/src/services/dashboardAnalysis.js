@@ -10,7 +10,7 @@ import { formatAmount, pluralize, toLocalIsoDate } from './format'
 /**
  * Fusionne les lignes qui partagent le même tiers en une seule (montant
  * additionné, date la plus récente conservée) : sert surtout à recombiner
- * les tranches d'une transaction annualisee (voir ServiceRapport#attributedTransactions),
+ * les tranches d'une transaction annualisee (voir AttributionTransactions#attributedTransactions),
  * qui remontent sinon comme autant de lignes distinctes (une par mois de la
  * fenêtre de 12 mois couverte par la cellule survolée, même id de
  * transaction à chaque fois) pour ce qui est en réalité UNE seule dépense/
@@ -312,7 +312,7 @@ export function balanceChangeOverPeriod(series, periodLabel) {
 /**
  * Couverture de la comparaison avec l'année précédente du tableau d'analyse
  * mensuelle (même fenêtre de 12 mois un an plus tôt, voir
- * ServiceRapport#monthlyCategoryAnalysis), d'après le début de l'historique :
+ * ServiceAnalyseMensuelle#monthlyCategoryAnalysis), d'après le début de l'historique :
  * available s'il commence au plus tard à la fin de cette fenêtre (sinon rien
  * à comparer), partial s'il commence après son premier mois (moins de 12 mois
  * de données en face). Comparaison au mois près : un relevé commencé le 2 du

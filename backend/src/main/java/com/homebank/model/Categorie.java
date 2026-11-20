@@ -49,7 +49,7 @@ public class Categorie {
     /**
      * Categorie "annuelle" : toute transaction qui lui est affectee est
      * automatiquement lissee sur les 12 mois suivant (et incluant) son mois
-     * de paiement dans les rapports (voir ServiceRapport#attributedTransactions),
+     * de paiement dans les rapports (voir AttributionTransactions#attributedTransactions),
      * plutot que comptee en une fois sur ce seul mois — ex : taxe fonciere,
      * assurance annuelle. Remplace l'ancien marquage par transaction
      * (Transaction#annualized, supprime) : la granularite est desormais la

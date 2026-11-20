@@ -8,7 +8,6 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.web.context.WebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
-import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
@@ -31,7 +30,8 @@ import java.util.List;
  */
 @Component
 @ConditionalOnProperty("homebank.entrainement-demarrage")
-@Order(Ordered.LOWEST_PRECEDENCE)
+// Sans valeur : priorite la plus basse, apres tous les autres ApplicationRunner.
+@Order
 public class EntrainementDemarrage implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(EntrainementDemarrage.class);

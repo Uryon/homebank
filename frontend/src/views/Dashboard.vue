@@ -215,7 +215,7 @@ const lastCompletedMonthStart = (() => {
 
 /**
  * Mois des cartes du haut, navigable sans limite haute (les rapports
- * affichent alors le prévisionnel, voir ServiceRapport#completeAnalysisRow).
+ * affichent alors le prévisionnel, voir ServiceAnalyseMensuelle#completeAnalysisRow).
  */
 const viewedMonthStart = ref(lastCompletedMonthStart)
 const monthLabel = computed(() => monthTitle(viewedMonthStart.value))
@@ -774,6 +774,14 @@ loadDashboard()
   }
 }
 
+
+/* PDF au format téléphone (page étroite, voir export/export-dashboard.mjs) :
+   une colonne de comptes, sinon leurs noms seraient réduits à une lettre. */
+@media print and (max-width: 600px) {
+  .accounts-print-list {
+    column-count: 1;
+  }
+}
 
 /* Cartes de graphique (solde, épargne) : contenu dans components/dashboard/. */
 .chart-card {

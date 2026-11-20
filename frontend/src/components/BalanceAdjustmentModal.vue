@@ -36,7 +36,7 @@
 <script setup>
 /**
  * Aligne le solde d'un compte sur sa valeur réelle (voir
- * ServiceTransaction#adjustAccountBalance côté backend) : utile pour un
+ * ServiceOperationsCompte#adjustAccountBalance côté backend) : utile pour un
  * livret ou un placement dont on ne saisit pas chaque mouvement.
  */
 import { computed, ref } from 'vue'

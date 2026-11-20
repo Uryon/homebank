@@ -5,6 +5,7 @@ import com.homebank.dto.CategorisationAutoResultatDTO;
 import com.homebank.dto.DemandeFusionDTO;
 import com.homebank.dto.ResultatNettoyageTiersDTO;
 import com.homebank.dto.TiersDTO;
+import com.homebank.service.ServiceCategorisationAuto;
 import com.homebank.service.ServiceNettoyageTiers;
 import com.homebank.service.ServiceTiers;
 import org.springframework.http.ResponseEntity;
@@ -18,9 +19,12 @@ public class ControleurTiers {
 
     private final ServiceTiers payeeService;
     private final ServiceNettoyageTiers cleanupService;
+    private final ServiceCategorisationAuto autoCategorizationService;
 
-    public ControleurTiers(ServiceTiers payeeService, ServiceNettoyageTiers cleanupService) {
+    public ControleurTiers(ServiceTiers payeeService, ServiceNettoyageTiers cleanupService,
+                           ServiceCategorisationAuto autoCategorizationService) {
         this.payeeService = payeeService;
+        this.autoCategorizationService = autoCategorizationService;
         this.cleanupService = cleanupService;
     }
 
@@ -61,11 +65,11 @@ public class ControleurTiers {
      * Categorise automatiquement chaque tiers sans categorie dont toutes les
      * transactions deja categorisees s'accordent sur une seule categorie, et
      * propage cette categorie a leurs transactions encore sans categorie.
-     * Voir ServiceTiers#autoCategorize.
+     * Voir ServiceCategorisationAuto#autoCategorize.
      */
     @PostMapping("/auto-categorize")
     public CategorisationAutoResultatDTO autoCategorize() {
-        return payeeService.autoCategorize();
+        return autoCategorizationService.autoCategorize();
     }
 
     /** Apercu des faux tiers, sans rien modifier (voir ServiceNettoyageTiers). */

@@ -56,10 +56,13 @@ class ServiceRapportTest {
     private DepotCompte accountRepository;
 
     private ServiceRapport service;
+    private ServiceAnalyseMensuelle analyse;
 
     @BeforeEach
     void setUp() {
-        service = new ServiceRapport(transactionRepository, accountRepository, new MappeurTransaction());
+        AttributionTransactions attribution = new AttributionTransactions(transactionRepository);
+        service = new ServiceRapport(transactionRepository, accountRepository, new MappeurTransaction(), attribution);
+        analyse = new ServiceAnalyseMensuelle(transactionRepository, attribution);
         // Par defaut, aucune transaction annualisee : seuls les tests qui passent par
         // attributedTransactions l'utilisent (lenient : periodicExpensesSummary/balanceForecast ne l'appellent pas).
         lenient().when(transactionRepository.findByCategory_AnnualizedTrue()).thenReturn(List.of());
@@ -160,7 +163,7 @@ class ServiceRapportTest {
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 12, 31), null);
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).total()).isEqualTo(new BigDecimal("50.00"));
+        assertThat(result.getFirst().total()).isEqualTo(new BigDecimal("50.00"));
     }
 
     @Test
@@ -187,9 +190,9 @@ class ServiceRapportTest {
         List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
-        assertThat(result.get(0).category()).isEqualTo("Alimentation : Restaurant");
-        assertThat(result.get(0).categoryId()).isEqualTo(2L);
-        assertThat(result.get(0).uncategorized()).isFalse();
+        assertThat(result.getFirst().category()).isEqualTo("Alimentation : Restaurant");
+        assertThat(result.getFirst().categoryId()).isEqualTo(2L);
+        assertThat(result.getFirst().uncategorized()).isFalse();
     }
 
     @Test
@@ -201,9 +204,9 @@ class ServiceRapportTest {
         List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
-        assertThat(result.get(0).category()).isEqualTo("Non catégorisé");
-        assertThat(result.get(0).uncategorized()).isTrue();
-        assertThat(result.get(0).categoryId()).isNull();
+        assertThat(result.getFirst().category()).isEqualTo("Non catégorisé");
+        assertThat(result.getFirst().uncategorized()).isTrue();
+        assertThat(result.getFirst().categoryId()).isNull();
     }
 
     @Test
@@ -219,8 +222,8 @@ class ServiceRapportTest {
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
         assertThat(result).hasSize(2);
-        assertThat(result.get(0).category()).isEqualTo("Courses");
-        assertThat(result.get(0).percentage()).isEqualTo(new BigDecimal("60.0"));
+        assertThat(result.getFirst().category()).isEqualTo("Courses");
+        assertThat(result.getFirst().percentage()).isEqualTo(new BigDecimal("60.0"));
         assertThat(result.get(1).category()).isEqualTo("Loisirs");
         assertThat(result.get(1).percentage()).isEqualTo(new BigDecimal("40.0"));
     }
@@ -241,7 +244,7 @@ class ServiceRapportTest {
                 LocalDate.of(2025, 11, 1), LocalDate.of(2026, 1, 31), null);
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).total()).isEqualTo(new BigDecimal("300.00")); // 3 * (1200/12)
+        assertThat(result.getFirst().total()).isEqualTo(new BigDecimal("300.00")); // 3 * (1200/12)
     }
 
     @Test
@@ -257,17 +260,17 @@ class ServiceRapportTest {
         List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2025, 10, 1), LocalDate.of(2025, 10, 31), null);
 
-        assertThat(result.get(0).total()).isEqualTo(new BigDecimal("100.00")); // 1200/12, jamais 1200
+        assertThat(result.getFirst().total()).isEqualTo(new BigDecimal("100.00")); // 1200/12, jamais 1200
     }
 
     @Test
     void annualizedShare_lesDouzePartsRedonnentExactementLeMontant() {
         BigDecimal total = BigDecimal.ZERO;
-        for (int i = 0; i < 12; i++) total = total.add(ServiceRapport.annualizedShare(new BigDecimal("-100.00"), i));
+        for (int i = 0; i < 12; i++) total = total.add(AttributionTransactions.annualizedShare(new BigDecimal("-100.00"), i));
 
         assertThat(total).isEqualByComparingTo("-100.00");
-        assertThat(ServiceRapport.annualizedShare(new BigDecimal("-100.00"), 0)).isEqualByComparingTo("-8.33");
-        assertThat(ServiceRapport.annualizedShare(new BigDecimal("-100.00"), 11)).isEqualByComparingTo("-8.37");
+        assertThat(AttributionTransactions.annualizedShare(new BigDecimal("-100.00"), 0)).isEqualByComparingTo("-8.33");
+        assertThat(AttributionTransactions.annualizedShare(new BigDecimal("-100.00"), 11)).isEqualByComparingTo("-8.37");
     }
 
     @Test
@@ -299,7 +302,7 @@ class ServiceRapportTest {
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).total()).isEqualByComparingTo("80.00");
+        assertThat(result.getFirst().total()).isEqualByComparingTo("80.00");
     }
 
     @Test
@@ -313,7 +316,7 @@ class ServiceRapportTest {
         List<DepenseParCategorieDTO> result = service.expensesByCategory(
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 2, 28), null);
 
-        assertThat(result.get(0).total()).isEqualByComparingTo("100.00");
+        assertThat(result.getFirst().total()).isEqualByComparingTo("100.00");
     }
 
     @Test
@@ -348,7 +351,7 @@ class ServiceRapportTest {
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null, "expense", null, null, false);
 
         assertThat(expenses).hasSize(1);
-        assertThat(expenses.get(0).getAmount()).isEqualByComparingTo("-500.00");
+        assertThat(expenses.getFirst().getAmount()).isEqualByComparingTo("-500.00");
     }
 
     @Test
@@ -364,7 +367,7 @@ class ServiceRapportTest {
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null, null, 1L, null, false);
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).getCategoryId()).isEqualTo(1L);
+        assertThat(result.getFirst().getCategoryId()).isEqualTo(1L);
     }
 
     @Test
@@ -397,7 +400,7 @@ class ServiceRapportTest {
                 LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null, null, null, null, true);
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).getId()).isEqualTo(2L);
+        assertThat(result.getFirst().getId()).isEqualTo(2L);
     }
 
     @Test
@@ -412,8 +415,8 @@ class ServiceRapportTest {
                 LocalDate.of(2025, 11, 1), LocalDate.of(2025, 11, 30), null, "expense", null, null, false);
 
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).getAmount()).isEqualByComparingTo("-100.00");
-        assertThat(result.get(0).getDate()).isEqualTo(LocalDate.of(2025, 11, 1));
+        assertThat(result.getFirst().getAmount()).isEqualByComparingTo("-100.00");
+        assertThat(result.getFirst().getDate()).isEqualTo(LocalDate.of(2025, 11, 1));
     }
 
     // --- monthlySavings ---
@@ -431,8 +434,8 @@ class ServiceRapportTest {
         List<EpargneMensuelleDTO> result = service.monthlySavings(2, null, referenceMonth);
 
         assertThat(result).hasSize(2);
-        assertThat(result.get(0).date()).isEqualTo("2026-02-01");
-        assertThat(result.get(0).savings()).isEqualTo(new BigDecimal("1000.00"));
+        assertThat(result.getFirst().date()).isEqualTo("2026-02-01");
+        assertThat(result.getFirst().savings()).isEqualTo(new BigDecimal("1000.00"));
         assertThat(result.get(1).date()).isEqualTo("2026-03-01");
         assertThat(result.get(1).savings()).isEqualTo(new BigDecimal("-200.00"));
     }
@@ -457,9 +460,9 @@ class ServiceRapportTest {
         List<EpargneMensuelleDTO> result = service.monthlySavings(3, null, currentMonthStart);
 
         assertThat(result).hasSize(3);
-        assertThat(result.get(0).date()).isEqualTo(currentMonthStart.minusMonths(2).toString());
-        assertThat(result.get(0).savings()).isEqualTo(new BigDecimal("1000.00"));
-        assertThat(result.get(0).forecast()).isFalse();
+        assertThat(result.getFirst().date()).isEqualTo(currentMonthStart.minusMonths(2).toString());
+        assertThat(result.getFirst().savings()).isEqualTo(new BigDecimal("1000.00"));
+        assertThat(result.getFirst().forecast()).isFalse();
         assertThat(result.get(1).date()).isEqualTo(currentMonthStart.minusMonths(1).toString());
         assertThat(result.get(1).savings()).isEqualTo(new BigDecimal("-200.00"));
         assertThat(result.get(1).forecast()).isFalse();
@@ -486,8 +489,8 @@ class ServiceRapportTest {
 
         // Moyenne sur les 12 VRAIS derniers mois (une seule transaction a 2400) : 2400 / 12 = 200.00.
         assertThat(result).hasSize(1);
-        assertThat(result.get(0).savings()).isEqualTo(new BigDecimal("200.00"));
-        assertThat(result.get(0).forecast()).isTrue();
+        assertThat(result.getFirst().savings()).isEqualTo(new BigDecimal("200.00"));
+        assertThat(result.getFirst().forecast()).isTrue();
     }
 
     // --- periodicExpensesSummary ---
@@ -524,10 +527,10 @@ class ServiceRapportTest {
         SynthesePeriodiqueDTO result = service.periodicExpensesSummary();
 
         assertThat(result.expenses().items()).hasSize(1); // une seule ligne pour Netflix, la plus recente
-        assertThat(result.expenses().items().get(0).transactionId()).isEqualTo(2L);
+        assertThat(result.expenses().items().getFirst().transactionId()).isEqualTo(2L);
 
         assertThat(result.revenues().items()).hasSize(1);
-        assertThat(result.revenues().items().get(0).transactionId()).isEqualTo(3L);
+        assertThat(result.revenues().items().getFirst().transactionId()).isEqualTo(3L);
     }
 
     @Test
@@ -727,8 +730,8 @@ class ServiceRapportTest {
         PrevisionSoldeDTO result = service.balanceForecast(null, null);
 
         List<PointSoldeDTO> points = result.points();
-        assertThat(points.get(0).balance()).isEqualTo(new BigDecimal("1200.00"));
-        assertThat(points.get(0).type()).isEqualTo(PointSoldeDTO.HISTORIQUE);
+        assertThat(points.getFirst().balance()).isEqualTo(new BigDecimal("1200.00"));
+        assertThat(points.getFirst().type()).isEqualTo(PointSoldeDTO.HISTORIQUE);
         assertThat(points.get(1).balance()).isEqualTo(new BigDecimal("1230.00"));
         assertThat(points.get(4).balance()).isEqualTo(new BigDecimal("1230.00"));
         assertThat(points.get(5).balance()).isEqualTo(new BigDecimal("1330.00"));
@@ -776,7 +779,7 @@ class ServiceRapportTest {
         when(transactionRepository.findByDateBetween(any(), any()))
                 .thenReturn(List.of(depenseRacine, depenseEnfant, revenu));
 
-        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
+        AnalyseMensuelleDTO result = analyse.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
 
         assertThat(result.months()).hasSize(12);
 
@@ -790,7 +793,7 @@ class ServiceRapportTest {
         assertThat(ligneRestaurant.values().get("2025-06-01")).isEqualByComparingTo("25.00");
 
         assertThat(result.income()).hasSize(1);
-        assertThat(result.income().get(0).name()).isEqualTo("Salaire");
+        assertThat(result.income().getFirst().name()).isEqualTo("Salaire");
 
         assertThat(result.expenseTotal().values().get("2025-06-01")).isEqualByComparingTo("65.00"); // 40 + 25
 
@@ -803,7 +806,7 @@ class ServiceRapportTest {
     void monthlyCategoryAnalysis_sansTransactions_renvoie12MoisVidesSansLignesNiErreur() {
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of());
 
-        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
+        AnalyseMensuelleDTO result = analyse.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
 
         assertThat(result.months()).hasSize(12);
         assertThat(result.expenses()).isEmpty();
@@ -828,7 +831,7 @@ class ServiceRapportTest {
         Transaction revenu2 = transaction(2L, account, currentMonthStart.minusMonths(2).plusDays(4), "3000.00", salaire);
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(revenu1, revenu2));
 
-        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, currentMonthStart);
+        AnalyseMensuelleDTO result = analyse.monthlyCategoryAnalysis(null, currentMonthStart);
 
         assertThat(result.months()).hasSize(12);
         assertThat(result.months().get(11).key()).isEqualTo(currentMonthStart.toString());
@@ -879,9 +882,9 @@ class ServiceRapportTest {
         // 15 mois dans le futur : la fenetre de 12 mois affichee ([+4 ; +15])
         // ne touche plus du tout les 12 vrais derniers mois ([-12 ; -1]).
         LocalDate loinDansLeFutur = currentMonthStart.plusMonths(15);
-        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, loinDansLeFutur);
+        AnalyseMensuelleDTO result = analyse.monthlyCategoryAnalysis(null, loinDansLeFutur);
 
-        assertThat(result.months()).allMatch(MoisAnalyseDTO::forecast);
+        assertThat(result.months()).isNotEmpty().allMatch(MoisAnalyseDTO::forecast);
 
         // Moyenne sur les 12 VRAIS derniers mois (une seule transaction a 2400) : 2400 / 12 = 200.00.
         BigDecimal expectedAverage = new BigDecimal("2400.00").divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
@@ -913,7 +916,7 @@ class ServiceRapportTest {
                 transaction(5L, account, LocalDate.of(2025, 1, 5), "2000.00", salaire),
                 transaction(6L, account, LocalDate.of(2025, 7, 5), "2500.00", salaire));
 
-        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
+        AnalyseMensuelleDTO result = analyse.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
 
         assertThat(result.previousFrom()).isEqualTo(LocalDate.of(2024, 2, 1));
         assertThat(result.previousTo()).isEqualTo(LocalDate.of(2025, 1, 31));
@@ -940,7 +943,7 @@ class ServiceRapportTest {
         Categorie salle = categorie(7L, "Salle de sport", null, false);
         stubTransactionsBetween(transaction(1L, account, LocalDate.of(2024, 9, 1), "-35.00", salle));
 
-        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
+        AnalyseMensuelleDTO result = analyse.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
 
         LigneAnalyseDTO ligne = ligneNommee(result.expenses(), "Salle de sport");
         assertThat(ligne.total()).isEqualByComparingTo("0");
@@ -963,7 +966,7 @@ class ServiceRapportTest {
         stubTransactionsBetween();
         when(transactionRepository.findByCategory_AnnualizedTrue()).thenReturn(List.of(annuelle));
 
-        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
+        AnalyseMensuelleDTO result = analyse.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
 
         LigneAnalyseDTO ligne = ligneNommee(result.expenses(), "Taxe foncière");
         assertThat(ligne.total()).isEqualByComparingTo("600.00");
@@ -978,9 +981,9 @@ class ServiceRapportTest {
         when(transactionRepository.findByAccountIdAndDateBetween(any(), any(), any())).thenReturn(List.of());
         when(transactionRepository.findEarliestDateByAccountId(5L)).thenReturn(LocalDate.of(2025, 3, 1));
 
-        assertThat(service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1)).historyStart())
+        assertThat(analyse.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1)).historyStart())
                 .isEqualTo(LocalDate.of(2024, 9, 1));
-        assertThat(service.monthlyCategoryAnalysis(5L, LocalDate.of(2026, 1, 1)).historyStart())
+        assertThat(analyse.monthlyCategoryAnalysis(5L, LocalDate.of(2026, 1, 1)).historyStart())
                 .isEqualTo(LocalDate.of(2025, 3, 1));
     }
 
@@ -993,7 +996,9 @@ class ServiceRapportTest {
 
     @Test
     void expensesByCategory_refuseUnePeriodeInversee() {
-        assertThatThrownBy(() -> service.expensesByCategory(LocalDate.of(2026, 12, 1), LocalDate.of(2026, 1, 1), null))
+        LocalDate debut = LocalDate.of(2026, 12, 1);
+        LocalDate fin = LocalDate.of(2026, 1, 1);
+        assertThatThrownBy(() -> service.expensesByCategory(debut, fin, null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Période invalide");
         verify(transactionRepository, never()).findByDateBetween(any(), any());
@@ -1001,8 +1006,9 @@ class ServiceRapportTest {
 
     @Test
     void cellTransactions_refuseUnePeriodeInversee() {
-        assertThatThrownBy(() -> service.cellTransactions(LocalDate.of(2026, 12, 1), LocalDate.of(2026, 1, 1),
-                null, "expense", null, null, false))
+        LocalDate debut = LocalDate.of(2026, 12, 1);
+        LocalDate fin = LocalDate.of(2026, 1, 1);
+        assertThatThrownBy(() -> service.cellTransactions(debut, fin, null, "expense", null, null, false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Période invalide");
     }

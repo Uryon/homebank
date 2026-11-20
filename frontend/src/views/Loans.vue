@@ -173,9 +173,13 @@ import { useRouteActions } from '../services/routeActions'
 import Chart from '../services/chart'
 import { LoansAPI } from '../services/api'
 import { MAX_DATE, MIN_DATE, formatAmount, formatRate, toLocalIsoDate } from '../services/format'
-import { monthlyPaymentFor } from '../services/loanMath'
+import {
+  MAX_TERM_MONTHS, formatScheduleDate as formatDate, loanPayload, markCurrentRow, monthlyPaymentFor,
+  ownedAmount, ownedPercent, progressPercent, termMonthsError, totalMonthly
+} from '../services/loanMath'
+import { loanBalanceChartConfig } from '../services/loanChart'
 import { alertApiError } from '../services/errors'
-import { areaGradient, axisOptions, readChartColors, tooltipOptions } from '../services/chartTheme'
+import { readChartColors } from '../services/chartTheme'
 import { effectiveTheme } from '../services/theme'
 import AmountInput from '../components/AmountInput.vue'
 import FieldError from '../components/FieldError.vue'
@@ -207,8 +211,6 @@ onBeforeUnmount(() => {
 })
 let currentRowNode = null
 
-const tickFormatter = new Intl.NumberFormat('fr-FR')
-
 // Couleurs du canvas lues au dessin (voir services/chartTheme.js) : on
 // redessine au changement de thème, système compris.
 watch(effectiveTheme, async () => {
@@ -232,43 +234,8 @@ function emptyForm() {
 
 const selectedLoan = computed(() => loans.value.find(l => l.id === selectedId.value) || null)
 
-const scheduleRows = computed(() => {
-  let currentAssigned = false
-  return schedule.value.map(row => {
-    const isCurrent = !currentAssigned && !row.paid
-    if (isCurrent) currentAssigned = true
-    return { ...row, isCurrent }
-  })
-})
-
-function totalMonthly(loan) {
-  return (loan.monthlyPayment || 0) + (loan.monthlyInsurance || 0)
-}
-
-/** Capital déjà remboursé = ce qui vous appartient réellement dans le bien financé. */
-function ownedAmount(loan) {
-  return (loan.principal || 0) - (loan.currentRemainingBalance || 0)
-}
-
-function ownedPercent(loan) {
-  if (!loan.principal) return 0
-  return Math.round((ownedAmount(loan) / loan.principal) * 100)
-}
-
-function progressPercent(loan) {
-  if (!loan.principal) return 0
-  const paid = loan.principal - loan.currentRemainingBalance
-  return Math.min(100, Math.max(0, (paid / loan.principal) * 100))
-}
-
-// Fallback "—" (au lieu de "" cote services/format.js) : une echeance de
-// pret sans date doit rester visuellement signalee dans le tableau
-// d'amortissement, contrairement a un memo ou un mode de paiement vide.
-function formatDate(iso) {
-  if (!iso) return '—'
-  const [y, m, d] = iso.split('-')
-  return `${d}/${m}/${y}`
-}
+/** Échéancier avec l'échéance courante (première non payée) marquée. */
+const scheduleRows = computed(() => markCurrentRow(schedule.value))
 
 async function loadLoans() {
   loans.value = await LoansAPI.list()
@@ -311,98 +278,14 @@ function select(id) {
   selectedId.value = id
 }
 
-/** Libellé de l'axe pour l'échéance d'index donné : l'année si elle ouvre une année retenue, sinon rien. */
-function yearTickLabel(index) {
-  const rows = schedule.value
-  const year = Number(rows[index]?.date?.slice(0, 4))
-  if (!year) return ''
-  const previousYear = index > 0 ? Number(rows[index - 1].date.slice(0, 4)) : null
-  if (previousYear === year) return ''
-  const firstYear = Number(rows[0].date.slice(0, 4))
-  const lastYear = Number(rows[rows.length - 1].date.slice(0, 4))
-  const step = Math.max(1, Math.ceil((lastYear - firstYear + 1) / 12))
-  return (year - firstYear) % step === 0 ? String(year) : ''
-}
-
-/**
- * Ligne pleine pour les echeances deja passees, pointilles pour les
- * echeances a venir (meme codage visuel que le graphique du tableau de
- * bord), pour bien montrer ce qui a deja ete rembourse.
- */
+/** Dessine le capital restant dû (voir services/loanChart.js), en remplaçant le graphique précédent. */
 function renderChart() {
   if (!balanceChart.value) return
-  const colors = readChartColors()
-  const presentIndex = schedule.value.findIndex(r => !r.paid)
-  const splitIndex = presentIndex === -1 ? schedule.value.length - 1 : presentIndex
-
-  const pastData = schedule.value.map((r, i) => (i <= splitIndex ? r.remainingBalance : null))
-  const futureData = schedule.value.map((r, i) => (i >= splitIndex ? r.remainingBalance : null))
-
   if (balanceChartInstance) balanceChartInstance.destroy()
-  balanceChartInstance = new Chart(balanceChart.value, {
-    type: 'line',
-    data: {
-      labels: schedule.value.map(r => formatDate(r.date)),
-      datasets: [
-        {
-          label: 'Remboursé',
-          data: pastData,
-          borderColor: colors.positive,
-          backgroundColor: areaGradient(colors.positive, 0.22),
-          fill: true,
-          tension: 0.2,
-          pointRadius: 0,
-          borderWidth: 2.5,
-          pointHoverRadius: 5,
-          spanGaps: false
-        },
-        {
-          label: 'Restant à rembourser',
-          data: futureData,
-          borderColor: colors.accent,
-          backgroundColor: areaGradient(colors.accent, 0.14),
-          borderDash: [6, 5],
-          fill: true,
-          tension: 0.2,
-          pointRadius: 0,
-          borderWidth: 2.5,
-          pointHoverRadius: 5,
-          spanGaps: false
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: tooltipOptions(colors, {
-          boxPadding: 4,
-          usePointStyle: true,
-          callbacks: {
-            label: (ctx) => `${ctx.dataset.label} : ${formatAmount(ctx.parsed.y)}`,
-            // Meme stat que l'encart "vous appartiennent aujourd'hui" en
-            // haut du graphique, mais recalculee au point survole (et non
-            // figee sur le solde actuel) : capital = deja rembourse a cette
-            // echeance = principal - solde restant du a cette echeance.
-            afterBody: (items) => {
-              if (!items.length || !selectedLoan.value) return ''
-              const row = schedule.value[items[0].dataIndex]
-              if (!row) return ''
-              const owned = (selectedLoan.value.principal || 0) - row.remainingBalance
-              return `Vous appartient à cette échéance : ${formatAmount(owned)}`
-            }
-          }
-        })
-      },
-      scales: {
-        // Axe : seulement les années (date complète dans l'infobulle), à la
-        // première échéance de chaque année retenue — au plus ~12 repères.
-        x: axisOptions(colors, { ticks: { maxRotation: 0, autoSkip: false, callback: (_value, index) => yearTickLabel(index) } }),
-        y: axisOptions(colors, { withGrid: true, ticks: { callback: (v) => tickFormatter.format(v) } })
-      }
-    }
-  })
+  balanceChartInstance = new Chart(balanceChart.value, loanBalanceChartConfig(schedule.value, {
+    principal: selectedLoan.value?.principal ?? null,
+    colors: readChartColors()
+  }))
 }
 
 const { errors, check, clear, invalidAttrs } = useFieldErrors({
@@ -433,15 +316,6 @@ function openEdit(loan) {
     notes: loan.notes || ''
   }
   showModal.value = true
-}
-
-/** Durée maximale d'un prêt, même limite que le backend (ServicePret#MAX_TERM_MONTHS). */
-const MAX_TERM_MONTHS = 600
-
-function termMonthsError(termMonths) {
-  if (!termMonths) return 'Saisissez la durée en mois.'
-  if (termMonths > MAX_TERM_MONTHS) return `La durée ne peut pas dépasser ${MAX_TERM_MONTHS} mois (50 ans).`
-  return ''
 }
 
 async function save() {
@@ -490,12 +364,6 @@ async function save() {
 
 /** Annulation de la dernière création, modification ou suppression de prêt (voir services/lastAction.js). */
 const { lastAction, undoing, setLastAction, runLastAction } = useLastAction()
-
-/** Paramètres saisis d'un prêt (sans les valeurs calculées par le backend), pour le recréer à l'identique. */
-function loanPayload(loan) {
-  const { name, principal, annualRate, termMonths, startDate, monthlyPayment, monthlyInsurance, notes } = loan
-  return { name, principal, annualRate, termMonths, startDate, monthlyPayment, monthlyInsurance, notes }
-}
 
 async function remove(loan) {
   if (!(await askConfirm(`Supprimer le prêt "${loan.name}" ?`))) return

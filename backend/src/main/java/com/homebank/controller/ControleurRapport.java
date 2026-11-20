@@ -6,6 +6,7 @@ import com.homebank.dto.EpargneMensuelleDTO;
 import com.homebank.dto.PrevisionSoldeDTO;
 import com.homebank.dto.SynthesePeriodiqueDTO;
 import com.homebank.dto.TransactionDTO;
+import com.homebank.service.ServiceAnalyseMensuelle;
 import com.homebank.service.ServiceRapport;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
@@ -18,9 +19,11 @@ import java.util.List;
 public class ControleurRapport {
 
     private final ServiceRapport reportService;
+    private final ServiceAnalyseMensuelle analysisService;
 
-    public ControleurRapport(ServiceRapport reportService) {
+    public ControleurRapport(ServiceRapport reportService, ServiceAnalyseMensuelle analysisService) {
         this.reportService = reportService;
+        this.analysisService = analysisService;
     }
 
     @GetMapping("/expenses-by-category")
@@ -40,7 +43,7 @@ public class ControleurRapport {
     public AnalyseMensuelleDTO monthlyCategoryAnalysis(
             @RequestParam(required = false) Long accountId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate referenceMonth) {
-        return reportService.monthlyCategoryAnalysis(accountId, referenceMonth);
+        return analysisService.monthlyCategoryAnalysis(accountId, referenceMonth);
     }
 
     /** Epargne mensuelle (revenus - depenses) sur les N derniers mois termines, jusqu'a referenceMonth inclus (omis = dernier mois calendaire deja termine). */

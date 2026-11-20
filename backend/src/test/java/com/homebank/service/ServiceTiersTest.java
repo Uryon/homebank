@@ -5,7 +5,6 @@ import com.homebank.mapper.MappeurTiers;
 import com.homebank.model.Categorie;
 import com.homebank.model.Tiers;
 import com.homebank.model.Transaction;
-import com.homebank.dto.CategorisationAutoResultatDTO;
 import com.homebank.repository.DepotTiers;
 import com.homebank.repository.DepotTransaction;
 import org.junit.jupiter.api.BeforeEach;
@@ -159,13 +158,13 @@ class ServiceTiersTest {
 
         assertThat(created.getName()).isEqualTo("VIR SEPA ACME; REF 2025");
         assertThat(created.getPattern()).isEqualTo("VIR SEPA ACME* REF 2025");
-        assertThat(ServiceTiers.matchesPatternField(created.getPattern(), "VIR SEPA ACME; REF 2025")).isTrue();
-        assertThat(ServiceTiers.matchesPatternField(created.getPattern(), "PRELEVEMENT ASSURANCE REF 2025")).isFalse();
+        assertThat(MotifsTiers.matchesPatternField(created.getPattern(), "VIR SEPA ACME; REF 2025")).isTrue();
+        assertThat(MotifsTiers.matchesPatternField(created.getPattern(), "PRELEVEMENT ASSURANCE REF 2025")).isFalse();
     }
 
     @Test
     void suggestFromBankLabel_commercantAvecPointVirgule_resteUnSeulMotif() {
-        assertThat(ServiceTiers.suggestFromBankLabel("ACHAT CB CAFE;BAR 09.08.26 CARTE NUMERO 697").pattern())
+        assertThat(MotifsTiers.suggestFromBankLabel("ACHAT CB CAFE;BAR 09.08.26 CARTE NUMERO 697").pattern())
                 .isEqualTo("ACHAT CB CAFE*BAR");
     }
 
@@ -510,24 +509,24 @@ class ServiceTiersTest {
 
     @Test
     void suggestFromBankLabel_retireDateCarteEtMontantDuLibelle() {
-        assertThat(ServiceTiers.suggestFromBankLabel("ACHAT CB SumUp   DOMOUS 09.08.26 CARTE NUMERO     697"))
-                .isEqualTo(new ServiceTiers.TiersSuggere("SumUp DOMOUS", "ACHAT CB SumUp DOMOUS"));
-        assertThat(ServiceTiers.suggestFromBankLabel("ACHAT CB SARL DU PARC 20.09.25, CARTE NUMERO 697"))
-                .isEqualTo(new ServiceTiers.TiersSuggere("SARL DU PARC", "ACHAT CB SARL DU PARC"));
-        assertThat(ServiceTiers.suggestFromBankLabel("ACHAT CB UBER    EATS   03.11.26 EUR  37,43 CARTE NO  697"))
-                .isEqualTo(new ServiceTiers.TiersSuggere("UBER EATS", "ACHAT CB UBER EATS"));
-        assertThat(ServiceTiers.suggestFromBankLabel("CREDIT CARTE BANCAIRE Steam Purchase  03.11.26 CARTE NUMERO 697"))
-                .isEqualTo(new ServiceTiers.TiersSuggere("Steam Purchase", "CREDIT CARTE BANCAIRE Steam Purchase"));
-        assertThat(ServiceTiers.suggestFromBankLabel("PRELEVEMENT DE Bouygues Telecom REF : PAGP0110 06xxxxx675"))
-                .isEqualTo(new ServiceTiers.TiersSuggere("Bouygues Telecom", "PRELEVEMENT DE Bouygues Telecom"));
+        assertThat(MotifsTiers.suggestFromBankLabel("ACHAT CB SumUp   DOMOUS 09.08.26 CARTE NUMERO     697"))
+                .isEqualTo(new MotifsTiers.TiersSuggere("SumUp DOMOUS", "ACHAT CB SumUp DOMOUS"));
+        assertThat(MotifsTiers.suggestFromBankLabel("ACHAT CB SARL DU PARC 20.09.25, CARTE NUMERO 697"))
+                .isEqualTo(new MotifsTiers.TiersSuggere("SARL DU PARC", "ACHAT CB SARL DU PARC"));
+        assertThat(MotifsTiers.suggestFromBankLabel("ACHAT CB UBER    EATS   03.11.26 EUR  37,43 CARTE NO  697"))
+                .isEqualTo(new MotifsTiers.TiersSuggere("UBER EATS", "ACHAT CB UBER EATS"));
+        assertThat(MotifsTiers.suggestFromBankLabel("CREDIT CARTE BANCAIRE Steam Purchase  03.11.26 CARTE NUMERO 697"))
+                .isEqualTo(new MotifsTiers.TiersSuggere("Steam Purchase", "CREDIT CARTE BANCAIRE Steam Purchase"));
+        assertThat(MotifsTiers.suggestFromBankLabel("PRELEVEMENT DE Bouygues Telecom REF : PAGP0110 06xxxxx675"))
+                .isEqualTo(new MotifsTiers.TiersSuggere("Bouygues Telecom", "PRELEVEMENT DE Bouygues Telecom"));
     }
 
     @Test
     void suggestFromBankLabel_libelleDUneAutreForme_gardeLeTexteTelQuel() {
-        assertThat(ServiceTiers.suggestFromBankLabel("Vinted"))
-                .isEqualTo(new ServiceTiers.TiersSuggere("Vinted", "Vinted"));
-        assertThat(ServiceTiers.suggestFromBankLabel("VIREMENT INSTANTANE A KELLY Cadeau"))
-                .isEqualTo(new ServiceTiers.TiersSuggere("VIREMENT INSTANTANE A KELLY Cadeau", "VIREMENT INSTANTANE A KELLY Cadeau"));
+        assertThat(MotifsTiers.suggestFromBankLabel("Vinted"))
+                .isEqualTo(new MotifsTiers.TiersSuggere("Vinted", "Vinted"));
+        assertThat(MotifsTiers.suggestFromBankLabel("VIREMENT INSTANTANE A KELLY Cadeau"))
+                .isEqualTo(new MotifsTiers.TiersSuggere("VIREMENT INSTANTANE A KELLY Cadeau", "VIREMENT INSTANTANE A KELLY Cadeau"));
     }
 
     @Test
@@ -545,87 +544,6 @@ class ServiceTiersTest {
     // --- autoCategorize : categorisation automatique en masse (page Tiers) ---
 
     @Test
-    void autoCategorize_deduitLaCategorieUnanimeEtCombleLesTransactionsSansCategorie() {
-        Categorie courses = categorie(10L, "Courses");
-        Tiers carrefour = tiers(1L, "Carrefour", "Carrefour", null);
-        Transaction categorisee1 = transaction(1L, carrefour, courses);
-        Transaction categorisee2 = transaction(2L, carrefour, courses);
-        Transaction sansCategorie = transaction(3L, carrefour, null);
-        Transaction sansTiers = transaction(4L, null, null);
-        when(payeeRepository.findAll()).thenReturn(List.of(carrefour));
-        when(transactionRepository.findAllWithPayeeAndCategory())
-                .thenReturn(List.of(categorisee1, categorisee2, sansCategorie, sansTiers));
-
-        CategorisationAutoResultatDTO result = service.autoCategorize();
-
-        assertThat(carrefour.getCategory()).isSameAs(courses);
-        assertThat(sansCategorie.getCategory()).isSameAs(courses);
-        assertThat(sansTiers.getCategory()).isNull();
-        verify(payeeRepository).saveAll(List.of(carrefour));
-        verify(transactionRepository).saveAll(List.of(sansCategorie));
-        assertThat(result.getPayeesUpdated()).isEqualTo(1);
-        assertThat(result.getTransactionsUpdated()).isEqualTo(1);
-        assertThat(result.getPayeeIds()).containsExactly(1L);
-        assertThat(result.getTransactionIds()).containsExactly(3L);
-    }
-
-    @Test
-    void autoCategorize_categorieUnanimeMaisMasquee_neLaReportePas() {
-        Categorie resilie = categorie(10L, "Ancien abonnement");
-        resilie.setHidden(true);
-        Tiers salle = tiers(1L, "Salle de sport", "Salle de sport", null);
-        Transaction ancienne = transaction(1L, salle, resilie);
-        Transaction sansCategorie = transaction(2L, salle, null);
-        when(payeeRepository.findAll()).thenReturn(List.of(salle));
-        when(transactionRepository.findAllWithPayeeAndCategory()).thenReturn(List.of(ancienne, sansCategorie));
-
-        CategorisationAutoResultatDTO result = service.autoCategorize();
-
-        assertThat(salle.getCategory()).isNull();
-        assertThat(sansCategorie.getCategory()).isNull();
-        assertThat(result.getPayeesUpdated()).isZero();
-        assertThat(result.getTransactionsUpdated()).isZero();
-    }
-
-    @Test
-    void autoCategorize_categoriesEnDesaccord_neModifieRien() {
-        Tiers amazon = tiers(1L, "Amazon", "Amazon", null);
-        Transaction livre = transaction(1L, amazon, categorie(10L, "Livres"));
-        Transaction maison = transaction(2L, amazon, categorie(11L, "Maison"));
-        Transaction sansCategorie = transaction(3L, amazon, null);
-        when(payeeRepository.findAll()).thenReturn(List.of(amazon));
-        when(transactionRepository.findAllWithPayeeAndCategory()).thenReturn(List.of(livre, maison, sansCategorie));
-
-        CategorisationAutoResultatDTO result = service.autoCategorize();
-
-        assertThat(amazon.getCategory()).isNull();
-        assertThat(sansCategorie.getCategory()).isNull();
-        assertThat(result.getPayeesUpdated()).isZero();
-        assertThat(result.getTransactionsUpdated()).isZero();
-    }
-
-    @Test
-    void autoCategorize_tiersDejaCategorise_combleLesVidesSansToucherAuxChoixExistants() {
-        Categorie telephone = categorie(10L, "Telephone");
-        Categorie cadeaux = categorie(11L, "Cadeaux");
-        Tiers bouygues = tiers(1L, "Bouygues", "Bouygues", null);
-        bouygues.setCategory(telephone);
-        Transaction choixUtilisateur = transaction(1L, bouygues, cadeaux);
-        Transaction sansCategorie = transaction(2L, bouygues, null);
-        when(payeeRepository.findAll()).thenReturn(List.of(bouygues));
-        when(transactionRepository.findAllWithPayeeAndCategory()).thenReturn(List.of(choixUtilisateur, sansCategorie));
-
-        CategorisationAutoResultatDTO result = service.autoCategorize();
-
-        assertThat(choixUtilisateur.getCategory()).isSameAs(cadeaux);
-        assertThat(sansCategorie.getCategory()).isSameAs(telephone);
-        assertThat(bouygues.getCategory()).isSameAs(telephone);
-        // Le tiers avait deja sa categorie : il n'est pas compte comme "categorise".
-        assertThat(result.getPayeesUpdated()).isZero();
-        assertThat(result.getTransactionsUpdated()).isEqualTo(1);
-    }
-
-    @Test
     void normalizeWhitespaceDonneLeMemeResultatQueLExpressionReguliere() {
         // Reference : l'expression complete, sans le raccourci isWhitespaceNormalized.
         java.util.regex.Pattern reference = java.util.regex.Pattern.compile("[\\s\\u00A0\\u2007\\u202F]+");
@@ -635,8 +553,40 @@ class ServiceTiersTest {
                 "a\u0001b", "Café du coin", "PRLV SEPA EDF 12/03");
         for (String sample : samples) {
             String expected = reference.matcher(sample).replaceAll(" ").trim();
-            assertThat(ServiceTiers.normalizeWhitespace(sample)).as("« %s »", sample).isEqualTo(expected);
+            assertThat(MotifsTiers.normalizeWhitespace(sample)).as("« %s »", sample).isEqualTo(expected);
         }
-        assertThat(ServiceTiers.normalizeWhitespace(null)).isNull();
+        assertThat(MotifsTiers.normalizeWhitespace(null)).isNull();
+    }
+
+    // --- findOrCreateByExactName : tiers d'une transaction restauree ---
+
+    @Test
+    void findOrCreateByExactName_neRattachePasAUnTiersDontLeMotifContientLeNom() {
+        Tiers rose = tiers(1L, "Rose", "Rose", null);
+        when(payeeRepository.save(any(Tiers.class))).thenAnswer(inv -> {
+            Tiers t = inv.getArgument(0);
+            t.setId(2L);
+            return t;
+        });
+        List<Tiers> known = new ArrayList<>(List.of(rose));
+
+        Tiers result = service.findOrCreateByExactName(" Fleuriste Rose ", known);
+
+        assertThat(result.getId()).isEqualTo(2L);
+        assertThat(result.getName()).isEqualTo("Fleuriste Rose");
+        assertThat(result.getPattern()).isEqualTo("Fleuriste Rose");
+        assertThat(result.getAmount()).isNull();
+        assertThat(known).contains(result);
+    }
+
+    @Test
+    void findOrCreateByExactName_reutiliseLeTiersGeneriqueDeMemeNom() {
+        Tiers avecMontant = tiers(1L, "Bouygues", "Bouygues", new BigDecimal("29.99"));
+        Tiers generique = tiers(2L, "bouygues", "bouygues", null);
+
+        Tiers result = service.findOrCreateByExactName("Bouygues", new ArrayList<>(List.of(avecMontant, generique)));
+
+        assertThat(result).isSameAs(generique);
+        verify(payeeRepository, never()).save(any());
     }
 }

@@ -193,6 +193,7 @@ public class ServiceSauvegarde {
         }
         for (Table table : DepotSauvegarde.TABLES) {
             List<Map<String, Object>> lignes = sauvegarde.tables().get(table.nom());
+            if (lignes == null && DepotSauvegarde.LIGNES_IMPORTEES.equals(table.nom())) continue;
             if (lignes == null) {
                 throw new IllegalArgumentException("Sauvegarde incomplète : table « " + table.nom() + " » absente.");
             }

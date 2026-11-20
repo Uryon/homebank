@@ -1,15 +1,11 @@
 package com.homebank.service;
 
-import com.homebank.dto.AnalyseMensuelleDTO;
 import com.homebank.dto.DepenseParCategorieDTO;
 import com.homebank.dto.ElementPeriodiqueDTO;
 import com.homebank.dto.EpargneMensuelleDTO;
 import com.homebank.dto.GroupePeriodiqueDTO;
-import com.homebank.dto.LigneAnalyseDTO;
-import com.homebank.dto.MoisAnalyseDTO;
 import com.homebank.dto.PointSoldeDTO;
 import com.homebank.dto.PrevisionSoldeDTO;
-import com.homebank.dto.ResumeMoisAnalyseDTO;
 import com.homebank.dto.SynthesePeriodiqueDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.mapper.MappeurTransaction;
@@ -22,16 +18,19 @@ import com.homebank.utils.Periode;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.homebank.service.AttributionTransactions.AttributedTransaction;
+import com.homebank.service.AttributionTransactions.CategorieMois;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.time.format.TextStyle;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
-import java.util.function.Function;
+
+import static com.homebank.service.AttributionTransactions.INCOME;
 
 /**
  * Rapports du tableau de bord : lecture seule (Hibernate ne garde alors aucun
@@ -41,150 +40,20 @@ import java.util.function.Function;
 @Transactional(readOnly = true)
 public class ServiceRapport {
 
-    private static final String INCOME = "income";
-    private static final String EXPENSE = "expense";
+    /** Fenetre maximale de l'epargne mensuelle (10 ans) : le tableau de bord en demande 12. */
+    static final int MAX_SAVINGS_MONTHS = 120;
 
     private final DepotTransaction transactionRepository;
     private final DepotCompte accountRepository;
     private final MappeurTransaction transactionMapper;
+    private final AttributionTransactions attribution;
 
-    public ServiceRapport(DepotTransaction transactionRepository, DepotCompte accountRepository, MappeurTransaction transactionMapper) {
+    public ServiceRapport(DepotTransaction transactionRepository, DepotCompte accountRepository, MappeurTransaction transactionMapper,
+                          AttributionTransactions attribution) {
         this.transactionRepository = transactionRepository;
         this.accountRepository = accountRepository;
         this.transactionMapper = transactionMapper;
-    }
-
-    /**
-     * Une transaction (reelle) attribuee a un mois donne pour un montant
-     * donne — en general la transaction elle-meme sur sa propre date, sauf
-     * pour une transaction dont la categorie est marquee "annuelle" (voir
-     * Categorie#annualized) qui genere une ligne par mois de la fenetre
-     * glissante de 12 mois demarrant a son propre mois de paiement, chacune
-     * pour 1/12 de son montant (voir {@link #attributedTransactions}).
-     */
-    private record AttributedTransaction(Transaction source, LocalDate date, BigDecimal amount) {}
-
-    /** Une categorie (null = sans categorie) sur un mois : l'unite de calcul des rapports par categorie. */
-    private record CategorieMois(Long categoryId, YearMonth month) {
-        static CategorieMois de(AttributedTransaction at) {
-            Categorie category = at.source().getCategory();
-            return new CategorieMois(category != null ? category.getId() : null, YearMonth.from(at.date()));
-        }
-
-        String categoryKey() {
-            return categoryId != null ? categoryId.toString() : "uncategorized";
-        }
-    }
-
-    /**
-     * Net de chaque categorie sur chaque mois. Regle commune a tous les
-     * rapports par categorie : un remboursement vient en deduction des depenses
-     * de sa categorie sur le meme mois, et le signe du net decide si ce mois
-     * compte en depense ou en revenu. Sans elle, la repartition des depenses et
-     * le detail d'une cellule comptaient le montant brut, different de celui
-     * du tableau d'analyse.
-     */
-    private static Map<CategorieMois, BigDecimal> netByCategoryMonth(List<AttributedTransaction> transactions) {
-        Map<CategorieMois, BigDecimal> nets = new LinkedHashMap<>();
-        for (AttributedTransaction at : transactions) {
-            nets.merge(CategorieMois.de(at), at.amount(), BigDecimal::add);
-        }
-        return nets;
-    }
-
-    /** Categorie derriere chaque identifiant present (cle null : sans categorie). */
-    private static Map<Long, Categorie> categoriesById(List<AttributedTransaction> transactions) {
-        Map<Long, Categorie> categories = new HashMap<>();
-        for (AttributedTransaction at : transactions) {
-            categories.putIfAbsent(CategorieMois.de(at).categoryId(), at.source().getCategory());
-        }
-        return categories;
-    }
-
-    /** Vrai si la transaction est affectee a une categorie marquee "annuelle" (voir Categorie#annualized). */
-    private boolean hasAnnualizedCategory(Transaction t) {
-        return t.getCategory() != null && t.getCategory().isAnnualized();
-    }
-
-    /**
-     * Transactions "attribuables" a la periode [from,to] : les transactions
-     * normales, sur leur propre date reelle ; et, pour toute transaction dont
-     * la categorie est marquee "annuelle" (ex : taxe fonciere payee en une
-     * fois mais qui couvre toute l'annee), une ligne par mois de la fenetre
-     * glissante de 12 mois qui commence a son propre mois de paiement (ex :
-     * payee en octobre 2025 => repartie d'octobre 2025 a septembre 2026
-     * inclus) qui tombe dans la periode — chacune pour 1/12 de son montant —
-     * meme quand la date reelle du paiement elle-meme est hors periode. Une
-     * transaction d'une categorie annuelle ne compte donc jamais en une fois
-     * sur son seul mois de paiement : uniquement lissee sur les 12 mois
-     * suivants. Les points "historique"/"previsionnel" de balanceForecast
-     * restent bases sur le solde reel des comptes (balanceAsOf, jamais lisse) ;
-     * seule sa tendance mensuelle moyenne (avgMonthlyNet) passe par monthlyNets
-     * et donc par cette methode.
-     * <p>
-     * Une transaction marquee "exceptionnelle" (voir Transaction#exceptional)
-     * est totalement exclue de attributedTransactions, quel que soit le
-     * caractere annuel de sa categorie, pour ne jamais fausser les moyennes/
-     * tendances des tableaux de bord (ex : achat d'une voiture).
-     */
-    private List<AttributedTransaction> attributedTransactions(LocalDate from, LocalDate to, Long accountId) {
-        LocalDate today = LocalDate.now(ZoneId.systemDefault());
-        List<AttributedTransaction> result = new ArrayList<>();
-
-        List<Transaction> inRange = accountId != null
-                ? transactionRepository.findByAccountIdAndDateBetween(accountId, from, to)
-                : transactionRepository.findByDateBetween(from, to);
-        for (Transaction t : inRange) {
-            addIfAttributable(t, today, result);
-        }
-
-        for (Transaction t : transactionRepository.findByCategory_AnnualizedTrue()) {
-            addAnnualizedShares(t, today, from, to, accountId, result);
-        }
-
-        return result;
-    }
-
-    /** Vrai si t doit etre exclue de tous les rapports, quelle que soit sa categorie : virement interne, ajustement de solde, transaction future, ou marquee exceptionnelle. */
-    private static boolean isExcludedFromReports(Transaction t, LocalDate today) {
-        return t.isInternalTransfer() || t.isBalanceAdjustment() || t.getDate().isAfter(today) || t.isExceptional();
-    }
-
-    /** Ajoute t a result s'il est attribuable normalement (voir attributedTransactions) : les categories annuelles sont traitees a part par addAnnualizedShares, jamais ici pour leur montant plein. */
-    private void addIfAttributable(Transaction t, LocalDate today, List<AttributedTransaction> result) {
-        if (isExcludedFromReports(t, today)) return;
-        if (hasAnnualizedCategory(t)) return;
-        result.add(new AttributedTransaction(t, t.getDate(), t.getAmount()));
-    }
-
-    /** Ajoute a result une ligne par mois de la fenetre glissante de 12 mois de t qui tombe dans [from,to] (voir attributedTransactions), pour le compte filtre (accountId==null = tous). */
-    private void addAnnualizedShares(Transaction t, LocalDate today, LocalDate from, LocalDate to, Long accountId, List<AttributedTransaction> result) {
-        if (isExcludedFromReports(t, today)) return;
-        if (accountId != null && (t.getAccount() == null || !accountId.equals(t.getAccount().getId()))) return;
-
-        LocalDate firstMonth = t.getDate().withDayOfMonth(1);
-        for (int i = 0; i < ANNUALIZED_MONTHS; i++) {
-            LocalDate monthStart = firstMonth.plusMonths(i);
-            if (monthStart.isBefore(from) || monthStart.isAfter(to)) continue;
-            result.add(new AttributedTransaction(t, monthStart, annualizedShare(t.getAmount(), i)));
-        }
-    }
-
-    private static final int ANNUALIZED_MONTHS = 12;
-
-    /** Fenetre maximale de l'epargne mensuelle (10 ans) : le tableau de bord en demande 12. */
-    static final int MAX_SAVINGS_MONTHS = 120;
-
-    /**
-     * Part du mois `monthIndex` (0 a 11) d'un montant lisse sur 12 mois : 1/12
-     * arrondi au centime, sauf le dernier mois qui prend le reste. Sans ce
-     * reste, 12 parts arrondies ne redonnaient pas le montant (100,00 ->
-     * 12 x 8,33 = 99,96) et les totaux sur l'annee derivaient de quelques centimes.
-     */
-    static BigDecimal annualizedShare(BigDecimal amount, int monthIndex) {
-        BigDecimal share = amount.divide(BigDecimal.valueOf(ANNUALIZED_MONTHS), 2, RoundingMode.HALF_UP);
-        if (monthIndex < ANNUALIZED_MONTHS - 1) return share;
-        return amount.subtract(share.multiply(BigDecimal.valueOf(ANNUALIZED_MONTHS - 1L)));
+        this.attribution = attribution;
     }
 
     /**
@@ -195,7 +64,7 @@ public class ServiceRapport {
      */
     public List<DepenseParCategorieDTO> expensesByCategory(LocalDate from, LocalDate to, Long accountId) {
         Periode.verifierOrdre(from, to);
-        List<AttributedTransaction> transactions = attributedTransactions(from, to, accountId);
+        List<AttributedTransaction> transactions = attribution.attributedTransactions(from, to, accountId);
 
         Map<String, BigDecimal> totals = new LinkedHashMap<>();
         // Categorie (id, ou absence = "non categorise") representative de chaque
@@ -203,8 +72,8 @@ public class ServiceRapport {
         // ensuite les transactions exactes d'une ligne (voir cellTransactions).
         Map<String, Long> categoryIdByLabel = new LinkedHashMap<>();
         Set<String> uncategorizedLabels = new HashSet<>();
-        Map<Long, Categorie> categories = categoriesById(transactions);
-        for (Map.Entry<CategorieMois, BigDecimal> net : netByCategoryMonth(transactions).entrySet()) {
+        Map<Long, Categorie> categories = AttributionTransactions.categoriesById(transactions);
+        for (Map.Entry<CategorieMois, BigDecimal> net : AttributionTransactions.netByCategoryMonth(transactions).entrySet()) {
             if (net.getValue().signum() >= 0) continue; // on ne garde que les depenses
             Categorie category = categories.get(net.getKey().categoryId());
             String label = categoryLabel(category);
@@ -253,8 +122,8 @@ public class ServiceRapport {
             String flow, Long categoryId, Long rootCategoryId, boolean uncategorized) {
         Periode.verifierOrdre(from, to);
 
-        List<AttributedTransaction> transactions = attributedTransactions(from, to, accountId);
-        Map<CategorieMois, BigDecimal> nets = netByCategoryMonth(transactions);
+        List<AttributedTransaction> transactions = attribution.attributedTransactions(from, to, accountId);
+        Map<CategorieMois, BigDecimal> nets = AttributionTransactions.netByCategoryMonth(transactions);
 
         return transactions.stream()
                 .filter(at -> matchesFlow(nets.get(CategorieMois.de(at)), flow))
@@ -295,22 +164,6 @@ public class ServiceRapport {
     }
 
     /**
-     * Premier jour du mois "courant" a utiliser comme ancre pour toutes les
-     * fenetres de mois des rapports (analyse mensuelle, epargne, solde
-     * previsionnel) : referenceMonth + 1 mois si fourni (navigation depuis
-     * le tableau de bord, voir Dashboard.vue), sinon le mois calendaire en
-     * cours. Chaque rapport reconstruit ensuite sa fenetre de mois EXACTEMENT
-     * comme avant (derniers mois avant cette ancre), ce qui garantit que
-     * referenceMonth omis reproduit le comportement historique (dernier mois
-     * calendaire deja termine).
-     */
-    private LocalDate anchorMonth(LocalDate referenceMonth) {
-        return referenceMonth != null
-                ? referenceMonth.withDayOfMonth(1).plusMonths(1)
-                : LocalDate.now(ZoneId.systemDefault()).withDayOfMonth(1);
-    }
-
-    /**
      * Epargne mensuelle (revenus - depenses, virements exclus) sur les N
      * mois entierement termines precedant referenceMonth (dernier mois
      * inclus) — ou les N derniers mois deja termines si referenceMonth est
@@ -327,7 +180,7 @@ public class ServiceRapport {
         if (monthsBack < 1 || monthsBack > MAX_SAVINGS_MONTHS) {
             throw new IllegalArgumentException("Le nombre de mois doit être compris entre 1 et " + MAX_SAVINGS_MONTHS + ".");
         }
-        LocalDate firstOfCurrentMonth = anchorMonth(referenceMonth);
+        LocalDate firstOfCurrentMonth = AttributionTransactions.anchorMonth(referenceMonth);
         LocalDate currentMonthStart = LocalDate.now(ZoneId.systemDefault()).withDayOfMonth(1);
         BigDecimal forecastAverage = avgMonthlyNetOverTrailing12Months(accountId, currentMonthStart);
         Map<YearMonth, BigDecimal> nets = monthlyNets(firstOfCurrentMonth.minusMonths(monthsBack), monthsBack, accountId);
@@ -376,10 +229,10 @@ public class ServiceRapport {
      */
     public PrevisionSoldeDTO balanceForecast(Long accountId, LocalDate referenceMonth) {
         List<PointSoldeDTO> result = new ArrayList<>();
-        LocalDate firstOfCurrentMonth = anchorMonth(referenceMonth);
+        LocalDate firstOfCurrentMonth = AttributionTransactions.anchorMonth(referenceMonth);
         LocalDate currentMonthStart = LocalDate.now(ZoneId.systemDefault()).withDayOfMonth(1);
         // Charge les comptes une seule fois pour tout le calcul, plutot qu'a
-        // chaque appel de balanceAsOf (findAll()/findById() repete).
+        // chaque appel de balanceAsOf, qui les relisait a chaque fois.
         List<Compte> accounts = loadAccounts(accountId);
 
         BigDecimal avgMonthlyNet = avgMonthlyNetOverTrailing12Months(accountId, currentMonthStart);
@@ -453,7 +306,7 @@ public class ServiceRapport {
         Map<YearMonth, BigDecimal> nets = new HashMap<>();
         if (monthCount <= 0) return nets;
         LocalDate lastDay = firstMonth.plusMonths(monthCount).minusDays(1);
-        for (AttributedTransaction t : attributedTransactions(firstMonth, lastDay, accountId)) {
+        for (AttributedTransaction t : attribution.attributedTransactions(firstMonth, lastDay, accountId)) {
             nets.merge(YearMonth.from(t.date()), t.amount(), BigDecimal::add);
         }
         return nets;
@@ -496,7 +349,7 @@ public class ServiceRapport {
                 .stream()
                 // Memes exclusions que tous les rapports. Une occurrence future n'a
                 // pas encore eu lieu : elle n'est pas la "derniere" occurrence connue.
-                .filter(t -> !isExcludedFromReports(t, today))
+                .filter(t -> !AttributionTransactions.isExcludedFromReports(t, today))
                 // Une depense periodique dont la derniere occurrence connue remonte a
                 // plus de 3 mois est probablement obsolete (abonnement resilie, etc.) :
                 // on ne l'affiche plus dans le tableau de bord.
@@ -522,13 +375,13 @@ public class ServiceRapport {
         for (Transaction t : transactions) {
             String key = t.getPayee() != null ? "tiers-" + t.getPayee().getId() : "id-" + t.getId();
             List<Transaction> latest = latestByPayee.computeIfAbsent(key, k -> new ArrayList<>());
-            if (latest.isEmpty() || latest.get(0).getDate().equals(t.getDate())) latest.add(t);
+            if (latest.isEmpty() || latest.getFirst().getDate().equals(t.getDate())) latest.add(t);
         }
 
         List<ElementPeriodiqueDTO> items = new ArrayList<>();
         BigDecimal total = BigDecimal.ZERO;
         for (List<Transaction> latest : latestByPayee.values()) {
-            Transaction t = latest.get(0);
+            Transaction t = latest.getFirst();
             BigDecimal amount = latest.stream().map(x -> x.getAmount().abs()).reduce(BigDecimal.ZERO, BigDecimal::add);
             items.add(new ElementPeriodiqueDTO(
                     t.getId(),
@@ -575,382 +428,5 @@ public class ServiceRapport {
         return category.getName();
     }
 
-    /**
-     * Tableau d'analyse des revenus et dépenses par catégorie/sous-catégorie
-     * sur les 12 mois entièrement terminés précédant referenceMonth (dernier
-     * mois inclus) — ou les 12 derniers mois déjà terminés si referenceMonth
-     * est omis. Les transactions annualisées y sont lissées sur leur année
-     * (voir attributedTransactions), ce qui impose une agrégation côté
-     * backend plutôt qu'en base.
-     */
-    public AnalyseMensuelleDTO monthlyCategoryAnalysis(Long accountId, LocalDate referenceMonth) {
-        LocalDate firstOfCurrentMonth = anchorMonth(referenceMonth);
-        LocalDate from = firstOfCurrentMonth.minusMonths(12);
-        LocalDate to = firstOfCurrentMonth.minusDays(1);
-        // Mois calendaire reel en cours (independant de referenceMonth, qui
-        // peut avoir ete navigue vers le futur) : sert a distinguer les mois
-        // "reels" des mois "previsionnels" ci-dessous, meme convention que
-        // balanceForecast (currentMonthStart la-bas).
-        LocalDate currentMonthStart = LocalDate.now(ZoneId.systemDefault()).withDayOfMonth(1);
-        // Meme fenetre decalee d'un an : comparaison avec l'annee precedente.
-        LocalDate previousFrom = from.minusMonths(12);
-        LocalDate previousTo = from.minusDays(1);
-
-        List<MoisAnalyseDTO> months = buildMonthsWindow(from, firstOfCurrentMonth, currentMonthStart);
-        List<MoisAnalyseDTO> previousMonths = buildMonthsWindow(previousFrom, from, currentMonthStart);
-        Map<String, BigDecimal> monthlyIncomeTotals = zeroedMonthlyTotals(months);
-        Map<String, BigDecimal> monthlyExpenseTotals = zeroedMonthlyTotals(months);
-        Map<String, BigDecimal> previousIncomeTotals = zeroedMonthlyTotals(previousMonths);
-        Map<String, BigDecimal> previousExpenseTotals = zeroedMonthlyTotals(previousMonths);
-
-        // Une seule lecture pour les deux fenetres (24 mois), partagee selon le
-        // mois d'attribution : memes regles des deux cotes (lissage des
-        // categories annuelles, exclusions), sans seconde requete.
-        List<AttributedTransaction> currentTransactions = new ArrayList<>();
-        List<AttributedTransaction> previousTransactions = new ArrayList<>();
-        for (AttributedTransaction at : attributedTransactions(previousFrom, to, accountId)) {
-            (at.date().isBefore(from) ? previousTransactions : currentTransactions).add(at);
-        }
-
-        // Clé stable : catégorie (ou catégorie racine + sous-catégorie) + type de flux.
-        Map<String, LigneEnConstruction> rows = buildCategoryMonthRows(
-                currentTransactions, months, monthlyIncomeTotals, monthlyExpenseTotals);
-        Map<String, LigneEnConstruction> previousRows = buildCategoryMonthRows(
-                previousTransactions, previousMonths, previousIncomeTotals, previousExpenseTotals);
-
-        // Previsionnel par categorie/flux, ancre sur les 12 VRAIS derniers
-        // mois (jamais sur la fenetre affichee ci-dessus, qui peut ne plus
-        // contenir aucun mois reel en naviguant loin dans le futur — d'ou des
-        // montants a 0 sans cette fenetre de reference fixe, voir
-        // categoryForecastAverages). Complete aussi rows avec une ligne
-        // vierge pour une categorie qui a de l'activite sur ces 12 vrais
-        // mois mais AUCUNE transaction dans la fenetre affichee (sinon elle
-        // n'apparaitrait pas du tout dans le tableau en naviguant loin dans
-        // le futur, alors qu'elle a un previsionnel a montrer).
-        CategoryForecast forecast = categoryForecastAverages(accountId, currentMonthStart);
-        for (String key : forecast.averages().keySet()) {
-            if (key.equals(totalKey(INCOME)) || key.equals(totalKey(EXPENSE)) || rows.containsKey(key)) continue;
-            String[] parts = key.split("\\|", 2);
-            Categorie category = forecast.categoriesByKey().get(parts[0]);
-            rows.put(key, LigneEnConstruction.pourCategorie(key, category, parts[1], months));
-        }
-        // Categorie active l'an dernier mais plus du tout cette annee : ligne
-        // vierge, pour que sa disparition se voie dans la comparaison et que
-        // les totaux precedents des lignes retombent sur celui du total.
-        for (LigneEnConstruction previousRow : previousRows.values()) {
-            rows.computeIfAbsent(previousRow.key, key -> previousRow.viergeSur(months));
-        }
-
-        // Total precedent d'une ligne, mois futurs completes par le meme
-        // previsionnel que la fenetre affichee (fenetre precedente elle aussi
-        // dans le futur, en naviguant loin) : comparaison a regles egales.
-        Map<String, BigDecimal> forecastAverages = forecast.averages();
-        Function<String, BigDecimal> previousTotalOf = key -> sum(completedValues(
-                previousRows.containsKey(key) ? previousRows.get(key).values : Map.of(),
-                previousMonths, forecastAverages.getOrDefault(key, BigDecimal.ZERO)).values());
-
-        // Construit la hiérarchie : racines d'abord, sous-catégories juste après.
-        List<LigneAnalyseDTO> incomeRows = extractSortedRows(rows, INCOME, currentMonthStart, forecastAverages, previousTotalOf);
-        List<LigneAnalyseDTO> expenseRows = extractSortedRows(rows, EXPENSE, currentMonthStart, forecastAverages, previousTotalOf);
-        BigDecimal incomeForecast = forecastAverages.getOrDefault(totalKey(INCOME), BigDecimal.ZERO);
-        BigDecimal expenseForecast = forecastAverages.getOrDefault(totalKey(EXPENSE), BigDecimal.ZERO);
-        Map<String, BigDecimal> previousIncome = completedValues(previousIncomeTotals, previousMonths, incomeForecast);
-        Map<String, BigDecimal> previousExpenses = completedValues(previousExpenseTotals, previousMonths, expenseForecast);
-        LigneAnalyseDTO incomeTotal = totalAnalysisRow("Total revenus", INCOME, months, monthlyIncomeTotals,
-                currentMonthStart, incomeForecast, sum(previousIncome.values()));
-        LigneAnalyseDTO expenseTotal = totalAnalysisRow("Total dépenses", EXPENSE, months, monthlyExpenseTotals,
-                currentMonthStart, expenseForecast, sum(previousExpenses.values()));
-        // Reutilise les valeurs de incomeTotal/expenseTotal (deja completees
-        // par le previsionnel ci-dessus) plutot que les totaux bruts, pour
-        // que le resume mensuel (Revenus/Depenses/Solde) affiche lui aussi
-        // le previsionnel sur les mois futurs au lieu de zeros.
-        List<ResumeMoisAnalyseDTO> monthlySummary = buildMonthlySummary(months, incomeTotal.values(), expenseTotal.values());
-        List<ResumeMoisAnalyseDTO> previousSummary = buildMonthlySummary(previousMonths, previousIncome, previousExpenses);
-        LocalDate historyStart = accountId != null
-                ? transactionRepository.findEarliestDateByAccountId(accountId)
-                : transactionRepository.findEarliestDate();
-
-        return new AnalyseMensuelleDTO(from, to, months, incomeRows, incomeTotal, expenseRows, expenseTotal, monthlySummary,
-                previousFrom, previousTo, historyStart, previousSummary);
-    }
-
-    /**
-     * Valeurs d'une ligne mois par mois sur une fenetre, mois previsionnels
-     * (voir MoisAnalyseDTO#forecast) remplaces par forecastAverage : meme regle
-     * que completeAnalysisRow, sans modifier les valeurs reelles recues.
-     */
-    private static Map<String, BigDecimal> completedValues(
-            Map<String, BigDecimal> actualValues, List<MoisAnalyseDTO> months, BigDecimal forecastAverage) {
-        Map<String, BigDecimal> values = new LinkedHashMap<>();
-        for (MoisAnalyseDTO month : months) {
-            values.put(month.key(), month.forecast() ? forecastAverage : actualValues.getOrDefault(month.key(), BigDecimal.ZERO));
-        }
-        return values;
-    }
-
-    private static BigDecimal sum(Collection<BigDecimal> values) {
-        return values.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-
-    /** Cle de la ligne de total d'un type de flux, partagee avec les moyennes previsionnelles (voir categoryForecastAverages). */
-    private static String totalKey(String type) {
-        return "total-" + type;
-    }
-
-    /**
-     * Ligne categorie/flux (ou total) en cours d'agregation : ses valeurs
-     * mensuelles restent mutables pendant le cumul des transactions, puis la
-     * ligne est figee en LigneAnalyseDTO une fois completee par le
-     * previsionnel (voir completeAnalysisRow).
-     */
-    private static final class LigneEnConstruction {
-        private final String key;
-        private final Long categoryId;
-        private final String name;
-        private final Long parentId;
-        private final String parentName;
-        private final String type;
-        private final Map<String, BigDecimal> values;
-
-        private LigneEnConstruction(String key, Long categoryId, String name, Long parentId, String parentName,
-                                    String type, Map<String, BigDecimal> values) {
-            this.key = key;
-            this.categoryId = categoryId;
-            this.name = name;
-            this.parentId = parentId;
-            this.parentName = parentName;
-            this.type = type;
-            this.values = values;
-        }
-
-        /** Ligne vierge (valeurs a zero sur tous les mois) pour une categorie/type de flux (voir buildCategoryMonthRows). */
-        static LigneEnConstruction pourCategorie(String key, Categorie category, String type, List<MoisAnalyseDTO> months) {
-            Categorie parent = category != null ? category.getParent() : null;
-            // Les transactions sans catégorie restent visibles dans le tableau.
-            return new LigneEnConstruction(
-                    key,
-                    category != null ? category.getId() : null,
-                    category != null ? category.getName() : "Sans catégorie",
-                    parent != null ? parent.getId() : null,
-                    parent != null ? parent.getName() : null,
-                    type,
-                    zeroedMonthlyTotals(months));
-        }
-
-        /** Ligne de total (sans categorie) d'un type de flux, valeurs deja calculees. */
-        static LigneEnConstruction pourTotal(String name, String type, Map<String, BigDecimal> values) {
-            return new LigneEnConstruction(totalKey(type), null, name, null, null, type, values);
-        }
-
-        /** Ligne vierge de meme categorie et meme flux sur une autre fenetre de mois (voir monthlyCategoryAnalysis). */
-        LigneEnConstruction viergeSur(List<MoisAnalyseDTO> months) {
-            return new LigneEnConstruction(key, categoryId, name, parentId, parentName, type, zeroedMonthlyTotals(months));
-        }
-
-        int level() {
-            return parentId == null ? 0 : 1;
-        }
-
-        void addMonthAmount(String monthKey, BigDecimal amount) {
-            values.merge(monthKey, amount.abs(), BigDecimal::add);
-        }
-    }
-
-    /** Un point par mois entierement termine de [from, firstOfCurrentMonth[ (voir monthlyCategoryAnalysis), marque "forecast" a partir du mois calendaire reel en cours (currentMonthStart). */
-    private List<MoisAnalyseDTO> buildMonthsWindow(LocalDate from, LocalDate firstOfCurrentMonth, LocalDate currentMonthStart) {
-        List<MoisAnalyseDTO> months = new ArrayList<>();
-        // "MMM" en français porte déjà son point d'abréviation ("nov.", "janv.")
-        // et n'en met pas aux mois courts ("mai", "juin") : ne pas en ajouter un.
-        DateTimeFormatter monthFormatter = DateTimeFormatter.ofPattern("MMM", Locale.FRENCH);
-        for (LocalDate month = from; month.isBefore(firstOfCurrentMonth); month = month.plusMonths(1)) {
-            months.add(new MoisAnalyseDTO(
-                    month.toString(),
-                    capitalize(month.format(monthFormatter)),
-                    month.getYear(),
-                    month.getMonthValue(),
-                    !month.isBefore(currentMonthStart)));
-        }
-        return months;
-    }
-
-    private static Map<String, BigDecimal> zeroedMonthlyTotals(List<MoisAnalyseDTO> months) {
-        Map<String, BigDecimal> totals = new LinkedHashMap<>();
-        for (MoisAnalyseDTO m : months) {
-            totals.put(m.key(), BigDecimal.ZERO);
-        }
-        return totals;
-    }
-
-    /**
-     * Pre-agrege les transactions attribuees en lignes categorie/mois (voir
-     * monthlyCategoryAnalysis) — equivalent du GROUP BY qu'une requete SQL
-     * ferait, mais en Java pour pouvoir inclure les tranches de transactions
-     * annualisees (voir attributedTransactions), qui n'existent qu'en
-     * memoire (jamais en base sous cette forme) — en cumulant au passage les
-     * totaux mensuels income/expense (monthlyIncomeTotals/monthlyExpenseTotals,
-     * mutes directement).
-     */
-    private Map<String, LigneEnConstruction> buildCategoryMonthRows(
-            List<AttributedTransaction> transactions,
-            List<MoisAnalyseDTO> months,
-            Map<String, BigDecimal> monthlyIncomeTotals,
-            Map<String, BigDecimal> monthlyExpenseTotals) {
-
-        Map<Long, Categorie> categories = categoriesById(transactions);
-        Map<String, LigneEnConstruction> rows = new LinkedHashMap<>();
-        for (Map.Entry<CategorieMois, BigDecimal> entry : netByCategoryMonth(transactions).entrySet()) {
-            String monthKey = entry.getKey().month().atDay(1).toString();
-            BigDecimal amount = entry.getValue();
-            Categorie category = categories.get(entry.getKey().categoryId());
-
-            String type = amount.signum() > 0 ? INCOME : EXPENSE;
-            LigneEnConstruction row = rows.computeIfAbsent(
-                    entry.getKey().categoryKey() + "|" + type,
-                    key -> LigneEnConstruction.pourCategorie(key, category, type, months));
-
-            row.addMonthAmount(monthKey, amount);
-            mergeMonthlyTotal(amount, monthKey, monthlyIncomeTotals, monthlyExpenseTotals);
-        }
-        return rows;
-    }
-
-    /**
-     * averages : moyenne mensuelle par categorie/flux (meme cle
-     * "catId|income|expense" que les lignes de monthlyCategoryAnalysis, voir
-     * buildCategoryMonthRows), plus deux entrees "total-income"/"total-expense"
-     * (meme cle que les lignes de total, voir totalKey) pour la
-     * moyenne globale. categoriesByKey : la Categorie derriere chaque "catId"
-     * (sans le suffixe "|income|expense"), pour pouvoir synthetiser une ligne
-     * pour une categorie qui n'a AUCUNE transaction dans la fenetre affichee
-     * (voir monthlyCategoryAnalysis) mais en a dans la fenetre de reference.
-     */
-    private record CategoryForecast(Map<String, BigDecimal> averages, Map<String, Categorie> categoriesByKey) {}
-
-    /**
-     * Calcule le previsionnel par categorie/flux sur les 12 VRAIS derniers
-     * mois termines, ancre sur currentMonthStart — jamais sur la fenetre
-     * affichee/referenceMonth, qui peut avoir ete navigee loin dans le futur
-     * au point de ne plus contenir aucun mois reel. Sert de previsionnel
-     * pour les mois futurs de la fenetre affichee (voir completeAnalysisRow),
-     * pour que la projection reste la meme peu importe jusqu'ou on navigue.
-     */
-    private CategoryForecast categoryForecastAverages(Long accountId, LocalDate currentMonthStart) {
-        LocalDate from = currentMonthStart.minusMonths(12);
-        LocalDate to = currentMonthStart.minusDays(1);
-
-        Map<String, BigDecimal> totals = new LinkedHashMap<>();
-        Map<String, Categorie> categoriesByKey = new LinkedHashMap<>();
-        BigDecimal totalIncome = BigDecimal.ZERO;
-        BigDecimal totalExpense = BigDecimal.ZERO;
-        List<AttributedTransaction> transactions = attributedTransactions(from, to, accountId);
-        Map<Long, Categorie> categories = categoriesById(transactions);
-        // Memes nets que les lignes affichees (voir buildCategoryMonthRows).
-        for (Map.Entry<CategorieMois, BigDecimal> entry : netByCategoryMonth(transactions).entrySet()) {
-            String catKey = entry.getKey().categoryKey();
-            categoriesByKey.putIfAbsent(catKey, categories.get(entry.getKey().categoryId()));
-            BigDecimal amount = entry.getValue();
-            String key = catKey + "|" + (amount.signum() > 0 ? INCOME : EXPENSE);
-            totals.merge(key, amount.abs(), BigDecimal::add);
-            if (amount.signum() > 0) totalIncome = totalIncome.add(amount);
-            else if (amount.signum() < 0) totalExpense = totalExpense.add(amount.abs());
-        }
-        totals.put(totalKey(INCOME), totalIncome);
-        totals.put(totalKey(EXPENSE), totalExpense);
-
-        Map<String, BigDecimal> averages = new LinkedHashMap<>();
-        for (Map.Entry<String, BigDecimal> entry : totals.entrySet()) {
-            averages.put(entry.getKey(), entry.getValue().divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP));
-        }
-        return new CategoryForecast(averages, categoriesByKey);
-    }
-
-    private static void mergeMonthlyTotal(BigDecimal amount, String monthKey,
-                                           Map<String, BigDecimal> monthlyIncomeTotals, Map<String, BigDecimal> monthlyExpenseTotals) {
-        if (amount.signum() > 0) {
-            monthlyIncomeTotals.merge(monthKey, amount, BigDecimal::add);
-        } else if (amount.signum() < 0) {
-            monthlyExpenseTotals.merge(monthKey, amount.abs(), BigDecimal::add);
-        }
-    }
-
-    /** Ordre d'affichage : par categorie racine (nom), la racine avant ses sous-categories, puis par nom. */
-    private static final Comparator<LigneEnConstruction> CATEGORY_ROW_ORDER = Comparator
-            .comparing((LigneEnConstruction r) -> Objects.toString(r.parentName, ""), String.CASE_INSENSITIVE_ORDER)
-            .thenComparingInt(LigneEnConstruction::level)
-            .thenComparing(r -> Objects.toString(r.name, ""), String.CASE_INSENSITIVE_ORDER);
-
-    private List<LigneAnalyseDTO> extractSortedRows(
-            Map<String, LigneEnConstruction> rows, String type, LocalDate currentMonthStart,
-            Map<String, BigDecimal> forecastAverages, Function<String, BigDecimal> previousTotalOf) {
-        return rows.values().stream()
-                .filter(r -> type.equals(r.type))
-                .sorted(CATEGORY_ROW_ORDER)
-                .map(r -> completeAnalysisRow(r, currentMonthStart, forecastAverages.getOrDefault(r.key, BigDecimal.ZERO),
-                        previousTotalOf.apply(r.key)))
-                .toList();
-    }
-
-    private List<ResumeMoisAnalyseDTO> buildMonthlySummary(
-            List<MoisAnalyseDTO> months, Map<String, BigDecimal> monthlyIncomeTotals, Map<String, BigDecimal> monthlyExpenseTotals) {
-        List<ResumeMoisAnalyseDTO> monthlySummary = new ArrayList<>();
-        for (MoisAnalyseDTO m : months) {
-            BigDecimal income = monthlyIncomeTotals.getOrDefault(m.key(), BigDecimal.ZERO);
-            BigDecimal expenses = monthlyExpenseTotals.getOrDefault(m.key(), BigDecimal.ZERO);
-            monthlySummary.add(new ResumeMoisAnalyseDTO(m.key(), income, expenses, income.subtract(expenses), m.forecast()));
-        }
-        return monthlySummary;
-    }
-
-    /**
-     * Complete une ligne (valeurs construites a partir des seules transactions
-     * reelles, donc a 0 sur les mois futurs) : les mois a partir du mois
-     * calendaire reel en cours (currentMonthStart, meme convention que
-     * balanceForecast) sont remplaces par forecastAverage — la moyenne
-     * previsionnelle de cette ligne sur les 12 VRAIS derniers mois (voir
-     * categoryForecastAverages), fixe quelle que soit la fenetre affichee —
-     * plutot que des zeros qui donneraient l'impression trompeuse qu'aucun
-     * revenu/depense n'est prevu. "average" est recalculee APRES ce
-     * remplacement (moyenne des 12 valeurs desormais affichees, reelles ou
-     * previsionnelles) pour rester la moyenne de ce qui est effectivement
-     * montre a l'ecran. previousTotal : total de la ligne sur les 12 mois
-     * precedents (comparaison avec l'annee precedente), transmis tel quel.
-     */
-    private LigneAnalyseDTO completeAnalysisRow(LigneEnConstruction row, LocalDate currentMonthStart,
-                                                BigDecimal forecastAverage, BigDecimal previousTotal) {
-        Map<String, BigDecimal> values = row.values;
-        for (Map.Entry<String, BigDecimal> entry : values.entrySet()) {
-            if (!LocalDate.parse(entry.getKey()).isBefore(currentMonthStart)) {
-                entry.setValue(forecastAverage);
-            }
-        }
-
-        BigDecimal total = values.values().stream().reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal average = values.isEmpty()
-                ? BigDecimal.ZERO
-                : total.divide(BigDecimal.valueOf(values.size()), 2, RoundingMode.HALF_UP);
-        return new LigneAnalyseDTO(row.key, row.categoryId, row.name, row.parentId, row.parentName,
-                row.level(), row.type, values, average, total, previousTotal);
-    }
-
-    private LigneAnalyseDTO totalAnalysisRow(
-            String name,
-            String type,
-            List<MoisAnalyseDTO> months,
-            Map<String, BigDecimal> monthlyTotals,
-            LocalDate currentMonthStart,
-            BigDecimal forecastAverage,
-            BigDecimal previousTotal) {
-        Map<String, BigDecimal> values = new LinkedHashMap<>();
-        for (MoisAnalyseDTO month : months) {
-            values.put(month.key(), monthlyTotals.getOrDefault(month.key(), BigDecimal.ZERO));
-        }
-        return completeAnalysisRow(LigneEnConstruction.pourTotal(name, type, values), currentMonthStart,
-                forecastAverage, previousTotal);
-    }
-
-    private String capitalize(String value) {
-        if (value == null || value.isEmpty()) return value;
-        return value.substring(0, 1).toUpperCase(Locale.FRENCH) + value.substring(1);
-    }
 
 }

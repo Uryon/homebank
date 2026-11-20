@@ -228,82 +228,21 @@
       <button v-if="searchQuery.trim()" type="button" class="btn secondary" @click="searchQuery = ''">Effacer la recherche</button>
     </div>
 
-    <!-- Modal création uniquement -->
-    <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
-      <div v-dialog="() => (showModal = false)" class="modal" role="dialog" aria-modal="true">
-        <h2>Nouveau tiers</h2>
-        <div class="form-grid">
-          <div class="form-field span-2">
-            <label for="new-payee-name">Nom du tiers</label>
-            <input id="new-payee-name" v-model="form.name" maxlength="255" placeholder="Ex : Carrefour" v-bind="invalidAttrs('name')" @input="clear('name')" />
-            <FieldError id="new-payee-name-error" :message="errors.name" />
-          </div>
-          <div class="form-field span-2">
-            <label for="new-payee-pattern">Motif de reconnaissance</label>
-            <input id="new-payee-pattern" v-model="form.pattern" placeholder="Ex : Carrefour" v-bind="invalidAttrs('pattern')" @input="clear('pattern')" />
-            <FieldError id="new-payee-pattern-error" :message="errors.pattern" />
-            <div class="text-hint">
-              Tapez simplement le texte à repérer (ex : <code>Carrefour</code>) : il sera
-              reconnu partout où il apparaît dans le libellé de la transaction, quelle que
-              soit la casse (CARREFOUR, Carrefour, carrefour…). Pas besoin d'ajouter d'étoiles,
-              c'est fait automatiquement. Pour des cas plus précis, vous pouvez tout de même
-              utiliser <code>*</code> comme joker (ex : <code>Carrefour*Paris</code>).
-            </div>
-          </div>
-          <div class="form-field span-2">
-            <label for="new-payee-amount">Montant associé (laisser vide = s'applique à tous les montants)</label>
-            <AmountInput id="new-payee-amount" v-model="form.amount" placeholder="Ex : 10" />
-          </div>
-          <div class="form-field span-2">
-            <label for="new-payee-category">Catégorie associée (appliquée automatiquement aux transactions de ce tiers)</label>
-            <CategoryAutocomplete
-              id="new-payee-category"
-              v-model="form.categoryId"
-              :categories="flatCategories"
-              placeholder="Rechercher une catégorie… (ex : ali)"
-            />
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button class="btn secondary" @click="showModal = false">Annuler</button>
-          <button class="btn" @click="save">Enregistrer</button>
-        </div>
-      </div>
-    </div>
+    <PayeeCreateModal
+      v-if="newPayeeDraft"
+      :initial="newPayeeDraft"
+      :categories="flatCategories"
+      @save="save"
+      @cancel="newPayeeDraft = null"
+    />
 
-    <!-- Modal fusion -->
-    <MergeModal
+    <PayeeMergeModal
       v-if="showMergeModal"
-      :title="`Fusionner ${selectedIds.length} tiers`"
-      description="Choisissez le tiers à conserver. Toutes les transactions des autres tiers sélectionnés lui seront réaffectées (elles porteront désormais son nom), puis les tiers fusionnés seront supprimés. Vous pourrez l'annuler juste après avec le bouton « Annuler » (ou Ctrl+Z)."
-      target-label="Tiers à conserver"
-      :items="selectedPayeeObjects"
-      :option-label="payeeOptionLabel"
-      v-model="mergeTargetId"
+      :payees="selectedPayeeObjects"
       :confirming="merging"
       @confirm="confirmMerge"
       @cancel="showMergeModal = false"
-    >
-      <div class="form-field">
-        <span class="form-field-label">Motifs actuels des tiers sélectionnés</span>
-        <ul class="merge-patterns-list">
-          <li v-for="p in selectedPayeeObjects" :key="p.id">
-            <strong>{{ p.name }}</strong> : <code>{{ p.pattern }}</code>
-          </li>
-        </ul>
-      </div>
-
-      <div class="form-field">
-        <label for="payee-merge-pattern">Motif de reconnaissance final</label>
-        <input id="payee-merge-pattern" v-model="mergePattern" placeholder="Ex : Carrefour" v-bind="invalidAttrs('mergePattern')" @input="clear('mergePattern')" />
-        <FieldError id="payee-merge-pattern-error" :message="errors.mergePattern" />
-        <div class="text-hint">
-          Pré-rempli avec le motif du tiers conservé, ci-dessus pour référence.
-          Modifiez-le comme vous le souhaitez : les motifs des tiers fusionnés ne
-          sont plus ajoutés automatiquement.
-        </div>
-      </div>
-    </MergeModal>
+    />
 
     <PayeeCleanupModal
       v-if="showCleanupModal"
@@ -322,9 +261,8 @@ import { notify, askConfirm } from '../services/feedback'
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useRouteActions } from '../services/routeActions'
-import { PayeesAPI, TransactionsAPI } from '../services/api'
+import { PayeesAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
-import { normalizeSearch, parseSearchTerms } from '../services/search'
 import { categoryChipInfo, flattenCategories, transactionSearchForPayee } from '../services/categories'
 import { splitPatternSegments } from '../services/payee'
 import { handleRowEnter, restoreFocusToRow } from '../services/rowKeyboard'
@@ -337,15 +275,19 @@ import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import AmountInput from '../components/AmountInput.vue'
 import FieldError from '../components/FieldError.vue'
 import { useFieldErrors } from '../services/fieldErrors'
-import MergeModal from '../components/MergeModal.vue'
+import PayeeCreateModal from '../components/PayeeCreateModal.vue'
+import PayeeMergeModal from '../components/PayeeMergeModal.vue'
 import PayeeCleanupModal from '../components/PayeeCleanupModal.vue'
 import Icon from '../components/Icon.vue'
 import CategoryChip from '../components/CategoryChip.vue'
 import SkeletonRows from '../components/SkeletonRows.vue'
 import UndoBar from '../components/UndoBar.vue'
 import { useLastAction } from '../services/lastAction'
-import { planPayeeMergeRestore, restorePayeeMerge } from '../services/payeeMergeRestore'
 import { useIdSelection } from '../services/selection'
+import { buildPayeeSearchIndex, categoryIdsByPayeeId, filterPayees, suggestedCategoryIdFor } from '../services/payeeFilters'
+import { usePayeeAutoCategorize } from '../services/payeeAutoCategorize'
+import { usePayeeSelectionActions } from '../services/payeeSelectionActions'
+import { usePayeeCleanup } from '../services/payeeCleanupActions'
 
 const route = useRoute()
 
@@ -360,98 +302,22 @@ const payees = computed(() => dataStore.state.payees)
 const payeesLoaded = computed(() => dataStore.state.loaded.payees)
 const loadFailed = computed(() => dataStore.state.loadFailed)
 const categories = computed(() => dataStore.state.categories)
-const showModal = ref(false)
 const searchQuery = ref('')
 const withoutCategoryOnly = ref(false)
-const form = ref(emptyForm())
-
-const autoCategorizing = ref(false)
-const autoCategorizeResult = ref(null)
+/** Valeurs de départ de la fenêtre « Nouveau tiers » (PayeeCreateModal.vue), null fenêtre fermée. */
+const newPayeeDraft = ref(null)
 
 const editingId = ref(null)
 const editForm = ref(null)
 const firstEditField = ref(null)
 
 const { selectedIds, selectedIdSet, allSelectedIn, toggleAllIn, keepExisting, clearSelection } = useIdSelection()
-const showMergeModal = ref(false)
-const mergeTargetId = ref(null)
-const mergePattern = ref('')
-const merging = ref(false)
-
-function emptyForm() {
-  return { name: '', pattern: '', amount: null, categoryId: null }
-}
 
 const withoutCategoryCount = computed(() => payees.value.filter(p => !p.categoryId).length)
 
 /** Filtre « Inutilisés » : tiers sans aucune transaction, les seuls supprimables (voir ServiceTiers#delete). */
 const unusedOnly = ref(false)
 const unusedCount = computed(() => payees.value.filter(p => !usageOf(p.id).count).length)
-
-/**
- * Champs de recherche normalisés (nom, motif, catégorie, montant) par tiers,
- * précalculés une seule fois quand `payees`/`categories` changent plutôt qu'à
- * chaque frappe — même principe que searchIndexById dans Transactions.vue.
- */
-const payeeSearchIndexById = computed(() => {
-  const index = new Map()
-  for (const p of payees.value) {
-    index.set(p.id, {
-      nameNormalized: normalizeSearch(p.name),
-      patternNormalized: normalizeSearch(p.pattern),
-      categoryNormalized: normalizeSearch(categoryLabel(p.categoryId)),
-      rawAmount: p.amount != null ? String(p.amount).toLowerCase() : '',
-      amountFormattedNormalized: p.amount != null ? normalizeSearch(formatAmount(p.amount)) : ''
-    })
-  }
-  return index
-})
-
-/**
- * Un critère matche ce tiers : en mode "contient" (défaut) il suffit que le
- * terme soit inclus dans le nom, le motif, la catégorie associée, ou le
- * montant (comparé à la fois brut et formaté, virgule ou point acceptés —
- * même logique que la recherche par montant de Transactions.vue) ; en mode
- * "exact" (terme entre guillemets, ex : "CAF") il faut une égalité stricte
- * avec le nom, le motif ou la catégorie, pour retrouver "CAF" sans remonter
- * aussi un tiers comme "Décaféiné".
- */
-function payeeMatchesTerm(idx, { term, exact }) {
-  const termAsAmount = term.replace(',', '.')
-  if (exact) {
-    return (
-      idx.nameNormalized === term ||
-      idx.patternNormalized === term ||
-      idx.categoryNormalized === term ||
-      idx.rawAmount === termAsAmount ||
-      idx.amountFormattedNormalized === termAsAmount
-    )
-  }
-  if (idx.nameNormalized.includes(term)) return true
-  if (idx.patternNormalized.includes(term)) return true
-  if (idx.categoryNormalized.includes(term)) return true
-  return idx.rawAmount.includes(termAsAmount) || idx.amountFormattedNormalized.includes(term)
-}
-
-/**
- * Plusieurs critères séparés par ";" sont tous exigés à la fois (ET), ex :
- * "Bouygues;29,99" pour retrouver le tiers Bouygues associé à ce montant
- * précis — chaque critère pris seul reste un simple "contient" (OR entre les
- * champs), sauf s'il est entre guillemets ("CAF"), auquel cas seule une
- * correspondance exacte est retenue — voir parseSearchTerms dans
- * services/search.js.
- */
-const filteredPayees = computed(() => {
-  const terms = parseSearchTerms(searchQuery.value)
-  const base = payees.value.filter(p =>
-    (!withoutCategoryOnly.value || !p.categoryId) && (!unusedOnly.value || !usageOf(p.id).count))
-  if (!terms.length) return base
-  const index = payeeSearchIndexById.value
-  return base.filter(p => {
-    const idx = index.get(p.id)
-    return idx && terms.every(criterion => payeeMatchesTerm(idx, criterion))
-  })
-})
 
 const flatCategories = computed(() => flattenCategories(categories.value))
 const categoriesById = computed(() => new Map(categories.value.map(c => [c.id, c])))
@@ -465,6 +331,18 @@ const patternSegmentsById = computed(() => new Map(payees.value.map(p => [p.id, 
 // filteredPayees ci-dessous, qui appelle categoryLabel pour chaque ligne).
 const categoryLabelById = computed(() => new Map(flatCategories.value.map(c => [c.id, c.label])))
 
+/** Champs de recherche normalisés par tiers, recalculés seulement quand tiers ou catégories changent (voir services/payeeFilters.js). */
+const payeeSearchIndexById = computed(() => buildPayeeSearchIndex(payees.value, categoryLabel))
+
+/** Filtres « Sans catégorie » / « Inutilisés » puis recherche (« Bouygues;29,99 », "CAF" exact). */
+const filteredPayees = computed(() => filterPayees(payees.value, {
+  query: searchQuery.value,
+  withoutCategoryOnly: withoutCategoryOnly.value,
+  unusedOnly: unusedOnly.value,
+  isUnused: p => !usageOf(p.id).count,
+  searchIndex: payeeSearchIndexById.value
+}))
+
 /** Chemin de la catégorie suggérée, au même format « Parent › Enfant » que les pastilles. */
 function suggestionPath(payee) {
   return categoryChipInfo(suggestedCategoryId(payee), categoriesById.value)?.path || '—'
@@ -475,28 +353,8 @@ function categoryLabel(categoryId) {
   return categoryLabelById.value.get(categoryId) || '—'
 }
 
-/**
- * Categorie(s) distincte(s) utilisee(s) par les transactions DEJA
- * categorisees de chaque tiers (indexees une seule fois par tiers, pas a
- * chaque ligne affichee — meme principe que categoryLabelById ci-dessus) :
- * sert a suggerer une categorie pour un tiers qui n'en a pas encore, quand
- * toutes ses transactions categorisees s'accordent sur UNE seule categorie.
- * Les transactions non categorisees du meme tiers n'entrent pas en compte
- * (ni pour, ni contre) : seul un signal consistant compte.
- */
-const categoryIdsByPayeeId = computed(() => {
-  const map = new Map()
-  for (const t of dataStore.state.transactions) {
-    if (!t.payeeId || t.categoryId == null) continue
-    let set = map.get(t.payeeId)
-    if (!set) {
-      set = new Set()
-      map.set(t.payeeId, set)
-    }
-    set.add(t.categoryId)
-  }
-  return map
-})
+/** Catégories des transactions déjà catégorisées de chaque tiers, indexées une seule fois (voir services/payeeFilters.js). */
+const categoryIdsByPayee = computed(() => categoryIdsByPayeeId(dataStore.state.transactions))
 
 /* --- Utilisation et tri (voir services/payeeUsage.js) --- */
 
@@ -557,19 +415,9 @@ function sortIcon(key) {
   return sortIconOf(sort.value, key)
 }
 
-/**
- * Categorie suggeree pour un tiers sans categorie, ou null si aucun signal
- * exploitable (aucune transaction categorisee, ou categories divergentes) ou
- * si la seule categorie trouvee est masquee (plus utilisee : la saisie ne la
- * propose plus, voir CategoryAutocomplete — meme regle que
- * ServiceTiers#autoCategorize).
- */
+/** Catégorie suggérée pour un tiers sans catégorie, null sans signal unanime (voir suggestedCategoryIdFor). */
 function suggestedCategoryId(payee) {
-  if (payee.categoryId) return null
-  const ids = categoryIdsByPayeeId.value.get(payee.id)
-  if (!ids || ids.size !== 1) return null
-  const categoryId = ids.values().next().value
-  return categoriesById.value.get(categoryId)?.hidden ? null : categoryId
+  return suggestedCategoryIdFor(payee, categoryIdsByPayee.value, categoriesById.value)
 }
 
 const applyingSuggestionId = ref(null)
@@ -600,73 +448,16 @@ async function refreshAfterMutation() {
   keepExisting(payees.value.map(p => p.id))
 }
 
-/**
- * Version en masse de applySuggestion ci-dessus (voir ServiceTiers#autoCategorize
- * cote backend) : categorise en une fois tous les tiers eligibles, et
- * propage la categorie ainsi determinee aux transactions de ces tiers
- * encore sans categorie. Revalide aussi le cache des transactions (pas
- * seulement celui des tiers), puisque des transactions peuvent avoir change.
- */
-/**
- * Annule une catégorisation automatique : tiers et transactions concernés
- * étaient tous sans catégorie avant (voir ServiceTiers#autoCategorize), ils
- * le redeviennent.
- */
-async function undoAutoCategorize({ payeeIds = [], transactionIds = [] }, payeesBefore) {
-  const payeeUpdates = payeeIds
-    .map(id => payeesBefore.get(id))
-    .filter(Boolean)
-    .map(p => PayeesAPI.update(p.id, { name: p.name, pattern: p.pattern, amount: p.amount, categoryId: null }))
-  const transactionUpdate = transactionIds.length
-    ? TransactionsAPI.bulkUpdate({ ids: transactionIds, categoryIdProvided: true, categoryId: null })
-    : null
-  await Promise.all([...payeeUpdates, transactionUpdate])
-  autoCategorizeResult.value = null
-  await Promise.all([refreshAfterMutation(), dataStore.refreshTransactions()])
-}
-
-async function runAutoCategorize() {
-  autoCategorizing.value = true
-  autoCategorizeResult.value = null
-  // Tiers tels qu'avant l'opération, pour pouvoir leur retirer la catégorie.
-  const payeesBefore = new Map(payees.value.map(p => [p.id, p]))
-  try {
-    const result = await PayeesAPI.autoCategorize()
-    autoCategorizeResult.value = result
-    await Promise.all([dataStore.refreshPayees(), dataStore.refreshTransactions()])
-    if (result.payeeIds?.length || result.transactionIds?.length) {
-      setLastAction('Catégorisation automatique', () => undoAutoCategorize(result, payeesBefore))
-    }
-  } catch (e) {
-    alertApiError('Erreur lors de la catégorisation automatique', e)
-  } finally {
-    autoCategorizing.value = false
-  }
-}
-
-/** Champs obligatoires de la création et de la fusion, erreurs affichées sous chaque champ. */
-const { errors, check, clear, invalidAttrs } = useFieldErrors({
-  name: 'new-payee-name',
-  pattern: 'new-payee-pattern',
-  mergePattern: 'payee-merge-pattern'
-})
-
 function openCreate() {
-  form.value = emptyForm()
-  clear()
-  showModal.value = true
+  newPayeeDraft.value = {}
 }
 
-async function save() {
-  const valid = check({
-    name: form.value.name.trim() ? '' : 'Saisissez le nom du tiers.',
-    pattern: form.value.pattern.trim() ? '' : 'Saisissez le texte à reconnaître.'
-  })
-  if (!valid) return
+/** Enregistre le tiers saisi dans PayeeCreateModal.vue (champs obligatoires déjà contrôlés). */
+async function save(form) {
   try {
-    await PayeesAPI.create(form.value)
+    await PayeesAPI.create(form)
     notify('Tiers créé.', 'success')
-    showModal.value = false
+    newPayeeDraft.value = null
     await refreshAfterMutation()
   } catch (e) {
     alertApiError('Erreur lors de la création du tiers', e)
@@ -675,6 +466,10 @@ async function save() {
 
 /** Annulation de la dernière suppression ou modification (voir services/lastAction.js). */
 const { lastAction, undoing, setLastAction, runLastAction } = useLastAction()
+
+/** Version en masse de applySuggestion (voir services/payeeAutoCategorize.js). */
+const { autoCategorizing, autoCategorizeResult, runAutoCategorize } =
+  usePayeeAutoCategorize({ payees, refreshAfterMutation, setLastAction })
 
 async function remove(payee) {
   // Même règle que le backend (ServiceTiers#delete) : prévenue ici pour ne
@@ -786,125 +581,22 @@ async function confirmEdit() {
 const filteredPayeeIds = computed(() => filteredPayees.value.map(p => p.id))
 const allFilteredSelected = computed(() => allSelectedIn(filteredPayeeIds.value))
 
-/* --- Fusion --- */
-
-const selectedPayeeObjects = computed(() => payees.value.filter(p => selectedIdSet.value.has(p.id)))
-
-/** Suppression groupée proposée seulement si aucun tiers sélectionné n'a de transaction (sinon : fusion). */
-const selectionIsUnused = computed(() => selectedPayeeObjects.value.every(p => !usageOf(p.id).count))
-const removingSelection = ref(false)
-
-/** Supprime les tiers sélectionnés (tous inutilisés) ; « Annuler » les recrée à l'identique. */
-async function removeSelected() {
-  const toRemove = selectedPayeeObjects.value
-  if (!toRemove.length) return
-  const question = toRemove.length === 1
-    ? `Supprimer le tiers « ${toRemove[0].name} » ? Il n'a aucune transaction.`
-    : `Supprimer les ${toRemove.length} tiers sélectionnés ? Ils n'ont aucune transaction.`
-  if (!(await askConfirm(question))) return
-  removingSelection.value = true
-  const results = await Promise.allSettled(toRemove.map(p => PayeesAPI.remove(p.id)))
-  removingSelection.value = false
-  const removed = toRemove.filter((_, i) => results[i].status === 'fulfilled')
-  const failure = results.find(r => r.status === 'rejected')
-  if (failure) alertApiError("Certains tiers n'ont pas pu être supprimés", failure.reason)
-  await refreshAfterMutation()
-  if (!removed.length) return
-  notify(`${pluralize(removed.length, 'tiers supprimé', 'tiers supprimés')}.`, 'success')
-  setLastAction(removed.length === 1 ? 'Tiers supprimé' : `${removed.length} tiers supprimés`, async () => {
-    await Promise.all(removed.map(({ name, pattern, amount, categoryId }) => PayeesAPI.create({ name, pattern, amount, categoryId })))
-    await refreshAfterMutation()
-  })
-}
-
-function payeeOptionLabel(p) {
-  return p.name + (p.amount != null ? ' — ' + formatAmount(p.amount) : '')
-}
-
-function openMergeModal() {
-  mergeTargetId.value = selectedIds.value[0]
-  mergePattern.value = selectedPayeeObjects.value.find(p => p.id === mergeTargetId.value)?.pattern || ''
-  clear()
-  showMergeModal.value = true
-}
-
-// Motif pré-rempli avec celui du tiers conservé à chaque changement de
-// cible, pour que l'utilisateur parte d'une base cohérente qu'il peut
-// ensuite librement modifier (voir motifs affichés au-dessus pour référence).
-watch(mergeTargetId, (id) => {
-  mergePattern.value = selectedPayeeObjects.value.find(p => p.id === id)?.pattern || ''
+/** Fusion et suppression groupée des tiers cochés (voir services/payeeSelectionActions.js). */
+const {
+  selectedPayeeObjects, selectionIsUnused, removingSelection, removeSelected,
+  showMergeModal, merging, openMergeModal, confirmMerge
+} = usePayeeSelectionActions({
+  payees,
+  selection: { selectedIds, selectedIdSet, clearSelection },
+  isUnused: p => !usageOf(p.id).count,
+  refreshAfterMutation,
+  setLastAction
 })
 
-async function confirmMerge() {
-  if (!mergeTargetId.value) return
-  if (!check({ mergePattern: mergePattern.value.trim() ? '' : 'Saisissez le motif de reconnaissance final.' })) return
-  merging.value = true
-  const sourceIds = selectedIds.value.filter(id => id !== mergeTargetId.value)
-  // Établi avant la fusion : les tiers source n'existent plus après.
-  const restorePlan = planPayeeMergeRestore(dataStore.state, sourceIds, mergeTargetId.value)
-  try {
-    await PayeesAPI.merge(sourceIds, mergeTargetId.value, mergePattern.value.trim())
-    showMergeModal.value = false
-    clearSelection()
-    // La fusion reaffecte aussi le tiers de chaque transaction des tiers
-    // source (voir ServiceTiers#merge cote backend) : revalider aussi le
-    // cache des transactions, pas seulement celui des tiers.
-    await Promise.all([dataStore.refreshPayees(), dataStore.refreshTransactions()])
-    notify(`${pluralize(sourceIds.length, 'tiers fusionné', 'tiers fusionnés')} dans « ${restorePlan.target?.name ?? ''} ».`, 'success')
-    setLastAction('Fusion de tiers', async () => {
-      await restorePayeeMerge(restorePlan, { payees: PayeesAPI, transactions: TransactionsAPI })
-      await Promise.all([refreshAfterMutation(), dataStore.refreshTransactions()])
-    })
-  } catch (e) {
-    alertApiError('Erreur lors de la fusion', e)
-  } finally {
-    merging.value = false
-  }
-}
+/** Nettoyage des faux tiers (voir ServiceNettoyageTiers et services/payeeCleanupActions.js). */
+const { cleanupItems, showCleanupModal, cleaning, cleanupNotice, loadCleanupItems, confirmCleanup } =
+  usePayeeCleanup({ refreshAfterMutation, setLastAction })
 
-/* --- Nettoyage des faux tiers (voir ServiceNettoyageTiers) --- */
-
-const cleanupItems = ref([])
-const showCleanupModal = ref(false)
-const cleaning = ref(false)
-
-const cleanupNotice = computed(() => {
-  const count = cleanupItems.value.length
-  return count === 1
-    ? '1 tiers a été créé à partir d’un libellé automatique de virement ou d’ajustement.'
-    : `${count} tiers ont été créés à partir de libellés automatiques de virement ou d’ajustement.`
-})
-
-/** Contrôle secondaire : s'il échoue, la page reste utilisable et le bandeau n'apparaît pas. */
-async function loadCleanupItems() {
-  try {
-    cleanupItems.value = await PayeesAPI.previewCleanup()
-  } catch {
-    cleanupItems.value = []
-  }
-}
-
-async function refreshAfterCleanup() {
-  await Promise.all([refreshAfterMutation(), dataStore.refreshTransactions(), loadCleanupItems()])
-}
-
-async function confirmCleanup(payeeIds) {
-  cleaning.value = true
-  try {
-    const result = await PayeesAPI.cleanup(payeeIds)
-    showCleanupModal.value = false
-    await refreshAfterCleanup()
-    notify(`${pluralize(result.detachedTransactions, 'transaction corrigée', 'transactions corrigées')}, ${pluralize(result.deletedPayees, 'tiers supprimé', 'tiers supprimés')}.`, 'success')
-    setLastAction('Faux tiers nettoyés', async () => {
-      await PayeesAPI.undoCleanup(result.payees)
-      await refreshAfterCleanup()
-    }, { retryable: true })
-  } catch (e) {
-    alertApiError('Erreur lors du nettoyage des tiers', e)
-  } finally {
-    cleaning.value = false
-  }
-}
 
 onMounted(async () => {
   loadCleanupItems()
@@ -950,10 +642,7 @@ function applyRouteQuery(query) {
       document.querySelector(`tr[data-payee-id="${target.id}"]`)?.scrollIntoView({ block: 'center' })
     })
   } else if (query.prefillName || query.prefillPattern) {
-    form.value = emptyForm()
-    form.value.name = query.prefillName || ''
-    form.value.pattern = query.prefillPattern || ''
-    showModal.value = true
+    newPayeeDraft.value = { name: query.prefillName || '', pattern: query.prefillPattern || '' }
   }
 }
 
@@ -1124,37 +813,7 @@ tr.row-editing td.row-actions {
 .payees-table tbody tr.row-editing td:last-child {
   background: var(--ink-800);
 }
-.text-hint {
-  font-size: 12px;
-  color: var(--text-faint);
-  margin-top: 4px;
-  line-height: 1.4;
-}
-.text-hint code {
-  background: var(--ink-800);
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-family: var(--font-mono);
-}
-.merge-patterns-list {
-  margin: 0;
-  padding-left: 18px;
-  max-height: 160px;
-  overflow-y: auto;
-  font-size: 13px;
-}
-.merge-patterns-list li {
-  margin: 2px 0;
-}
-.merge-patterns-list code {
-  background: var(--ink-800);
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-family: var(--font-mono);
-}
-</style>
 
-<style scoped>
 /* table-layout fixed : les largeurs du <colgroup> sont respectées (sinon le
    navigateur les répartit selon le contenu et le nom s'étale sur 4 lignes). */
 .payees-page .payees-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; width: 100%; min-width: 1000px; }

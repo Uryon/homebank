@@ -7,7 +7,7 @@ import com.homebank.dto.ValidationRapprochementDTO;
 import com.homebank.mapper.MappeurCompte;
 import com.homebank.service.ServiceCompte;
 import com.homebank.service.ServiceRapprochement;
-import com.homebank.service.ServiceTransaction;
+import com.homebank.service.ServiceOperationsCompte;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -22,14 +22,14 @@ public class ControleurCompte {
 
     private final ServiceCompte accountService;
     private final ServiceRapprochement reconciliationService;
-    private final ServiceTransaction transactionService;
+    private final ServiceOperationsCompte operationsCompteService;
     private final MappeurCompte accountMapper;
 
     public ControleurCompte(ServiceCompte accountService, ServiceRapprochement reconciliationService,
-                            ServiceTransaction transactionService, MappeurCompte accountMapper) {
+                            ServiceOperationsCompte operationsCompteService, MappeurCompte accountMapper) {
         this.accountService = accountService;
         this.reconciliationService = reconciliationService;
-        this.transactionService = transactionService;
+        this.operationsCompteService = operationsCompteService;
         this.accountMapper = accountMapper;
     }
 
@@ -74,7 +74,7 @@ public class ControleurCompte {
     public TransactionDTO adjustBalance(@PathVariable Long id,
                                        @RequestParam LocalDate date,
                                        @RequestParam BigDecimal actualBalance) {
-        return transactionService.adjustAccountBalance(id, date, actualBalance);
+        return operationsCompteService.adjustAccountBalance(id, date, actualBalance);
     }
 
     /** Valide les transactions en attente du compte jusqu'a la date du releve rapproche. */

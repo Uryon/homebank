@@ -72,8 +72,8 @@ class ServiceSuggestionPeriodiqueTest {
         List<SuggestionPeriodiqueDTO> suggestions = service.findPeriodicSuggestions();
 
         assertThat(suggestions).hasSize(1);
-        assertThat(suggestions.get(0).getPayee()).isEqualTo("Netflix");
-        assertThat(suggestions.get(0).getCount()).isEqualTo(3);
+        assertThat(suggestions.getFirst().getPayee()).isEqualTo("Netflix");
+        assertThat(suggestions.getFirst().getCount()).isEqualTo(3);
     }
 
     @Test
@@ -118,7 +118,7 @@ class ServiceSuggestionPeriodiqueTest {
         List<SuggestionPeriodiqueDTO> suggestions = service.findPeriodicSuggestions();
 
         assertThat(suggestions).hasSize(1);
-        assertThat(suggestions.get(0).getPayee()).isEqualTo("EDF");
+        assertThat(suggestions.getFirst().getPayee()).isEqualTo("EDF");
     }
 
     @Test

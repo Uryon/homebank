@@ -128,8 +128,8 @@ class ServiceDoublonTest {
         List<GroupeDoublonDTO> groups = service.findDuplicateGroups();
 
         assertThat(groups).hasSize(1);
-        assertThat(groups.get(0).isCertain()).isTrue();
-        assertThat(groups.get(0).getCount()).isEqualTo(2);
+        assertThat(groups.getFirst().isCertain()).isTrue();
+        assertThat(groups.getFirst().getCount()).isEqualTo(2);
     }
 
 
@@ -147,8 +147,8 @@ class ServiceDoublonTest {
         List<GroupeDoublonDTO> groups = service.findDuplicateGroups();
 
         assertThat(groups).hasSize(1);
-        assertThat(groups.get(0).isCertain()).isFalse();
-        assertThat(groups.get(0).isReimbursement()).isFalse();
+        assertThat(groups.getFirst().isCertain()).isFalse();
+        assertThat(groups.getFirst().isReimbursement()).isFalse();
     }
 
     /** Deux commerçants distincts déjà reconnus, même jour et même montant : deux vraies opérations. */
@@ -227,8 +227,8 @@ class ServiceDoublonTest {
         List<GroupeDoublonDTO> groups = service.findDuplicateGroups();
 
         assertThat(groups).hasSize(1);
-        assertThat(groups.get(0).isReimbursement()).isTrue();
-        assertThat(groups.get(0).isCertain()).isFalse();
+        assertThat(groups.getFirst().isReimbursement()).isTrue();
+        assertThat(groups.getFirst().isCertain()).isFalse();
     }
 
     @Test

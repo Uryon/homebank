@@ -2,9 +2,11 @@ package com.homebank.service;
 
 import com.homebank.model.Categorie;
 import com.homebank.model.Compte;
+import com.homebank.model.LigneImportee;
 import com.homebank.model.Tiers;
 import com.homebank.model.Transaction;
 import com.homebank.model.TransactionSupprimee;
+import com.homebank.repository.DepotLigneImportee;
 import com.homebank.repository.DepotTransaction;
 import com.homebank.repository.DepotTransactionSupprimee;
 import jakarta.persistence.EntityManager;
@@ -49,6 +51,8 @@ class ServiceImportTest {
     @Mock
     private DepotTransactionSupprimee deletedTransactionRepository;
     @Mock
+    private DepotLigneImportee importedLineRepository;
+    @Mock
     private ServiceTiers payeeService;
     @Mock
     private ServiceDernierImport dernierImportService;
@@ -63,7 +67,7 @@ class ServiceImportTest {
     @BeforeEach
     void setUp() {
         service = new ServiceImport(accountService, categoryService, transactionRepository,
-                deletedTransactionRepository, payeeService, dernierImportService, transactionManager, entityManager);
+                deletedTransactionRepository, importedLineRepository, payeeService, dernierImportService, transactionManager, entityManager);
         account.setId(1L);
         when(accountService.findById(1L)).thenReturn(account);
     }
@@ -94,7 +98,8 @@ class ServiceImportTest {
         account.setName("Ancien livret");
         account.setArchived(true);
 
-        assertThatThrownBy(() -> service.importCsv(csvFile("Date;Montant\n"), 1L))
+        var fichier = csvFile("Date;Montant\n");
+        assertThatThrownBy(() -> service.importCsv(fichier, 1L))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("archivé");
         verify(dernierImportService, never()).enregistrerImport();
@@ -175,8 +180,8 @@ class ServiceImportTest {
 
         assertThat(result.getErrors()).isEmpty();
         List<Transaction> saved = transactionsEnregistrees(2);
-        assertThat(saved.get(0).getAmount()).isEqualByComparingTo("-45.50");
-        assertThat(saved.get(0).getBankLabel()).isEqualTo("CARREFOUR");
+        assertThat(saved.getFirst().getAmount()).isEqualByComparingTo("-45.50");
+        assertThat(saved.getFirst().getBankLabel()).isEqualTo("CARREFOUR");
         assertThat(saved.get(1).getAmount()).isEqualByComparingTo("1500.00");
         assertThat(saved.get(1).getBankLabel()).isEqualTo("SALAIRE");
     }
@@ -192,7 +197,7 @@ class ServiceImportTest {
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
 
         assertThat(result.getErrors()).isEmpty();
-        Transaction saved = transactionsEnregistrees(1).get(0);
+        Transaction saved = transactionsEnregistrees(1).getFirst();
         assertThat(saved.getBankLabel()).isEqualTo("PRLV EDF");
         assertThat(saved.getAmount()).isEqualByComparingTo("-72.40");
     }
@@ -208,7 +213,7 @@ class ServiceImportTest {
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
 
         assertThat(result.getErrors()).isEmpty();
-        Transaction saved = transactionsEnregistrees(1).get(0);
+        Transaction saved = transactionsEnregistrees(1).getFirst();
         assertThat(saved.getBankLabel()).isEqualTo("CB BOULANGERIE");
         assertThat(saved.getAmount()).isEqualByComparingTo("-4.80");
         assertThat(saved.getDate()).isEqualTo(LocalDate.of(2024, 3, 1));
@@ -225,7 +230,7 @@ class ServiceImportTest {
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
 
         assertThat(result.getErrors()).isEmpty();
-        Transaction saved = transactionsEnregistrees(1).get(0);
+        Transaction saved = transactionsEnregistrees(1).getFirst();
         assertThat(saved.getBankLabel()).isEqualTo("CARREFOUR");
         assertThat(saved.getAmount()).isEqualByComparingTo("-12.30");
     }
@@ -242,7 +247,7 @@ class ServiceImportTest {
 
         assertThat(result.getErrors()).isEmpty();
         List<Transaction> saved = transactionsEnregistrees(2);
-        assertThat(saved.get(0).getAmount()).isEqualByComparingTo("-45.50");
+        assertThat(saved.getFirst().getAmount()).isEqualByComparingTo("-45.50");
         assertThat(saved.get(1).getAmount()).isEqualByComparingTo("1500.00");
     }
 
@@ -271,7 +276,7 @@ class ServiceImportTest {
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
 
         assertThat(result.getErrors()).isEmpty();
-        Transaction saved = transactionsEnregistrees(1).get(0);
+        Transaction saved = transactionsEnregistrees(1).getFirst();
         assertThat(saved.getAmount()).isEqualByComparingTo("-45.50");
         assertThat(saved.getBankLabel()).isEqualTo("CARTE CARREFOUR");
         assertThat(saved.getMemo()).isEqualTo("Courses du samedi");
@@ -287,7 +292,7 @@ class ServiceImportTest {
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
 
         assertThat(result.getErrors()).isEmpty();
-        assertThat(transactionsEnregistrees(1).get(0).getAmount()).isEqualByComparingTo("-45.50");
+        assertThat(transactionsEnregistrees(1).getFirst().getAmount()).isEqualByComparingTo("-45.50");
     }
 
     private List<Transaction> transactionsEnregistrees(int attendues) {
@@ -361,7 +366,7 @@ class ServiceImportTest {
 
         assertThat(result.getImported()).isEqualTo(1);
         verify(categoryService, never()).findOrCreateByName(any(), any());
-        assertThat(transactionsEnregistrees(1).get(0).getCategory()).isNull();
+        assertThat(transactionsEnregistrees(1).getFirst().getCategory()).isNull();
     }
 
     @Test
@@ -413,7 +418,7 @@ class ServiceImportTest {
         assertThat(result.getSkipped()).isEqualTo(2);
         assertThat(result.getImportedIds()).containsExactly(1L, 3L);
         assertThat(result.getErrors()).hasSize(2);
-        assertThat(result.getErrors().get(0)).startsWith("Ligne 3 : ");
+        assertThat(result.getErrors().getFirst()).startsWith("Ligne 3 : ");
         assertThat(result.getErrors().get(1)).startsWith("Ligne 4 : ").contains("contrainte");
     }
 
@@ -452,7 +457,7 @@ class ServiceImportTest {
 
         ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
 
-        assertThat(ServiceImport.parseDate("17/11/26")).isEqualTo(LocalDate.of(2026, 11, 17));
+        assertThat(ValeursReleve.parseDate("17/11/26")).isEqualTo(LocalDate.of(2026, 11, 17));
         assertThat(result.getSkipped()).isEqualTo(1);
         assertThat(result.getErrors()).singleElement().asString()
                 .contains("17/11/0026").contains("année saisie : 26");
@@ -754,7 +759,7 @@ class ServiceImportTest {
 
         assertThat(result.getSkipped()).isEqualTo(1);
         assertThat(result.getImported()).isZero();
-        assertThat(result.getErrors().get(0)).contains("colonnes insuffisant");
+        assertThat(result.getErrors().getFirst()).contains("colonnes insuffisant");
         verify(transactionRepository, never()).save(any());
     }
 
@@ -1138,5 +1143,103 @@ class ServiceImportTest {
         verify(transactionManager, times(2)).rollback(any()); // le lot, puis la ligne fautive
         // Le tiers annule n'est jamais propose comme deja connu aux lignes suivantes.
         assertThat(cacheContenaitLeTiersAnnule).containsOnly(false);
+    }
+
+    // --- Registre des lignes importees : une ligne deja importee n'est jamais reimportee ---
+
+    private static final String LIGNE_PAYPAL_CSV = """
+            Date;Libelle;Montant
+            05/11/2026;ACHAT CB PAYPAL .ryckew 03.11.26 CARTE NUMERO                697;-144,05
+            """;
+
+    private static LigneImportee ligneImportee(String date, String amount, String label, Long transactionId) {
+        return new LigneImportee(1L, LocalDate.parse(date), new BigDecimal(amount), label, transactionId);
+    }
+
+    @Test
+    void importCsv_ligneDejaImporteeDontLaTransactionAEteSupprimee_nEstPasReimportee() {
+        // Cas reel : ligne importee puis supprimee, memorisee sous un autre nom
+        // de tiers que celui que l'import donne aujourd'hui au meme libelle.
+        when(importedLineRepository.findByAccountId(1L)).thenReturn(List.of(
+                ligneImportee("2026-11-05", "-144.05", "ACHAT CB PAYPAL .ryckew 03.11.26 CARTE NUMERO 697", null)));
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(LIGNE_PAYPAL_CSV), 1L);
+
+        assertThat(result.getImported()).isZero();
+        assertThat(result.getDuplicates()).isEqualTo(1);
+        verify(transactionRepository, never()).save(any());
+        verify(importedLineRepository, never()).save(any());
+    }
+
+    @Test
+    void importCsv_ligneDejaImportee_reconnueMalgreCasseEtEspacesDifferents() {
+        when(importedLineRepository.findByAccountId(1L)).thenReturn(List.of(
+                ligneImportee("2026-11-05", "-144.05", "achat cb paypal .RYCKEW 03.11.26 carte numero 697", 12L)));
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(LIGNE_PAYPAL_CSV), 1L);
+
+        assertThat(result.getImported()).isZero();
+        verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void importCsv_nouvelleLigne_estEnregistreeAuRegistreAvecSaTransaction() {
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> {
+            Transaction t = inv.getArgument(0);
+            t.setId(77L);
+            return t;
+        });
+
+        service.importCsv(csvFile("Date;Libelle;Montant\n01/03/2024;  CB CARREFOUR  ;-45,50\n"), 1L);
+
+        ArgumentCaptor<LigneImportee> captor = ArgumentCaptor.forClass(LigneImportee.class);
+        verify(importedLineRepository).save(captor.capture());
+        LigneImportee ligne = captor.getValue();
+        assertThat(ligne.getAccountId()).isEqualTo(1L);
+        assertThat(ligne.getDate()).isEqualTo(LocalDate.of(2024, 3, 1));
+        assertThat(ligne.getAmount()).isEqualByComparingTo("-45.50");
+        assertThat(ligne.getLabel()).isEqualTo("CB CARREFOUR");
+        assertThat(ligne.getTransactionId()).isEqualTo(77L);
+    }
+
+    @Test
+    void importCsv_ligneReconnueParSaTransaction_estAjouteeAuRegistreSansTransaction() {
+        Tiers cafe = cafeConnu();
+        when(transactionRepository.findByAccount_IdOrderByDateDescIdDesc(1L)).thenReturn(List.of(cafeEnBase(cafe)));
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile("""
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                01/03/2024;;;Café du coin;;-2,50;;
+                """), 1L);
+
+        assertThat(result.getDuplicates()).isEqualTo(1);
+        ArgumentCaptor<LigneImportee> captor = ArgumentCaptor.forClass(LigneImportee.class);
+        verify(importedLineRepository).save(captor.capture());
+        assertThat(captor.getValue().getTransactionId()).isNull();
+        assertThat(captor.getValue().getLabel()).isEqualTo("Café du coin");
+    }
+
+    @Test
+    void importCsv_deuxOperationsIdentiquesDontUneSeuleDejaImportee_importeLaSeconde() {
+        cafeConnu();
+        when(importedLineRepository.findByAccountId(1L)).thenReturn(List.of(
+                ligneImportee("2024-03-01", "-2.50", "Café du coin", null)));
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(DEUX_CAFES_CSV), 1L);
+
+        assertThat(result.getImported()).isEqualTo(1);
+        assertThat(result.getDuplicates()).isEqualTo(1);
+        verify(transactionRepository, times(1)).save(any());
+    }
+
+    @Test
+    void importCsv_memeLibelleAUneAutreDateOuUnAutreMontant_estImporte() {
+        when(importedLineRepository.findByAccountId(1L)).thenReturn(List.of(
+                ligneImportee("2026-11-04", "-144.05", "ACHAT CB PAYPAL .ryckew 03.11.26 CARTE NUMERO 697", null),
+                ligneImportee("2026-11-05", "-14.05", "ACHAT CB PAYPAL .ryckew 03.11.26 CARTE NUMERO 697", null)));
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(LIGNE_PAYPAL_CSV), 1L);
+
+        assertThat(result.getImported()).isEqualTo(1);
     }
 }

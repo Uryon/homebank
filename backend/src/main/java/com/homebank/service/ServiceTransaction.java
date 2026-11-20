@@ -4,15 +4,12 @@ import com.homebank.dto.TransactionBulkUpdateDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.dto.DemandeAnnulationDivisionDTO;
 import com.homebank.dto.DemandeDivisionDTO;
-import com.homebank.dto.DemandeVirementDTO;
 import com.homebank.mapper.MappeurTransaction;
 import com.homebank.model.Compte;
 import com.homebank.model.Categorie;
 import com.homebank.model.Tiers;
 import com.homebank.model.Transaction;
-import com.homebank.model.TransactionSupprimee;
 import com.homebank.repository.DepotTransaction;
-import com.homebank.repository.DepotTransactionSupprimee;
 import com.homebank.utils.LongueurTexte;
 import com.homebank.utils.ModePaiement;
 import com.homebank.utils.Montant;
@@ -21,20 +18,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -44,26 +33,26 @@ public class ServiceTransaction {
     private static final Logger log = LoggerFactory.getLogger(ServiceTransaction.class);
 
     private final DepotTransaction transactionRepository;
-    private final DepotTransactionSupprimee deletedTransactionRepository;
     private final ServiceCompte accountService;
     private final ServiceCategorie categoryService;
     private final ServiceTiers payeeService;
     private final MappeurTransaction transactionMapper;
+    private final ElagageTiersOrphelins elagageTiers;
 
     public ServiceTransaction(
             DepotTransaction transactionRepository,
-            DepotTransactionSupprimee deletedTransactionRepository,
             ServiceCompte accountService,
             ServiceCategorie categoryService,
             ServiceTiers payeeService,
-            MappeurTransaction transactionMapper) {
+            MappeurTransaction transactionMapper,
+            ElagageTiersOrphelins elagageTiers) {
 
         this.transactionRepository = transactionRepository;
-        this.deletedTransactionRepository = deletedTransactionRepository;
         this.accountService = accountService;
         this.categoryService = categoryService;
         this.payeeService = payeeService;
         this.transactionMapper = transactionMapper;
+        this.elagageTiers = elagageTiers;
     }
 
     /** Toutes les transactions, des plus recentes aux plus anciennes (GET /api/transactions, filtrees cote frontend). */
@@ -112,7 +101,7 @@ public class ServiceTransaction {
         log.info("Transaction modifiee : {}{}", id, twin != null ? " (et la jumelle du virement)" : "");
 
         if (previousPayee != null && !previousPayee.equals(saved.getPayee())) {
-            prunePayeesAfterCommit(List.of(previousPayee));
+            elagageTiers.apresCommit(List.of(previousPayee));
         }
 
         return transactionMapper.toDTO(saved);
@@ -134,7 +123,7 @@ public class ServiceTransaction {
         if (edited.getAccount().getId().equals(twin.getAccount().getId())) {
             throw new IllegalArgumentException("Le compte source et le compte destination doivent être différents.");
         }
-        ensureSameCurrency(edited.getAccount(), twin.getAccount());
+        ServiceOperationsCompte.ensureSameCurrency(edited.getAccount(), twin.getAccount());
 
         edited.setPaymentMode(ModePaiement.TRANSFER);
         twin.setDate(edited.getDate());
@@ -142,17 +131,6 @@ public class ServiceTransaction {
         twin.setMemo(edited.getMemo());
         twin.setValidated(edited.isValidated());
         transactionRepository.save(twin);
-    }
-
-    /** Pas de taux de change gere : un virement relie toujours deux comptes de meme devise. */
-    private static void ensureSameCurrency(Compte first, Compte second) {
-        String firstCurrency = first.getCurrency();
-        String secondCurrency = second.getCurrency();
-        if (firstCurrency == null || secondCurrency == null || !firstCurrency.equalsIgnoreCase(secondCurrency)) {
-            throw new IllegalArgumentException(
-                    "Les virements entre comptes de devises différentes ne sont pas pris en charge"
-            );
-        }
     }
 
     /**
@@ -259,7 +237,7 @@ public class ServiceTransaction {
         Transaction saved = transactionRepository.save(first);
         log.info("Division annulee : transaction {} (2e partie {} supprimee)", id, secondPartId);
 
-        prunePayeesAfterCommit(Collections.singletonList(second.getPayee()));
+        elagageTiers.apresCommit(Collections.singletonList(second.getPayee()));
         return transactionMapper.toDTO(saved);
     }
 
@@ -309,7 +287,7 @@ public class ServiceTransaction {
         List<Transaction> saved = transactionRepository.saveAll(transactions);
         log.info("Modification en masse de {} transaction(s)", saved.size());
 
-        prunePayeesAfterCommit(orphanCandidates);
+        elagageTiers.apresCommit(orphanCandidates);
 
         return saved.stream().map(transactionMapper::toDTO).toList();
     }
@@ -401,240 +379,6 @@ public class ServiceTransaction {
     }
 
     /**
-     * Nettoyage "best effort" des anciens tiers devenus orphelins (voir
-     * ServiceTiers#deleteIfOrphan), reporte APRES le commit de la transaction
-     * en cours. L'executer dedans etait trompeur : une exception, meme
-     * rattrapee, marquait toute la transaction rollback-only (la suppression
-     * ou modification echouait alors au commit avec une 500), et le DELETE du
-     * tiers n'etait de toute facon envoye en base qu'au commit, hors du
-     * try/catch. Sans transaction active, le nettoyage est fait tout de suite.
-     */
-    private void prunePayeesAfterCommit(Collection<Tiers> previousPayees) {
-        List<Long> payeeIds = previousPayees.stream()
-                .filter(Objects::nonNull)
-                .map(Tiers::getId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-        if (payeeIds.isEmpty()) return;
-
-        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            prunePayees(payeeIds);
-            return;
-        }
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                prunePayees(payeeIds);
-            }
-        });
-    }
-
-    /**
-     * Tous les tiers d'un coup ; si cela echoue, un a la fois, chacun dans sa
-     * propre transaction : l'echec de l'un n'empeche pas le nettoyage des autres.
-     */
-    private void prunePayees(List<Long> payeeIds) {
-        if (payeeIds.size() > 1 && prunePayeesTogether(payeeIds)) return;
-        for (Long payeeId : payeeIds) {
-            try {
-                payeeService.deleteIfOrphan(payeeId);
-            } catch (RuntimeException e) {
-                log.warn("Echec du nettoyage du tiers {} devenu orphelin : {}", payeeId, e.getMessage(), e);
-            }
-        }
-    }
-
-    private boolean prunePayeesTogether(List<Long> payeeIds) {
-        try {
-            payeeService.deleteOrphans(payeeIds);
-            return true;
-        } catch (RuntimeException e) {
-            log.warn("Nettoyage groupe de {} tiers en echec, reprise un par un : {}", payeeIds.size(), e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Supprime la transaction, et si elle fait partie d'un virement (voir
-     * createTransfer), supprime aussi la transaction jumelle avec elle : les
-     * deux se referencent mutuellement (transferTransaction dans les deux
-     * sens), donc les laisser desappariees romprait l'invariant "un virement
-     * = deux transactions liees" — et de toute facon, supprimer l'une sans
-     * l'autre serait rejete par la contrainte de cle etrangere en base.
-     */
-    @Transactional
-    public void delete(Long id) {
-        Transaction existing = findEntityById(id);
-
-        Map<Long, Transaction> byId = new LinkedHashMap<>();
-        byId.put(existing.getId(), existing);
-        // Inclut la jumelle d'un virement, supprimee avec elle.
-        List<Transaction> transactions = unlinkTransferPairs(byId);
-
-        transactions.forEach(this::recordDeletion);
-        transactionRepository.deleteAll(transactions);
-        log.info("Transaction supprimee : {}{}", id, transactions.size() > 1 ? " (avec la jumelle du virement)" : "");
-
-        // Tiers de CHAQUE transaction supprimee (jumelle comprise), comme
-        // deleteTransactions : sinon le tiers propre a l'autre cote d'un
-        // virement restait orphelin dans la liste des tiers.
-        prunePayeesAfterCommit(transactions.stream().map(Transaction::getPayee).toList());
-    }
-
-    /**
-     * Supprime plusieurs transactions a la fois (selection multiple de
-     * l'onglet Transactions) : meme empreinte de suppression (recordDeletion)
-     * qu'une suppression unitaire (voir delete), pour qu'un futur reimport du
-     * releve source ne les fasse pas reapparaitre. Renvoie le nombre de
-     * transactions effectivement supprimees.
-     */
-    @Transactional
-    public int deleteBulk(List<Long> ids) {
-        return deleteTransactions(ids, true);
-    }
-
-    /**
-     * Supprime toutes les transactions en attente (non validees) — pendant
-     * equivalent de validateAllPending. Contrairement a deleteBulk, ne laisse
-     * PAS d'empreinte de suppression (recordDeletion) : une transaction en
-     * attente n'a jamais ete rapprochee/confirmee, ce nettoyage sert
-     * generalement a repartir d'une base propre avant un reimport du meme
-     * releve, qui doit alors pouvoir la recreer normalement plutot que de la
-     * rejeter a tort comme doublon.
-     * <p>
-     * Un cote de virement en attente dont la jumelle est deja validee est
-     * exclu de ce nettoyage : deleteTransactions/unlinkTransferPairs emporte
-     * toujours les deux cotes ensemble (voir leur javadoc), ce qui supprimerait
-     * ici une transaction validee que l'utilisateur n'a pourtant jamais
-     * demande a supprimer (seul "en attente" a ete demande) — a supprimer
-     * manuellement si c'est bien l'intention.
-     * <p>
-     * Avec accountId, seules les transactions en attente de ce compte sont
-     * concernees (liste filtree par compte cote frontend : le nombre annonce
-     * dans la confirmation doit etre celui reellement supprime) ; la jumelle
-     * en attente d'un virement, sur un autre compte, part avec elle.
-     */
-    @Transactional
-    public int deleteAllPending(Long accountId) {
-        List<Transaction> pending = findPendingWithTransferTransaction(accountId);
-        List<Long> pendingIds = new ArrayList<>();
-        int skipped = 0;
-        for (Transaction t : pending) {
-            Transaction pair = t.getTransferTransaction();
-            if (pair != null && pair.isValidated()) {
-                skipped++;
-                continue;
-            }
-            pendingIds.add(t.getId());
-        }
-        if (skipped > 0) {
-            log.warn("{} transaction(s) de virement en attente ignorees par le nettoyage : leur jumelle est deja validee (suppression manuelle si besoin)", skipped);
-        }
-        return pendingIds.isEmpty() ? 0 : deleteTransactions(pendingIds, false);
-    }
-
-    /** Transactions en attente de tous les comptes (accountId null) ou d'un seul, jumelle de virement chargee. */
-    private List<Transaction> findPendingWithTransferTransaction(Long accountId) {
-        return accountId == null
-                ? transactionRepository.findByValidatedFalseWithTransferTransaction()
-                : transactionRepository.findPendingByAccountIdWithTransferTransaction(accountId);
-    }
-
-    /**
-     * Complete `byId` avec la jumelle de virement de chaque transaction deja
-     * presente (voir createTransfer), puis casse la reference mutuelle
-     * transferTransaction des deux cotes : sinon la cle etrangere de chaque
-     * cote d'un virement empeche de supprimer l'autre. Factorise entre
-     * delete(Long) et deleteTransactions, seule differences etant le nombre
-     * de transactions de depart.
-     */
-    private List<Transaction> unlinkTransferPairs(Map<Long, Transaction> byId) {
-        for (Transaction t : List.copyOf(byId.values())) {
-            Transaction pair = t.getTransferTransaction();
-            if (pair != null) {
-                byId.putIfAbsent(pair.getId(), pair);
-            }
-        }
-        List<Transaction> transactions = new ArrayList<>(byId.values());
-
-        List<Transaction> transferSides = transactions.stream()
-                .filter(t -> t.getTransferTransaction() != null)
-                .toList();
-        if (!transferSides.isEmpty()) {
-            transferSides.forEach(t -> t.setTransferTransaction(null));
-            transactionRepository.saveAll(transferSides);
-        }
-
-        return transactions;
-    }
-
-    /**
-     * Annule une creation (saisie, virement, ajustement, 2e partie d'une
-     * division) ou un import (voir ServiceImport.ImportResult#importedIds) :
-     * supprime les transactions SANS empreinte de suppression. Ce n'est pas
-     * un refus de ces operations : la ligne correspondante d'un releve doit
-     * rester importable. Les tiers crees avec elles et devenus orphelins
-     * partent aussi ; les categories creees par un import restent.
-     */
-    @Transactional
-    public int undoCreation(List<Long> ids) {
-        int deleted = deleteTransactions(ids, false);
-        log.info("Creation annulee : {} transaction(s) supprimee(s)", deleted);
-        return deleted;
-    }
-
-    /**
-     * Suppression en masse factorisee entre deleteBulk, deleteAllPending et undoCreation
-     * (voir leur javadoc pour la difference de comportement sur recordTombstone).
-     * Comme delete(Long) : la transaction jumelle d'un virement selectionne
-     * est toujours emportee avec lui, meme si elle n'a pas ete selectionnee
-     * elle-meme, pour ne jamais laisser un virement partiellement supprime
-     * (les deux se referencent mutuellement, voir createTransfer).
-     */
-    private int deleteTransactions(List<Long> ids, boolean recordTombstone) {
-        if (ids == null || ids.isEmpty()) {
-            throw new IllegalArgumentException("Aucune transaction sélectionnée.");
-        }
-
-        Map<Long, Transaction> byId = new LinkedHashMap<>();
-        for (Transaction t : transactionRepository.findAllByIdWithTransferTransaction(ids)) {
-            byId.put(t.getId(), t);
-        }
-        List<Transaction> transactions = unlinkTransferPairs(byId);
-
-        List<Tiers> orphanCandidates = new ArrayList<>();
-        for (Transaction t : transactions) {
-            if (recordTombstone) recordDeletion(t);
-            if (t.getPayee() != null) orphanCandidates.add(t.getPayee());
-        }
-        transactionRepository.deleteAll(transactions);
-
-        prunePayeesAfterCommit(orphanCandidates);
-        log.info("Suppression en masse de {} transaction(s) (empreinte de suppression : {})", transactions.size(), recordTombstone);
-
-        return transactions.size();
-    }
-
-    /**
-     * Enregistre une empreinte de la transaction avant sa suppression (voir
-     * TransactionSupprimee), pour que ServiceImport#isAlreadyKnown la reconnaisse
-     * et evite de la reimporter si le releve bancaire source la contient
-     * encore lors d'un futur import — sans quoi une transaction supprimee
-     * manuellement (ex : paire "depense remboursee", voir
-     * ServiceDoublon#findReimbursementGroups) reapparaissait au prochain import.
-     */
-    private void recordDeletion(Transaction t) {
-        TransactionSupprimee tombstone = new TransactionSupprimee();
-        tombstone.setAccountId(t.getAccount().getId());
-        tombstone.setDate(t.getDate());
-        tombstone.setAmount(t.importKeyAmount());
-        tombstone.setPayeeName(t.getPayee() != null ? t.getPayee().getName() : null);
-        tombstone.setBankLabel(t.getBankLabel());
-        deletedTransactionRepository.save(tombstone);
-    }
-
-    /**
      * Passe au statut "validee" les transactions en attente de tous les
      * comptes (accountId null : simple UPDATE en masse), ou du seul compte
      * filtre. Dans ce cas, chaque transaction est validee avec sa jumelle de
@@ -686,107 +430,6 @@ public class ServiceTransaction {
         t.setExceptional(!t.isExceptional());
         log.info("Transaction {} {} comme exceptionnelle", id, t.isExceptional() ? "marquee" : "retiree");
         return transactionMapper.toDTO(transactionRepository.save(t));
-    }
-
-    /**
-     * Aligne le solde calcule d'un compte sur sa valeur reelle a une date
-     * (ex : placement dont la valeur suit la bourse, livret sans mouvement
-     * saisi) : cree une transaction "Ajustement de solde" du montant de
-     * l'ecart, validee d'office (la valeur vient de l'utilisateur), et exclue
-     * des rapports de depenses/revenus (voir Transaction#balanceAdjustment).
-     * Le solde calcule inclut toutes les transactions jusqu'a `date` incluse,
-     * meme regle que le rapprochement (voir ServiceRapprochement).
-     */
-    @Transactional
-    public TransactionDTO adjustAccountBalance(Long accountId, LocalDate date, BigDecimal actualBalance) {
-        if (date == null) {
-            throw new IllegalArgumentException("La date est obligatoire.");
-        }
-        if (date.isAfter(LocalDate.now(ZoneId.systemDefault()))) {
-            throw new IllegalArgumentException("La date ne peut pas être dans le futur.");
-        }
-        Periode.verifierAnnee(date, "La date");
-        BigDecimal actual = Montant.auCentime(actualBalance, "Le solde réel");
-        if (actual == null) {
-            throw new IllegalArgumentException("Le solde réel est obligatoire.");
-        }
-        Compte account = accountService.findById(accountId);
-        ServiceCompte.ensureNotArchived(account);
-
-        BigDecimal computedBalance = account.getInitialBalance()
-                .add(transactionRepository.sumAmountByAccountIdAsOf(accountId, date));
-        BigDecimal gap = actual.subtract(computedBalance);
-        if (gap.signum() == 0) {
-            throw new IllegalArgumentException("Le solde est déjà de " + computedBalance + " à cette date : aucun ajustement nécessaire.");
-        }
-
-        Transaction adjustment = new Transaction();
-        adjustment.setAccount(account);
-        adjustment.setDate(date);
-        adjustment.setAmount(gap);
-        adjustment.setPaymentMode(ModePaiement.NONE);
-        adjustment.setValidated(true);
-        adjustment.setBalanceAdjustment(true);
-        Transaction saved = transactionRepository.save(adjustment);
-        log.info("Ajustement du solde du compte {} au {} : {} (solde réel {})", accountId, date, gap, actual);
-        return transactionMapper.toDTO(saved);
-    }
-
-    /**
-     * Cree un virement entre deux comptes : deux transactions liees
-     * (debit sur le compte source, credit sur le compte destination),
-     * chacune reliee a l'autre via transferTransaction, et marquees
-     * ModePaiement.TRANSFER ; leur liaison les exclut des rapports de depenses/revenus
-     * (voir Transaction#isInternalTransfer).
-     */
-    @Transactional
-    public List<TransactionDTO> createTransfer(DemandeVirementDTO request) {
-        if (request.getFromAccountId() == null || request.getToAccountId() == null) {
-            throw new IllegalArgumentException("Les deux comptes sont obligatoires.");
-        }
-        if (request.getFromAccountId().equals(request.getToAccountId())) {
-            throw new IllegalArgumentException("Le compte source et le compte destination doivent être différents.");
-        }
-        BigDecimal amount = Montant.auCentime(request.getAmount(), "Le montant du virement");
-        if (amount == null || amount.signum() <= 0) {
-            throw new IllegalArgumentException("Le montant du virement doit être positif.");
-        }
-
-        Compte from = accountService.findById(request.getFromAccountId());
-        Compte to = accountService.findById(request.getToAccountId());
-        ServiceCompte.ensureNotArchived(from);
-        ServiceCompte.ensureNotArchived(to);
-        ensureSameCurrency(from, to);
-        LocalDate date = request.getDate() != null ? request.getDate() : LocalDate.now(ZoneId.systemDefault());
-        Periode.verifierAnnee(date, "La date du virement");
-        boolean validated = !Boolean.FALSE.equals(request.getValidated());
-
-        Transaction debit = new Transaction();
-        debit.setAccount(from);
-        debit.setDate(date);
-        debit.setAmount(amount.negate());
-        String memo = sanitizeMemo(request.getMemo());
-        debit.setMemo(memo);
-        debit.setPaymentMode(ModePaiement.TRANSFER);
-        debit.setValidated(validated);
-
-        Transaction credit = new Transaction();
-        credit.setAccount(to);
-        credit.setDate(date);
-        credit.setAmount(amount);
-        credit.setMemo(memo);
-        credit.setPaymentMode(ModePaiement.TRANSFER);
-        credit.setValidated(validated);
-
-        Transaction savedDebit = transactionRepository.save(debit);
-        credit.setTransferTransaction(savedDebit);
-        Transaction savedCredit = transactionRepository.save(credit);
-        savedDebit.setTransferTransaction(savedCredit);
-        Transaction finalDebit = transactionRepository.save(savedDebit);
-        log.info("Virement cree du compte {} vers le compte {} : transactions {} et {}",
-                from.getId(), to.getId(), finalDebit.getId(), savedCredit.getId());
-
-        return List.of(transactionMapper.toDTO(finalDebit), transactionMapper.toDTO(savedCredit));
     }
 
     /**

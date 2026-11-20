@@ -21,3 +21,16 @@ describe('mémoire des sections repliées', () => {
     expect(() => saveCollapsed('k', ['x'], throwing)).not.toThrow()
   })
 })
+
+describe('createCollapsibleSections', () => {
+  it('replie puis déplie une section et mémorise l\'état', async () => {
+    const { createCollapsibleSections } = await import('./collapsibleSections')
+    const storage = memoryStorage({ k: '["resume"]' })
+    const sections = createCollapsibleSections('k', storage)
+    expect(sections.collapsed.value.has('resume')).toBe(true)
+    sections.toggle('solde')
+    sections.toggle('resume')
+    expect([...sections.collapsed.value]).toEqual(['solde'])
+    expect(readCollapsed('k', storage)).toEqual(['solde'])
+  })
+})
