@@ -1114,74 +1114,14 @@ class ServiceTransactionTest {
         assertThat(ServiceTransaction.sanitizeMemo("  Courses  ")).isEqualTo("Courses");
     }
 
-    // --- search : choix du filtre de GET /api/transactions ---
-
-    private static final LocalDate DEBUT = LocalDate.of(2026, 1, 1);
-    private static final LocalDate FIN = LocalDate.of(2026, 1, 31);
+    // --- findAll : GET /api/transactions ---
 
     @Test
-    void search_sansParametre_renvoieToutesLesTransactions() {
+    void findAll_renvoieToutesLesTransactions() {
         when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of());
 
-        assertThat(service.search(null, null, null, null, null)).isEmpty();
+        assertThat(service.findAll()).isEmpty();
         verify(transactionRepository).findAllByOrderByDateDescIdDesc();
-    }
-
-    @Test
-    void search_compteEtPeriode_filtreSurLesDeux() {
-        Transaction t = transaction(compte(7L), payee(1L, "Loyer"), LocalDate.of(2026, 1, 10), "-800");
-        when(transactionRepository.findByAccountIdAndDateBetween(7L, DEBUT, FIN)).thenReturn(List.of(t));
-
-        assertThat(service.search(7L, DEBUT, FIN, null, null)).hasSize(1);
-        verify(transactionRepository, never()).findByAccount_IdOrderByDateDescIdDesc(any());
-    }
-
-    @Test
-    void search_periodeSeule_filtreSurLaPeriode() {
-        when(transactionRepository.findByDateBetween(DEBUT, FIN)).thenReturn(List.of());
-
-        service.search(null, DEBUT, FIN, null, null);
-
-        verify(transactionRepository).findByDateBetween(DEBUT, FIN);
-    }
-
-    @Test
-    void search_montant_utiliseLeFiltreParMontant() {
-        when(transactionRepository.findByAmountGreaterThanOrderByDateDescIdDesc(new BigDecimal("100"))).thenReturn(List.of());
-
-        service.search(null, null, null, ">", new BigDecimal("100"));
-
-        verify(transactionRepository).findByAmountGreaterThanOrderByDateDescIdDesc(new BigDecimal("100"));
-    }
-
-    @Test
-    void search_periodeIncomplete_estRefuseeAuLieuDeToutRenvoyer() {
-        assertThatThrownBy(() -> service.search(null, DEBUT, null, null, null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("date de fin");
-        verifyNoInteractions(transactionRepository);
-    }
-
-    @Test
-    void search_periodeInversee_estRefusee() {
-        assertThatThrownBy(() -> service.search(null, FIN, DEBUT, null, null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("postérieure");
-    }
-
-    @Test
-    void search_operateurSansMontant_estRefuse() {
-        assertThatThrownBy(() -> service.search(null, null, null, ">", null))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("opérateur et un montant");
-    }
-
-    @Test
-    void search_montantEtPeriode_estRefuse() {
-        assertThatThrownBy(() -> service.search(null, DEBUT, FIN, "=", BigDecimal.TEN))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("combinée");
-        verifyNoInteractions(transactionRepository);
     }
 
     // --- nettoyage des tiers orphelins : jamais dans la transaction de la suppression ---

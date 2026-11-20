@@ -1,0 +1,237 @@
+/* Finitions visuelles : cartes, hiérarchie du tableau de bord, navigation,
+   contrôles de période, adaptation aux écrans étroits. */
+
+/* ================================================================
+   HomeBank — itération 1 : hiérarchie visuelle du tableau de bord
+   Travail volontairement limité au CSS : aucune donnée, règle métier,
+   route ou interaction Vue n'est modifiée.
+   ================================================================ */
+
+.main-content {
+    padding-top: 38px;
+}
+
+.card {
+    border-color: var(--line);
+    box-shadow: var(--shadow-card);
+    transition: border-color 160ms ease, box-shadow 160ms ease,
+                transform 160ms ease;
+}
+
+/* Le tableau de bord devient plus lisible sans supprimer de données. */
+.dashboard-page > .page-header {
+    margin-bottom: 30px;
+}
+
+.dashboard-page > .page-header h1 {
+    font-size: 30px;
+    letter-spacing: -0.04em;
+}
+
+.dashboard-page > .page-header .subtitle {
+    color: var(--text-muted);
+}
+
+/* Les quatre indicateurs forment un groupe cohérent.
+   Le solde total joue le rôle de point d'ancrage visuel. */
+.dashboard-page > .card-grid {
+    gap: 14px;
+    margin-bottom: 22px;
+}
+
+.dashboard-page > .card-grid > .card {
+    position: relative;
+    min-width: 0;
+    padding: 19px 20px 20px;
+    overflow: hidden;
+    border-radius: 15px;
+}
+
+.dashboard-page > .card-grid > .card:not(:first-child)::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 20px;
+    right: 20px;
+    height: 3px;
+    border-radius: 0 0 4px 4px;
+    background: var(--line-strong);
+}
+
+.dashboard-page > .card-grid > .card:nth-child(2)::before {
+    background: color-mix(in srgb, var(--mint) 55%, transparent);
+}
+
+.dashboard-page > .card-grid > .card:nth-child(3)::before {
+    background: color-mix(in srgb, var(--coral) 55%, transparent);
+}
+
+.dashboard-page > .card-grid > .card:nth-child(4)::before {
+    background: color-mix(in srgb, var(--azure) 55%, transparent);
+}
+
+.dashboard-page > .card-grid > .card:first-child {
+    background: var(--hero-bg);
+    border-color: transparent;
+    box-shadow: var(--hero-shadow);
+}
+
+.dashboard-page > .card-grid > .card:first-child .stat-label {
+    color: var(--hero-label);
+}
+
+.dashboard-page > .card-grid > .card:first-child .stat-value {
+    color: var(--hero-text);
+    font-size: clamp(25px, 2vw, 31px);
+}
+
+.dashboard-page > .card-grid > .card:first-child .stat-value.positive {
+    color: var(--hero-positive);
+}
+
+.dashboard-page > .card-grid > .card:first-child .stat-value.negative {
+    color: var(--hero-negative);
+}
+
+.dashboard-page > .card-grid > .card:not(:first-child) .stat-value {
+    font-size: clamp(23px, 1.8vw, 28px);
+}
+
+.dashboard-page > .card-grid .stat-label {
+    font-size: 12.5px;
+    letter-spacing: 0.005em;
+}
+
+/* Les graphiques sont des espaces d'analyse, pas de simples blocs encadrés. */
+.dashboard-page .forecast-card,
+.dashboard-page .monthly-analysis-card {
+    border-radius: 16px;
+}
+
+.dashboard-page .chart-header .stat-label {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 650;
+}
+
+/* Navigation : état actif plus net, sans modifier les liens. */
+.sidebar {
+    padding-left: 16px;
+    padding-right: 16px;
+}
+
+.nav-item {
+    min-height: 40px;
+    border-radius: 10px;
+}
+
+.nav-item.active {
+    background: var(--sidebar-active-bg);
+}
+
+/* Les contrôles de période ont un rendu plus proche d'une barre d'outils. */
+.month-nav {
+    border-radius: 13px;
+    box-shadow: 0 5px 18px rgba(17, 24, 39, 0.08);
+}
+
+.month-nav-btn {
+    border-radius: 9px;
+}
+
+/* Adaptation progressive aux écrans d'ordinateur plus étroits. */
+@media (max-width: 1250px) {
+    .app-shell {
+        grid-template-columns: 224px minmax(0, 1fr);
+    }
+
+    .main-content {
+        padding-left: 28px;
+        padding-right: 28px;
+    }
+
+    .main-content.main-content-wide {
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+
+    .dashboard-page > .card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 760px) {
+    .app-shell {
+        grid-template-columns: minmax(0, 1fr);
+        /* La barre de navigation garde sa hauteur naturelle ; sur une page
+           courte, c'est le contenu qui prend la place restante. */
+        grid-template-rows: auto 1fr;
+    }
+
+    .sidebar {
+        position: relative;
+        top: auto;
+        height: auto;
+        overflow: visible;
+        padding: 14px 16px;
+    }
+
+    .brand {
+        margin-bottom: 12px;
+    }
+
+    .sidebar nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .nav-group,
+    .nav-group + .nav-group {
+        display: contents;
+        margin: 0;
+        padding: 0;
+        border: 0;
+    }
+
+    .nav-item {
+        min-height: 36px;
+        padding: 7px 9px;
+        font-size: 12px;
+    }
+
+    .nav-item.active::before {
+        display: none;
+    }
+
+    .sidebar-accounts {
+        display: none;
+    }
+
+    .main-content,
+    .main-content.main-content-wide {
+        padding: 24px 16px 48px;
+    }
+
+    .dashboard-page > .card-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+
+    .dashboard-page > .card-grid > .card {
+        padding: 15px;
+    }
+
+    .dashboard-page > .page-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .month-nav {
+        position: static;
+        width: fit-content;
+        max-width: 100%;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+    }
+}

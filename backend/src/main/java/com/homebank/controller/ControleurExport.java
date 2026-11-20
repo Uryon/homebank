@@ -19,9 +19,9 @@ public class ControleurExport {
 
     /**
      * Exporte le tableau de bord en PDF dans le dossier synchronise configure
-     * (voir ServiceExport). Declenche manuellement (bouton "Exporter en PDF"
-     * du tableau de bord) ou automatiquement apres validation en masse des
-     * transactions (voir Transactions.vue#validateAll).
+     * (voir ServiceExport). Declenche automatiquement apres un rapprochement
+     * valide (voir frontend services/dashboardExport.js) et a la fermeture de
+     * l'appli (HomeBank.vbs).
      */
     @PostMapping("/dashboard-pdf")
     public Map<String, String> exporterTableauDeBord() {

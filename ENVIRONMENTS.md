@@ -24,8 +24,9 @@ catégories, des tiers, quelques dizaines de transactions réparties sur les der
 d'exemple. Le détail exact est affiché dans le journal au démarrage (« Données de démonstration
 chargées : … »).
 
-Ce profil utilise une base **H2 en mémoire** (`create-drop`) : elle est recréée vierge à chaque
-démarrage puis repeuplée par `TestDataSeeder`. Rien de ce qui s'y passe n'affecte jamais ta base
+Ce profil utilise une base **H2 en mémoire** : elle est recréée vierge à chaque démarrage, son
+schéma est créé par les mêmes scripts Flyway que la vraie base, puis elle est repeuplée par
+`TestDataSeeder`. Rien de ce qui s'y passe n'affecte jamais ta base
 PostgreSQL réelle.
 
 ### Lancer ce profil depuis IntelliJ

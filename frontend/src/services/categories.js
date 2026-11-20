@@ -79,6 +79,11 @@ export function flattenCategories(categories) {
  * sous-catégories partagent la même couleur, stable d'une session à l'autre
  * sans rien stocker en base. Renvoie null si la catégorie est inconnue.
  */
+/** Teinte (0-359) d'une catégorie racine, répartie sur le cercle chromatique : puces et graphiques (voir categoryColors.js). */
+export function categoryHue(rootId) {
+  return (rootId * 47) % 360
+}
+
 export function categoryChipInfo(categoryId, categoriesById) {
   const category = categoryId ? categoriesById.get(categoryId) : null
   if (!category) return null
@@ -88,7 +93,7 @@ export function categoryChipInfo(categoryId, categoriesById) {
     name: category.name,
     parent: parent ? parent.name : '',
     icon: root.icon || category.icon || '',
-    hue: (root.id * 47) % 360,
+    hue: categoryHue(root.id),
     path: parent ? `${parent.name} › ${category.name}` : category.name
   }
 }

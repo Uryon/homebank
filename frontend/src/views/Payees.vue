@@ -57,7 +57,7 @@
         </button>
       </div>
       <div v-if="selectedIds.length > 0" class="form-field toolbar-action">
-        <button class="btn secondary" @click="selectedIds = []">Annuler la sélection</button>
+        <button class="btn secondary" @click="clearSelection">Annuler la sélection</button>
       </div>
     </div>
 
@@ -93,7 +93,7 @@
                 :checked="allFilteredSelected"
                 title="Sélectionner / désélectionner tous les tiers actuellement affichés"
                 aria-label="Sélectionner / désélectionner tous les tiers actuellement affichés"
-                @change="toggleSelectAllFiltered"
+                @change="toggleAllIn(filteredPayeeIds)"
               />
             </th>
             <th :aria-sort="ariaSort('name')">
@@ -345,6 +345,7 @@ import SkeletonRows from '../components/SkeletonRows.vue'
 import UndoBar from '../components/UndoBar.vue'
 import { useLastAction } from '../services/lastAction'
 import { planPayeeMergeRestore, restorePayeeMerge } from '../services/payeeMergeRestore'
+import { useIdSelection } from '../services/selection'
 
 const route = useRoute()
 
@@ -371,7 +372,7 @@ const editingId = ref(null)
 const editForm = ref(null)
 const firstEditField = ref(null)
 
-const selectedIds = ref([])
+const { selectedIds, selectedIdSet, allSelectedIn, toggleAllIn, keepExisting, clearSelection } = useIdSelection()
 const showMergeModal = ref(false)
 const mergeTargetId = ref(null)
 const mergePattern = ref('')
@@ -596,8 +597,7 @@ async function applySuggestion(payee) {
 /** Revalide le cache partage des tiers apres creation/edition/suppression/fusion, et purge la selection des tiers qui n'existent plus. */
 async function refreshAfterMutation() {
   await dataStore.refreshPayees()
-  const existingIds = new Set(payees.value.map(p => p.id))
-  selectedIds.value = selectedIds.value.filter(id => existingIds.has(id))
+  keepExisting(payees.value.map(p => p.id))
 }
 
 /**
@@ -782,27 +782,9 @@ async function confirmEdit() {
   }
 }
 
-// Set plutot que includes() : avec "tout selectionner" sur des milliers de
-// tiers, includes() dans un every()/filter() devenait quadratique a chaque
-// coche (meme principe que selectedIdSet dans Categories.vue).
-const selectedIdSet = computed(() => new Set(selectedIds.value))
-
-/** Vrai si tous les tiers actuellement affichés (selon le filtre) sont sélectionnés. */
-const allFilteredSelected = computed(() =>
-  filteredPayees.value.length > 0 && filteredPayees.value.every(p => selectedIdSet.value.has(p.id))
-)
-
-/**
- * Case à cocher d'en-tête : sélectionne, ou désélectionne, tous les tiers
- * actuellement affichés (selon le filtre), sans toucher à une éventuelle
- * sélection existante en dehors du filtre courant.
- */
-function toggleSelectAllFiltered() {
-  const filteredIds = new Set(filteredPayees.value.map(p => p.id))
-  selectedIds.value = allFilteredSelected.value
-    ? selectedIds.value.filter(id => !filteredIds.has(id))
-    : [...new Set([...selectedIds.value, ...filteredIds])]
-}
+/** Ids des tiers actuellement affichés (selon le filtre), pour la case « tout sélectionner ». */
+const filteredPayeeIds = computed(() => filteredPayees.value.map(p => p.id))
+const allFilteredSelected = computed(() => allSelectedIn(filteredPayeeIds.value))
 
 /* --- Fusion --- */
 
@@ -863,7 +845,7 @@ async function confirmMerge() {
   try {
     await PayeesAPI.merge(sourceIds, mergeTargetId.value, mergePattern.value.trim())
     showMergeModal.value = false
-    selectedIds.value = []
+    clearSelection()
     // La fusion reaffecte aussi le tiers de chaque transaction des tiers
     // source (voir ServiceTiers#merge cote backend) : revalider aussi le
     // cache des transactions, pas seulement celui des tiers.

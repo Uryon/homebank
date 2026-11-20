@@ -154,6 +154,8 @@
         </button>
       </div>
     </div>
+
+    <BackupCard />
   </div>
 </template>
 
@@ -167,6 +169,7 @@ import { activeAccounts } from '../services/accounts'
 import { alertApiError } from '../services/errors'
 import { VISIBLE_ERRORS_LIMIT, formatFileSize, importFileProblem, importOutcome, lastImportLabel, resultTileLabels } from '../services/importResult'
 import Icon from '../components/Icon.vue'
+import BackupCard from '../components/BackupCard.vue'
 import Money from '../components/Money.vue'
 import { DEFAULT_CURRENCY, formatDate, pluralize } from '../services/format'
 

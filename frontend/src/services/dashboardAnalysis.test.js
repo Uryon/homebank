@@ -14,6 +14,9 @@ import {
   monthDelta,
   mergeRowsByPayee,
   monthRange,
+  monthKeyOf,
+  monthTitle,
+  monthTitleFromKey,
   yearAgoKpi,
   yearOverYearChange,
   yearOverYearCoverage
@@ -327,5 +330,20 @@ describe('yearAgoKpi', () => {
     expect(yearAgoKpi(920, 0, 'expense', 'oct. 2025')).toBeNull()
     expect(yearAgoKpi(920, undefined, 'expense', 'oct. 2025')).toBeNull()
     expect(yearAgoKpi(0, 0, 'income', 'oct. 2025')).toBeNull()
+  })
+})
+
+describe('libellés de mois', () => {
+  it('monthKeyOf renvoie le premier jour du mois au format des rapports', () => {
+    expect(monthKeyOf(new Date(2026, 8, 17))).toBe('2026-09-01')
+    expect(monthKeyOf(new Date(2026, 11, 1))).toBe('2026-12-01')
+  })
+
+  it('monthTitle écrit le mois en toutes lettres avec une majuscule', () => {
+    expect(monthTitle(new Date(2026, 8, 1))).toBe('Septembre 2026')
+  })
+
+  it('monthTitleFromKey lit une clé AAAA-MM-01', () => {
+    expect(monthTitleFromKey('2025-01-01')).toBe('Janvier 2025')
   })
 })

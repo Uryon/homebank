@@ -96,7 +96,11 @@ export function safeFileName(name) {
  * ServiceImport#decodeImportedText).
  */
 export function downloadCsv(fileName, csvText) {
-  const blob = new Blob(['﻿', csvText], { type: 'text/csv;charset=utf-8' })
+  downloadBlob(fileName, new Blob(['﻿', csvText], { type: 'text/csv;charset=utf-8' }))
+}
+
+/** Fait enregistrer un fichier (Blob) par le navigateur sous le nom donné. */
+export function downloadBlob(fileName, blob) {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url

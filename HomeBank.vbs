@@ -269,10 +269,15 @@ Sub Main()
     End If
 
     WaitForEdgeToAppear edgeProfile
+    ' Fenetre deja affichee : la requete WMI ne retarde plus rien.
+    EnsureGoogleDriveRunning
     WatchUntilWindowClosed
 
     CreateEmptyFile closingFile
     ExportPdfOnClose
+    ' Drive a pu etre ferme pendant la session : le PDF et la sauvegarde du
+    ' jour ne partiraient pas. Il continue de tourner apres HomeBank.
+    EnsureGoogleDriveRunning
     If fso.FileExists(relaunchRequestFile) Then
         HandOverServers
     Else
@@ -1137,7 +1142,7 @@ End Sub
 '
 ' Avant l'arret du backend/frontend : le backend lance le script
 ' Playwright, qui capture le tableau de bord servi par Vite (voir
-' ControleurExport, meme endpoint que le bouton "Exporter en PDF").
+' ControleurExport, meme endpoint que l'export apres un rapprochement valide).
 ' =========================================================
 
 Sub ExportPdfOnClose()
@@ -1545,6 +1550,64 @@ Function ServiceIsRunning(name)
             "SELECT State FROM Win32_Service WHERE Name = '" & name & "'")
         ServiceIsRunning = service.State = "Running"
     Next
+
+End Function
+
+
+' =========================================================
+' GOOGLE DRIVE
+'
+' Le PDF du tableau de bord et la sauvegarde quotidienne sont ecrits dans
+' export\sortie, envoye sur Google Drive par Google Drive pour ordinateur...
+' seulement quand celui-ci tourne : ferme, rien ne part. Le lanceur le
+' demarre donc s'il ne tourne pas. Jamais bloquant : sans Drive installe,
+' seul le journal le signale.
+' =========================================================
+
+Sub EnsureGoogleDriveRunning()
+
+    Dim command
+    On Error Resume Next
+    If GetObject("winmgmts:root\cimv2").ExecQuery( _
+            "SELECT ProcessId FROM Win32_Process WHERE Name = 'GoogleDriveFS.exe'").Count > 0 Then
+        If Err.Number = 0 Then Exit Sub
+    End If
+    Err.Clear
+    On Error GoTo 0
+
+    command = GoogleDriveCommand()
+    If command = "" Then
+        Log "Google Drive pour ordinateur introuvable : export\sortie ne sera pas synchronise."
+        Exit Sub
+    End If
+    Log "Google Drive ne tournait pas : demarrage (" & command & ")."
+    On Error Resume Next
+    shell.Run command, 0, False
+    If Err.Number <> 0 Then Log "ECHEC du demarrage de Google Drive : " & Err.Description
+    Err.Clear
+    On Error GoTo 0
+
+End Sub
+
+
+' Commande de demarrage de Google Drive : celle que Drive inscrit lui-meme au
+' demarrage de Windows (suit ses mises a jour, le dossier porte la version),
+' sinon son lanceur stable launch.bat ; "" s'il n'est pas installe.
+Function GoogleDriveCommand()
+
+    Dim registered, launcher
+    GoogleDriveCommand = ""
+    On Error Resume Next
+    registered = shell.RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\Run\GoogleDriveFS")
+    Err.Clear
+    On Error GoTo 0
+    If Trim(registered & "") <> "" Then
+        GoogleDriveCommand = registered
+        Exit Function
+    End If
+
+    launcher = shell.ExpandEnvironmentStrings("%ProgramFiles%") & "\Google\Drive File Stream\launch.bat"
+    If fso.FileExists(launcher) Then GoogleDriveCommand = """" & launcher & """"
 
 End Function
 

@@ -23,6 +23,16 @@
 
     <TransactionsSubNav />
 
+    <AccountSummaryBar
+      v-if="selectedAccount"
+      :account="selectedAccount"
+      :balance="selectedAccountBalance"
+      :pending-count="pendingCount"
+      :oldest-pending-date="oldestPendingDate"
+      :has-transactions="transactions.length > 0"
+      @show-pending="pendingOnly = true"
+    />
+
     <div ref="toolbarEl" class="toolbar transactions-toolbar">
       <div class="form-field">
         <label for="tx-filter-account">Compte</label>
@@ -292,7 +302,8 @@ import {
 } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { previousTransactionPayload, restorationSnapshots, runOnePerPayee, transactionPayloadFrom } from '../services/undoRestore'
-import { normalizeSearch, parseAmountQuery, matchesAmountQuery, parseSearchTerms, matchesSearchTerm } from '../services/search'
+import { parseAmountQuery } from '../services/search'
+import { buildSearchIndex, filterByStatusAndPeriod, filterBySearch } from '../services/transactionFilters'
 import { flattenCategories, needsCategory } from '../services/categories'
 import TransactionRow from '../components/TransactionRow.vue'
 import TransactionCreateModal from '../components/TransactionCreateModal.vue'
@@ -308,6 +319,7 @@ import SkeletonRows from '../components/SkeletonRows.vue'
 import { formatMonthHeading, monthKey, startsNewMonth, summarizeByMonth } from '../services/monthGroups'
 import Icon from '../components/Icon.vue'
 import TransactionsSubNav from './TransactionsSubNav.vue'
+import AccountSummaryBar from '../components/AccountSummaryBar.vue'
 import { formatAmount, formatDate, pluralize, toLocalIsoDate } from '../services/format'
 import { downloadCsv, safeFileName, transactionsToCsv } from '../services/csvExport'
 import { findIdenticalTransaction } from '../services/duplicateEntry'
@@ -590,6 +602,19 @@ const pendingCount = computed(() =>
   transactions.value.filter(t => !t.validated).length
 )
 
+/** Compte filtré (en-tête AccountSummaryBar), null sur « Tous les comptes ». */
+const selectedAccount = computed(() => (filterAccount.value != null ? accountsById.value.get(filterAccount.value) ?? null : null))
+const selectedAccountBalance = computed(() => Number(dataStore.state.balances[filterAccount.value] ?? 0))
+
+/** Date de la plus ancienne opération en attente du compte filtré (comparaison de dates ISO). */
+const oldestPendingDate = computed(() => {
+  let oldest = null
+  for (const t of transactions.value) {
+    if (!t.validated && t.date && (oldest === null || t.date < oldest)) oldest = t.date
+  }
+  return oldest
+})
+
 /** Précision ajoutée aux confirmations quand la liste est filtrée sur un compte. */
 const pendingScopeLabel = computed(() => {
   const account = filterAccount.value !== null ? accountsById.value.get(filterAccount.value) : null
@@ -629,97 +654,22 @@ const categoryNameById = computed(() => {
   return map
 })
 
-/**
- * Champs de recherche normalises (tiers, categorie, montant formate) par
- * transaction, precalcules en Map une seule fois quand la liste de
- * transactions change (chargement, changement de filtre compte...), et non
- * recalcules a chaque frappe dans la recherche : formatAmount +
- * normalizeSearch sur plusieurs milliers de transactions a chaque caractere
- * tape est ce qui avait deja rendu la recherche lente une premiere fois sur
- * ce projet (voir CLAUDE.md). filteredTransactions ci-dessous ne fait plus
- * que des comparaisons de chaines deja normalisees.
- */
-const searchIndexById = computed(() => {
-  const index = new Map()
-  const labels = categoryLabelById.value
-  const names = categoryNameById.value
-  for (const t of transactions.value) {
-    index.set(t.id, {
-      payeeNormalized: normalizeSearch(t.payee),
-      categoryNormalized: normalizeSearch(labels.get(t.categoryId) || ''),
-      categoryNameNormalized: normalizeSearch(names.get(t.categoryId) || ''),
-      memoNormalized: normalizeSearch(t.memo),
-      bankLabelNormalized: normalizeSearch(t.bankLabel),
-      rawAmount: String(t.amount ?? '').toLowerCase(),
-      absAmount: String(Math.abs(t.amount ?? 0)),
-      // Montant formate ("0,60 €") avec la virgule decimale remplacee par un
-      // point, pour que la recherche matche qu'on tape "0,60" ou "0.60" (voir
-      // transactionMatchesTerm, qui convertit le terme tape de la meme facon).
-      // Sans ca, un montant a 2 decimales tape avec un point (ex : "0.60")
-      // ne matchait ni ce champ (virgule attendue) ni rawAmount/absAmount
-      // (qui n'ont pas le zero final, ex : "0.6" pour 0,60€).
-      amountFormattedNormalized: normalizeSearch(formatAmount(t.amount)).replace(',', '.')
-    })
-  }
-  return index
-})
+/** Champs de recherche normalisés, recalculés seulement quand la liste change (voir services/transactionFilters.js). */
+const searchIndexById = computed(() =>
+  buildSearchIndex(transactions.value, categoryLabelById.value, categoryNameById.value))
 
-/**
- * Statut + mois/année : etape memoisee separee de filteredTransactions
- * ci-dessous, pour ne pas repasser sur toute la liste a chaque frappe dans
- * la recherche (elle ne depend que du statut/mois/annee/compte, jamais de
- * searchQuery — meme principe que searchIndexById plus haut).
- */
-const statusAndDateFiltered = computed(() => {
-  let filtered = pendingOnly.value
-    ? transactions.value.filter(t => !t.validated)
-    : transactions.value
+/** Statut, critères du tableau de bord et mois / année : étape séparée, jamais refaite à la frappe. */
+const statusAndDateFiltered = computed(() => filterByStatusAndPeriod(transactions.value, {
+  pendingOnly: pendingOnly.value,
+  uncategorizedOnly: uncategorizedOnly.value,
+  drillDownMatch: drillDown.value ? drillDownMatcher(transactions.value, drillDown.value, categoriesById.value) : null,
+  month: filterMonth.value,
+  year: filterYear.value
+}))
 
-  if (uncategorizedOnly.value) {
-    filtered = filtered.filter(needsCategory)
-  }
-
-  if (drillDown.value) {
-    filtered = filtered.filter(drillDownMatcher(transactions.value, drillDown.value, categoriesById.value))
-  }
-
-  if (filterMonth.value == null && filterYear.value == null) return filtered
-
-  return filtered.filter(t => {
-    if (!t.date) return false
-    if (filterYear.value != null && Number(t.date.slice(0, 4)) !== filterYear.value) return false
-    if (filterMonth.value != null && Number(t.date.slice(5, 7)) !== filterMonth.value) return false
-    return true
-  })
-})
-
-/**
- * Filtre les transactions par le texte de recherche : tiers, catégorie,
- * mémo et montant, peu importe le format saisi (virgule, point, signe, ou
- * juste des chiffres). Une comparaison de montant ("> 100", "< 50",
- * "= 42.50") compare le montant signé (voir matchesAmountQuery).
- *
- * Plusieurs critères séparés par ";" sont tous exigés à la fois (ET), ex :
- * "Bouygues;29,99" pour retrouver la transaction Bouygues de ce montant
- * précis parmi plusieurs. Un critère pris seul est un "contient" (OR entre
- * tiers/catégorie/montant) sauf s'il est entre guillemets ("CAF"), auquel
- * cas seule une correspondance exacte est retenue — voir parseSearchTerms
- * et matchesSearchTerm dans services/search.js.
- */
-const filteredTransactions = computed(() => {
-  const amount = amountQuery.value
-  if (amount) return statusAndDateFiltered.value.filter(t => matchesAmountQuery(t, amount))
-
-  const terms = parseSearchTerms(searchQuery.value)
-  if (!terms.length) return statusAndDateFiltered.value
-
-  const index = searchIndexById.value
-
-  return statusAndDateFiltered.value.filter(t => {
-    const idx = index.get(t.id)
-    return idx && terms.every(criterion => matchesSearchTerm(idx, criterion))
-  })
-})
+/** Recherche texte (« Bouygues;29,99 », "CAF" exact) ou comparaison de montant (« > 100 »). */
+const filteredTransactions = computed(() =>
+  filterBySearch(statusAndDateFiltered.value, searchQuery.value, amountQuery.value, searchIndexById.value))
 
 /**
  * Tri par clic sur les en-têtes Date / Tiers / Dépense / Revenu (voir

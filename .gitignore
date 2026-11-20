@@ -8,8 +8,10 @@ frontend/dist/
 frontend/coverage/
 
 # Export PDF du tableau de bord (voir ServiceExport / export/export-dashboard.mjs) ;
-# export/sortie/ = dossier de sortie synchronise Google Drive, PDF generes uniquement
+# export/sortie/ = dossier de sortie synchronise Google Drive (PDF, et sauvegardes dans sauvegardes/)
 /export/node_modules/
+# Sorties de l'appli (PDF et sauvegardes JSON de toutes les donnees bancaires) : jamais versionnees
+/export/sortie/
 
 # Lanceur HomeBank.vbs : profil Edge de la fenetre, journaux
 /.homebank-edge/*

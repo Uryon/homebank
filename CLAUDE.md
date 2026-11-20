@@ -46,7 +46,8 @@ Backend Spring Boot exposant une API REST consommée par un frontend Vue 3 (SPA)
 - Pas de logique métier dans les templates ; extraire en fonctions/computed
   nommées clairement.
 - CSS scoped par composant (`<style scoped>`), pas de styles globaux sauf
-  dans `style.css`.
+  dans `style.css` et les feuilles qu'il importe (`src/styles/`, dans l'ordre
+  de la cascade).
 
 ## Backend Spring Boot — qualité et perf
 - Respecter les couches existantes : Controller → Service → Repository →
@@ -74,6 +75,11 @@ Backend Spring Boot exposant une API REST consommée par un frontend Vue 3 (SPA)
 - Quand une modification touche le schéma ou la logique métier, mettre à
   jour en cohérence les jeux de données de test en base (fixtures/scripts
   SQL) pour qu'ils restent valides.
+- Schéma de la base géré par Flyway (`backend/src/main/resources/db/migration`) :
+  toute évolution d'entité JPA demande un nouveau script `V<n>__<description>.sql`
+  (SQL compatible PostgreSQL et H2 en mode PostgreSQL) ; ne jamais modifier un
+  script déjà appliqué. Hibernate est en `validate` et refuse de démarrer si le
+  schéma et les entités divergent.
 
 ## Definition of done
 Avant de dire qu'une tâche est terminée :

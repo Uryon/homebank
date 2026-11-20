@@ -57,32 +57,53 @@ public class ServiceDoublon {
      *   fois ici. Pour l'onglet "Doublons" de la page Transactions, qui
      *   permet de nettoyer les doublons importes par erreur.
      */
+    @Transactional(readOnly = true)
     public List<GroupeDoublonDTO> findDuplicateGroups() {
         List<Transaction> all = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
                 .filter(t -> !t.isDuplicateIgnored() && !t.isBalanceAdjustment())
                 .toList();
+        DuplicateGroups groups = groupDuplicates(all);
 
-        Map<String, List<Transaction>> certainGroups = all.stream()
-                .collect(Collectors.groupingBy(this::duplicateGroupKey, LinkedHashMap::new, Collectors.toList()));
-
-        Stream<GroupeDoublonDTO> certain = certainGroups.values().stream()
-                .filter(group -> group.size() > 1)
-                .map(group -> buildDuplicateGroup(group, true, false));
-
-        Map<String, List<Transaction>> looseGroups = all.stream()
-                .collect(Collectors.groupingBy(this::looseDuplicateGroupKey, LinkedHashMap::new, Collectors.toList()));
-
-        Stream<GroupeDoublonDTO> probable = looseGroups.values().stream()
-                .filter(group -> group.size() > 1)
-                // Meme tiers partout : deja liste parmi les "certains" (meme cle).
-                .filter(group -> !samePayeeForAll(group) && payeesMayBeSameMerchant(group))
-                .map(group -> buildDuplicateGroup(group, false, false));
-
+        Stream<GroupeDoublonDTO> certain = groups.certain().stream().map(group -> buildDuplicateGroup(group, true, false));
+        Stream<GroupeDoublonDTO> probable = groups.probable().stream().map(group -> buildDuplicateGroup(group, false, false));
         Stream<GroupeDoublonDTO> reimbursements = findReimbursementGroups(all).stream();
 
         return Stream.concat(Stream.concat(certain, probable), reimbursements)
                 .sorted(Comparator.comparing((GroupeDoublonDTO g) -> g.getTransactions().get(0).getDate()).reversed())
                 .toList();
+    }
+
+    /**
+     * Nombre de groupes de doublons "certains" et "probables" (remboursements
+     * exclus : ce ne sont pas des doublons a supprimer), pour le bandeau
+     * « A faire » du tableau de bord. Meme detection que findDuplicateGroups,
+     * sans charger categories ni virements ni construire les DTO.
+     */
+    @Transactional(readOnly = true)
+    public int countDuplicateGroups() {
+        DuplicateGroups groups = groupDuplicates(transactionRepository.findDuplicateCandidates());
+        return groups.certain().size() + groups.probable().size();
+    }
+
+    /** Groupes "certains" (tiers identiques) et "probables" (tiers differents, meme commercant possible). */
+    private record DuplicateGroups(List<List<Transaction>> certain, List<List<Transaction>> probable) {}
+
+    private DuplicateGroups groupDuplicates(List<Transaction> candidates) {
+        List<List<Transaction>> certain = candidates.stream()
+                .collect(Collectors.groupingBy(this::duplicateGroupKey, LinkedHashMap::new, Collectors.toList()))
+                .values().stream()
+                .filter(group -> group.size() > 1)
+                .toList();
+
+        List<List<Transaction>> probable = candidates.stream()
+                .collect(Collectors.groupingBy(this::looseDuplicateGroupKey, LinkedHashMap::new, Collectors.toList()))
+                .values().stream()
+                .filter(group -> group.size() > 1)
+                // Meme tiers partout : deja liste parmi les "certains" (meme cle).
+                .filter(group -> !samePayeeForAll(group) && payeesMayBeSameMerchant(group))
+                .toList();
+
+        return new DuplicateGroups(certain, probable);
     }
 
     /**

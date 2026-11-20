@@ -25,7 +25,7 @@
         </button>
       </div>
       <div v-if="selectedIds.length > 0" class="form-field toolbar-action">
-        <button class="btn secondary" @click="selectedIds = []">Annuler la sélection</button>
+        <button class="btn secondary" @click="clearSelection">Annuler la sélection</button>
       </div>
     </div>
 
@@ -38,7 +38,7 @@
             :checked="allSelectedIn(column.visibleIds)"
             :title="column.selectAllLabel"
             :aria-label="column.selectAllLabel"
-            @change="toggleSelectAllColumn(column)"
+            @change="toggleAllIn(column.visibleIds)"
           />
           <span class="column-dot" :class="column.key"></span> {{ column.title }}
         </div>
@@ -291,6 +291,7 @@ import FieldError from '../components/FieldError.vue'
 import CategoryInlineEditor from '../components/CategoryInlineEditor.vue'
 import { useFieldErrors } from '../services/fieldErrors'
 import { useLastAction } from '../services/lastAction'
+import { useIdSelection } from '../services/selection'
 import UndoBar from '../components/UndoBar.vue'
 
 /*
@@ -308,7 +309,7 @@ const editingId = ref(null)
 const editForm = ref(null)
 const firstEditField = ref(null)
 
-const selectedIds = ref([])
+const { selectedIds, selectedIdSet, allSelectedIn, toggleAllIn, keepExisting, clearSelection } = useIdSelection()
 const showMergeModal = ref(false)
 const mergeTargetId = ref(null)
 const merging = ref(false)
@@ -445,12 +446,6 @@ function visibleIds(roots) {
 const visibleExpenseIds = computed(() => visibleIds(expenseRoots.value))
 const visibleIncomeIds = computed(() => visibleIds(incomeRoots.value))
 
-const selectedIdSet = computed(() => new Set(selectedIds.value))
-
-function allSelectedIn(idList) {
-  return idList.length > 0 && idList.every(id => selectedIdSet.value.has(id))
-}
-
 /** Colonnes Dépenses et Revenus, rendues par le même gabarit (voir le template). */
 const categoryColumns = computed(() => [
   {
@@ -478,22 +473,6 @@ function annualToggleTitle(category) {
   return category.annualized
     ? 'Catégorie annuelle : lissée sur 12 mois dans les rapports (cliquer pour désactiver)'
     : 'Lisser sur 12 mois dans les rapports (ex : taxe foncière, assurance annuelle)'
-}
-
-/**
- * Sélectionne, ou désélectionne, toutes les catégories actuellement
- * affichées dans une colonne, sans toucher à une éventuelle sélection
- * existante en dehors (autre colonne, ou filtre précédent).
- */
-function toggleSelectAllIn(visibleIdList, allSelected) {
-  const idSet = new Set(visibleIdList)
-  selectedIds.value = allSelected
-    ? selectedIds.value.filter(id => !idSet.has(id))
-    : [...new Set([...selectedIds.value, ...idSet])]
-}
-
-function toggleSelectAllColumn(column) {
-  toggleSelectAllIn(column.visibleIds, allSelectedIn(column.visibleIds))
 }
 
 // Index Map (id racine -> type), pour resoudre le type herite d'une
@@ -524,8 +503,7 @@ function categoryFullLabel(category) {
  */
 async function load(...also) {
   await Promise.all([dataStore.refreshCategories(), ...also.map(refresh => refresh())])
-  const existingIds = new Set(categories.value.map(c => c.id))
-  selectedIds.value = selectedIds.value.filter(id => existingIds.has(id))
+  keepExisting(categories.value.map(c => c.id))
 }
 
 const { errors, check, clear, invalidAttrs } = useFieldErrors({ name: 'new-category-name' })
@@ -757,7 +735,7 @@ async function confirmMerge() {
     const sourceIds = selectedIds.value.filter(id => id !== mergeTargetId.value)
     await CategoriesAPI.merge(sourceIds, mergeTargetId.value)
     showMergeModal.value = false
-    selectedIds.value = []
+    clearSelection()
     // Transactions et tiers des catégories sources passent sur la cible
     // (voir ServiceCategorie#merge).
     await load(dataStore.refreshTransactions, dataStore.refreshPayees)
@@ -798,7 +776,7 @@ async function confirmReparent() {
       return CategoriesAPI.update(id, { name: category.name, type: category.type, parentId: reparentTargetId.value, icon: category.icon })
     }))
     showReparentModal.value = false
-    selectedIds.value = []
+    clearSelection()
     await load()
     offerStateRestore('Catégorie parente changée', before)
   } catch (e) {

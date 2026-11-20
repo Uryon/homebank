@@ -423,3 +423,20 @@ export function dashboardTodoItems({ pending = 0, uncategorized = 0, duplicates 
     { key: 'duplicates', count: duplicates, label: pluralize(duplicates, 'doublon possible', 'doublons possibles'), to: { path: '/transactions/doublons' } }
   ].filter(item => item.count > 0)
 }
+
+/** Clé de mois « AAAA-MM-01 » (premier jour) d'une date, format des rapports (referenceMonth, months[].key). */
+export function monthKeyOf(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`
+}
+
+/** Mois en toutes lettres avec l'année, majuscule initiale (« Septembre 2026 »). */
+export function monthTitle(date) {
+  const label = date.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+/** monthTitle d'une clé « AAAA-MM-01 » : les en-têtes « Sept. » des tableaux ne précisent pas l'année. */
+export function monthTitleFromKey(key) {
+  const [year, month] = key.split('-').map(Number)
+  return monthTitle(new Date(year, month - 1, 1))
+}

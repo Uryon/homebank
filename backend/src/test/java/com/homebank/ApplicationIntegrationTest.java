@@ -51,9 +51,7 @@ class ApplicationIntegrationTest {
     void lesEcransDeLectureRepondentTous() throws Exception {
         String[] urls = {
                 "/api/accounts", "/api/accounts/balances", "/api/categories", "/api/payees", "/api/loans",
-                "/api/transactions", "/api/transactions?accountId=1",
-                "/api/transactions?amountOperator=>&amountValue=100", "/api/transactions?amountOperator=<&amountValue=-50",
-                "/api/transactions?amountOperator==&amountValue=10", "/api/transactions?accountId=1&amountOperator=>&amountValue=100",
+                "/api/transactions",
                 "/api/transactions/duplicates", "/api/transactions/periodic-suggestions",
                 "/api/reports/balance-forecast", "/api/reports/balance-forecast?accountId=1",
                 "/api/reports/monthly-savings", "/api/reports/monthly-category-analysis",

@@ -10,6 +10,7 @@ import com.homebank.utils.TypeCompte;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -168,6 +169,7 @@ public class ServiceCompte {
      * Deux requetes au total (comptes + sommes groupees par compte) au lieu
      * d'une somme par compte.
      */
+    @Transactional(readOnly = true)
     public Map<Long, BigDecimal> allBalances() {
         Map<Long, BigDecimal> movementsByAccountId = transactionRepository
                 .sumAmountGroupedByAccountIdAsOf(LocalDate.now(ZoneId.systemDefault()))

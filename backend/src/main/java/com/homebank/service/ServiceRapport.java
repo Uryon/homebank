@@ -20,6 +20,7 @@ import com.homebank.repository.DepotCompte;
 import com.homebank.repository.DepotTransaction;
 import com.homebank.utils.Periode;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -32,7 +33,12 @@ import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.function.Function;
 
+/**
+ * Rapports du tableau de bord : lecture seule (Hibernate ne garde alors aucun
+ * instantane des milliers d'entites chargees pour detecter des modifications).
+ */
 @Service
+@Transactional(readOnly = true)
 public class ServiceRapport {
 
     private static final String INCOME = "income";

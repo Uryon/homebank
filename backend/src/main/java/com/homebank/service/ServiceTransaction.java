@@ -66,96 +66,13 @@ public class ServiceTransaction {
         this.transactionMapper = transactionMapper;
     }
 
-    /**
-     * Point d'entree unique de GET /api/transactions : choisit le filtre a
-     * appliquer selon les parametres fournis, et refuse (400) une combinaison
-     * incoherente plutot que de l'ignorer en silence et renvoyer toutes les
-     * transactions (ex : "from" sans "to", ou un operateur sans montant).
-     */
-    public List<TransactionDTO> search(Long accountId, LocalDate from, LocalDate to,
-                                       String amountOperator, BigDecimal amountValue) {
-        boolean hasAmountFilter = validateAmountFilter(amountOperator, amountValue);
-        boolean hasPeriod = validatePeriod(from, to);
-        if (hasAmountFilter && hasPeriod) {
-            throw new IllegalArgumentException("La recherche par montant ne peut pas être combinée à une période.");
-        }
-        if (hasAmountFilter) {
-            return findByAmountFilter(accountId, amountOperator, amountValue);
-        }
-        if (hasPeriod) {
-            return accountId != null ? findByAccountAndPeriod(accountId, from, to) : findByPeriod(from, to);
-        }
-        return accountId != null ? findByAccount(accountId) : findAll();
-    }
-
-    private static boolean validateAmountFilter(String amountOperator, BigDecimal amountValue) {
-        if ((amountOperator == null) != (amountValue == null)) {
-            throw new IllegalArgumentException("La recherche par montant attend à la fois un opérateur et un montant.");
-        }
-        return amountOperator != null;
-    }
-
-    private static boolean validatePeriod(LocalDate from, LocalDate to) {
-        if ((from == null) != (to == null)) {
-            throw new IllegalArgumentException("Une période attend à la fois une date de début et une date de fin.");
-        }
-        Periode.verifierOrdre(from, to);
-        return from != null;
-    }
-
+    /** Toutes les transactions, des plus recentes aux plus anciennes (GET /api/transactions, filtrees cote frontend). */
+    @Transactional(readOnly = true)
     public List<TransactionDTO> findAll() {
         return transactionRepository.findAllByOrderByDateDescIdDesc()
                 .stream()
                 .map(transactionMapper::toDTO)
                 .toList();
-    }
-
-    public List<TransactionDTO> findByAccount(Long accountId) {
-        return transactionRepository
-                .findByAccount_IdOrderByDateDescIdDesc(accountId)
-                .stream()
-                .map(transactionMapper::toDTO)
-                .toList();
-    }
-
-    public List<TransactionDTO> findByPeriod(LocalDate from, LocalDate to) {
-        return transactionRepository
-                .findByDateBetween(from, to)
-                .stream()
-                .map(transactionMapper::toDTO)
-                .toList();
-    }
-
-    public List<TransactionDTO> findByAccountAndPeriod(Long accountId, LocalDate from, LocalDate to) {
-        return transactionRepository
-                .findByAccountIdAndDateBetween(accountId, from, to)
-                .stream()
-                .map(transactionMapper::toDTO)
-                .toList();
-    }
-
-    /**
-     * Recherche de transactions par montant, avec un operateur de comparaison
-     * (">", "<" ou "=") et optionnellement un compte pour restreindre la
-     * recherche — utilisee par le champ de recherche de l'onglet Transactions
-     * (ex : "> 100", "< 50", "= 42.50"). Filtree directement en base plutot
-     * que de charger toutes les transactions cote frontend pour les filtrer
-     * ensuite en Javascript.
-     */
-    public List<TransactionDTO> findByAmountFilter(Long accountId, String operator, BigDecimal amount) {
-        List<Transaction> results = switch (operator) {
-            case ">" -> accountId != null
-                    ? transactionRepository.findByAccount_IdAndAmountGreaterThanOrderByDateDescIdDesc(accountId, amount)
-                    : transactionRepository.findByAmountGreaterThanOrderByDateDescIdDesc(amount);
-            case "<" -> accountId != null
-                    ? transactionRepository.findByAccount_IdAndAmountLessThanOrderByDateDescIdDesc(accountId, amount)
-                    : transactionRepository.findByAmountLessThanOrderByDateDescIdDesc(amount);
-            case "=" -> accountId != null
-                    ? transactionRepository.findByAccount_IdAndAmountOrderByDateDescIdDesc(accountId, amount)
-                    : transactionRepository.findByAmountOrderByDateDescIdDesc(amount);
-            default -> throw new IllegalArgumentException("Opérateur de montant invalide : " + operator);
-        };
-        return results.stream().map(transactionMapper::toDTO).toList();
     }
 
     private Transaction findEntityById(Long id) {
@@ -754,6 +671,7 @@ public class ServiceTransaction {
     }
 
     /** Bascule le statut "depense periodique" d'une transaction. */
+    @Transactional
     public TransactionDTO togglePeriodicExpense(Long id) {
         Transaction t = findEntityById(id);
         t.setPeriodicExpense(!t.isPeriodicExpense());
@@ -762,6 +680,7 @@ public class ServiceTransaction {
     }
 
     /** Bascule le statut "exceptionnelle" (exclue des tableaux de bord) d'une transaction. */
+    @Transactional
     public TransactionDTO toggleExceptional(Long id) {
         Transaction t = findEntityById(id);
         t.setExceptional(!t.isExceptional());

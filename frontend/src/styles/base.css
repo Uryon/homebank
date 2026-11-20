@@ -1,0 +1,680 @@
+/* Fondations : page, barre latérale, contenu, tableaux, boutons, pastilles,
+   formulaires, modales, impression. */
+
+html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--ink-950);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-optical-sizing: auto;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+#app { min-height: 100vh; }
+
+/* Contenu pour lecteurs d'écran uniquement (voir tableaux dont le titre
+   visuel est porté par la carte englobante). */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+a { color: inherit; text-decoration: none; }
+
+button { font-family: var(--font-ui); cursor: pointer; }
+input, select, textarea { font-family: var(--font-ui); }
+
+:focus-visible {
+    outline: 2px solid var(--azure);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+input[type="checkbox"] {
+    accent-color: var(--brand);
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+/* Montants : chiffres tabulaires pour que les virgules s'alignent en colonne */
+.amount, td.num, th.num, .stat-value, .money {
+    font-variant-numeric: tabular-nums;
+}
+.amount {
+    font-weight: 600;
+    letter-spacing: -0.005em;
+}
+.amount.positive { color: var(--mint); }
+.amount.negative { color: var(--coral); }
+
+.app-shell {
+    display: grid;
+    /* minmax(0, 1fr) : sans le 0, la colonne s'élargit jusqu'à la largeur
+       minimale de son contenu (graphiques, tableaux larges) et la page
+       déborde à droite au lieu de laisser ces blocs défiler dans leur cadre. */
+    grid-template-columns: 252px minmax(0, 1fr);
+    min-height: 100vh;
+}
+
+/* ---------------- Sidebar ---------------- */
+.sidebar {
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
+    padding: 22px 14px 18px;
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 2px 10px 0;
+    margin-bottom: 26px;
+}
+.brand-name {
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    color: var(--sidebar-text-active);
+}
+.brand-name strong { font-weight: 700; }
+
+.nav-group + .nav-group { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--sidebar-border); }
+
+.nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    color: var(--sidebar-text);
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 2px;
+    transition: background 0.12s, color 0.12s;
+}
+.nav-item:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-active); }
+.nav-item.active { background: var(--sidebar-active-bg); color: var(--sidebar-text-active); font-weight: 600; }
+.nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: -14px;
+    top: 9px;
+    bottom: 9px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--sidebar-accent);
+}
+.nav-item.active .icon { color: var(--sidebar-accent); }
+
+/* Patrimoine + liste des comptes */
+.sidebar-accounts {
+    margin-top: auto;
+    padding-top: 18px;
+}
+.sidebar-networth {
+    padding: 14px 14px 13px;
+    margin-bottom: 8px;
+    border-radius: var(--radius-md);
+    background: var(--sidebar-raised-bg);
+    border: 1px solid var(--sidebar-border);
+}
+.sidebar-networth-label {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--sidebar-text);
+    margin-bottom: 3px;
+}
+.sidebar-networth-value {
+    font-size: 25px;
+    line-height: 1.15;
+    font-weight: 650;
+    letter-spacing: -0.025em;
+    color: var(--sidebar-text-active);
+    font-variant-numeric: tabular-nums;
+}
+.sidebar-account {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 7px 12px;
+    border: none;
+    background: transparent;
+    border-radius: var(--radius-sm);
+    color: var(--sidebar-text);
+    font-family: var(--font-ui);
+    text-align: left;
+    transition: background 0.12s, color 0.12s;
+}
+.sidebar-account:hover { background: var(--sidebar-hover-bg); color: var(--sidebar-text-active); }
+.sidebar-account-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--sidebar-text);
+}
+/* Mêmes teintes que la répartition de la page Comptes, dans leur version
+   pour fond sombre (la barre latérale l'est dans les deux thèmes). */
+.sidebar-account-dot.checking { background: var(--sidebar-accent); }
+.sidebar-account-dot.savings { background: var(--sidebar-positive); }
+.sidebar-account-dot.cash { background: #FFC857; }
+.sidebar-account-dot.credit_card { background: var(--sidebar-negative); }
+.sidebar-account-dot.investment { background: #B9A6FF; }
+.sidebar-account-name {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+/* Double classe : doit l'emporter sur .amount.positive / .negative (couleurs
+   prévues pour fond clair, illisibles sur la sidebar sombre). */
+.sidebar-account-balance.amount {
+    font-size: 12.5px;
+    flex-shrink: 0;
+    font-weight: 500;
+    color: var(--sidebar-positive);
+}
+.sidebar-account-balance.amount.negative { color: var(--sidebar-negative); }
+
+/* ---------------- Contenu ---------------- */
+.main-content {
+    position: relative;
+    padding: 34px 44px 72px;
+    max-width: 1600px;
+}
+
+/* Page Transactions : tableau très large, profite de tout l'écran
+   (classe posée par App.vue sur la route "transactions"). */
+.main-content.main-content-wide { max-width: none; padding-left: 28px; padding-right: 28px; }
+/* Sur grand écran, le tableau a largement sa place (1 130 px requis) : même
+   marge que les autres pages, pour que le titre ne saute plus de 16 px en
+   passant d'une page à l'autre. */
+@media (min-width: 1600px) {
+    .main-content.main-content-wide { padding-left: 44px; padding-right: 44px; }
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+    margin-bottom: 26px;
+    padding-bottom: 0;
+}
+.page-header h1 {
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 1.15;
+    font-weight: 650;
+    margin: 0 0 6px;
+    letter-spacing: -0.025em;
+    color: var(--text-primary);
+}
+.page-header .subtitle {
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.card {
+    background: var(--ink-900);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: 20px 22px;
+    box-shadow: var(--shadow-sm);
+}
+
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+}
+
+/* Étiquettes de statistique : casse normale (les majuscules espacées
+   fatiguent la lecture et ne portent aucune information). */
+.stat-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+.stat-value {
+    font-size: 28px;
+    line-height: 1.15;
+    font-weight: 650;
+    letter-spacing: -0.025em;
+    color: var(--text-primary);
+}
+
+/* ---------------- Tableaux ---------------- */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    background: var(--ink-900);
+}
+thead th {
+    text-align: left;
+    font-size: 12.5px;
+    color: var(--table-head-text);
+    font-weight: 600;
+    padding: 11px 12px;
+    border-bottom: 1px solid var(--table-head-border);
+    background: var(--table-head-bg);
+}
+tbody td {
+    padding: 12px;
+    border-bottom: 1px solid var(--line);
+    color: var(--text-primary);
+}
+tbody tr { transition: background 0.1s; }
+tbody tr:hover { background: var(--row-hover); }
+tbody tr:last-child td { border-bottom: none; }
+td.num, th.num { text-align: right; }
+
+/* Table « nue » (hors .table-scroll) : bordure + arrondi cohérents.
+   Exclusions : leur "overflow: hidden" casserait le position: sticky de leur
+   thead (le conteneur qui scrolle est un autre élément). */
+table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    /* clip (et non hidden) : arrondit les coins sans créer de conteneur de
+       défilement, sinon le position: sticky des en-têtes cesse de fonctionner. */
+    overflow: clip;
+    box-shadow: var(--shadow-sm);
+}
+
+/* ---------------- Boutons ---------------- */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    background: var(--brand);
+    color: var(--brand-text);
+    border: 1px solid var(--brand);
+    padding: 8px 14px;
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    font-size: 14px;
+    line-height: 1.4;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), var(--shadow-xs);
+    transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.05s;
+}
+.btn:hover { background: var(--brand-hover); border-color: var(--brand-hover); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+.btn.secondary {
+    background: var(--ink-900);
+    color: var(--text-primary);
+    border: 1px solid var(--line-strong);
+    box-shadow: var(--shadow-xs);
+}
+.btn.secondary:hover { background: var(--ink-800); border-color: var(--ink-600); }
+.btn.danger {
+    background: var(--ink-900);
+    color: var(--coral);
+    border: 1px solid var(--line-strong);
+    box-shadow: var(--shadow-xs);
+}
+.btn.danger:hover { background: var(--coral-dim); border-color: color-mix(in srgb, var(--coral) 35%, transparent); }
+
+/* ---------------- Boutons-icônes d'action de ligne ---------------- */
+.icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    transition: background 0.12s, color 0.12s, opacity 0.12s;
+}
+.icon-btn .icon { width: 16px; height: 16px; }
+.icon-btn:hover { background: var(--ink-700); color: var(--text-primary); }
+.icon-btn.danger:hover { background: var(--coral-dim); color: var(--coral); }
+.icon-btn.on { background: var(--amber-dim); color: var(--amber); }
+/* Action impossible sur cette ligne (raison en info-bulle) : atténuée, sans effet de survol.
+   Bouton laissé focusable et cliquable (aria-disabled, pas disabled) : le clic explique le refus. */
+.icon-btn[aria-disabled="true"],
+.icon-btn[aria-disabled="true"]:hover {
+    background: transparent;
+    color: color-mix(in srgb, var(--text-muted) 45%, transparent);
+    cursor: not-allowed;
+}
+.hover-actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+/* Sur un appareil avec survol : les actions n'apparaissent que sur la ligne visée
+   (ou au focus clavier). Un bouton à l'état actif (.on) reste visible en permanence.
+   Sans survol (tactile) : toujours visibles. */
+@media (hover: hover) {
+    .hover-actions .icon-btn:not(.on) { opacity: 0; }
+    tr:hover .hover-actions .icon-btn,
+    tr:focus-within .hover-actions .icon-btn,
+    .cat-row:hover .hover-actions .icon-btn,
+    .cat-row:focus-within .hover-actions .icon-btn,
+    .loan-card:hover .hover-actions .icon-btn,
+    .loan-card:focus-within .hover-actions .icon-btn { opacity: 1; }
+}
+
+/* ---------------- Filtres « chip » (bascule on/off) ---------------- */
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--line-strong);
+    background: var(--ink-900);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.chip:hover { background: var(--ink-800); }
+.chip.active { background: var(--brand); border-color: var(--brand); color: var(--brand-text); }
+.chip-count {
+    min-width: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--ink-700);
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+.chip.active .chip-count { background: color-mix(in srgb, var(--brand-text) 20%, transparent); color: var(--brand-text); }
+
+/* ---------------- Pastilles ---------------- */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px 3px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.badge::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.badge.checking { background: var(--azure-dim); color: var(--azure); }
+.badge.savings { background: var(--mint-dim); color: var(--mint); }
+.badge.cash { background: var(--amber-dim); color: var(--amber); }
+.badge.credit_card { background: var(--coral-dim); color: var(--coral); }
+.badge.investment { background: var(--violet-dim); color: var(--violet); }
+
+/* ---------------- Formulaires ---------------- */
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+}
+/* Champ qui occupe toute la largeur de la grille du formulaire. */
+.form-grid > .span-2 { grid-column: 1 / -1; }
+/* Case à cocher suivie de son libellé, sur une seule ligne. */
+.form-field.checkbox-field { flex-direction: row; align-items: center; gap: 8px; }
+.form-field.checkbox-field input { width: auto; }
+.form-field.checkbox-field label { margin: 0; }
+/* Groupe de boutons à droite d'un en-tête de page. */
+.header-actions { display: flex; gap: 10px; }
+/* Bouton de barre d'outils aligné sur le bas des champs voisins (sous leur libellé). */
+.toolbar-action { align-self: flex-end; }
+/* Texte d'explication sous le titre d'une fenêtre. */
+.modal-intro { color: var(--text-muted); font-size: 14px; margin-bottom: 16px; }
+.form-field { display: flex; flex-direction: column; gap: 6px; }
+.form-field label, .form-field .form-field-label {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+.form-field input, .form-field select, .form-field textarea,
+table input:not([type="checkbox"]), table select,
+.inline-edit-fields input:not([type="checkbox"]), .inline-edit-fields select {
+    background: var(--ink-900);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    padding: 8px 11px;
+    color: var(--text-primary);
+    font-size: 14px;
+    box-shadow: var(--shadow-xs);
+    transition: border-color 0.12s, box-shadow 0.12s;
+}
+/* Édition en ligne (tableaux, lignes de liste .inline-edit-fields) : version compacte. */
+table input:not([type="checkbox"]), table select,
+.inline-edit-fields input:not([type="checkbox"]), .inline-edit-fields select { padding: 6px 9px; }
+.form-field input:focus, .form-field select:focus, .form-field textarea:focus,
+table input:not([type="checkbox"]):focus, table select:focus,
+.inline-edit-fields input:not([type="checkbox"]):focus, .inline-edit-fields select:focus {
+    outline: none;
+    border-color: var(--azure);
+    box-shadow: 0 0 0 3px var(--azure-dim);
+}
+
+/* ---------------- Modales ---------------- */
+.modal-overlay {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 50;
+}
+.modal {
+    background: var(--ink-900);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 26px;
+    width: 520px;
+    max-width: 92vw;
+    max-height: 88vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    animation: modal-in 0.16s ease-out;
+}
+.modal h2 { margin-top: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.015em; color: var(--text-primary); }
+/* Boutons en bas d'une fenêtre (Annuler / Enregistrer), alignés à droite. */
+.modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 20px; }
+/* Variante avec une action à part à gauche (ex : Supprimer). */
+.modal-actions .modal-actions-start { margin-right: auto; }
+@keyframes modal-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.985); }
+    to { opacity: 1; transform: none; }
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 176px;
+    text-align: center;
+    /* Texte limité à ~560px et centré même quand il est posé directement
+       dans le bloc (nœud texte, que « > * » ne peut pas cibler). */
+    padding: 34px max(24px, calc((100% - 560px) / 2));
+    text-wrap: balance;
+    color: var(--text-muted);
+    background: linear-gradient(180deg, var(--ink-900) 0%, var(--surface-sunken) 100%);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius-lg);
+    font-size: 13.5px;
+    line-height: 1.65;
+}
+.empty-state::before {
+    content: '';
+    display: block;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    border-radius: 13px;
+    background-color: var(--azure-dim);
+    background-image: var(--empty-state-icon);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 21px 21px;
+}
+.empty-state > * { max-width: 520px; }
+/* Texte avec liens : un paragraphe, sinon chaque lien devient un élément flex sur sa propre ligne. */
+.empty-state-text { margin: 0; }
+/* Champ refusé à l'enregistrement : bordure corail et message juste dessous. */
+/* Préfixe .form-field : doit l'emporter sur le focus bleu des champs (.form-field input:focus / :focus-visible plus bas). */
+input[aria-invalid="true"], select[aria-invalid="true"],
+.form-field :is(input, select)[aria-invalid="true"]:is(:focus, :focus-visible) {
+    border-color: var(--coral);
+    outline: 3px solid color-mix(in srgb, var(--coral) 28%, transparent);
+    outline-offset: 2px;
+}
+.field-error { margin: 4px 0 0; font-size: 12.5px; color: var(--coral); }
+.empty-state-text a { color: var(--azure); text-decoration: underline; text-underline-offset: 2px; }
+.empty-state-text a:hover { text-decoration-thickness: 2px; }
+.empty-state.compact-empty-state {
+    min-height: 112px;
+    padding: 20px 16px;
+    gap: 8px;
+}
+.empty-state.compact-empty-state::before {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+    border-radius: 10px;
+    background-size: 18px 18px;
+}
+
+.toolbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+}
+/* Champ de recherche principal d'une barre d'outils (Catégories, Tiers) :
+   assez large pour une requête à plusieurs critères (« a;b;"c" »). */
+.toolbar-search {
+    width: 420px;
+    max-width: 100%;
+}
+
+code {
+    background: var(--ink-800);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    font-size: 12.5px;
+    color: var(--text-muted);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--ink-600); border-radius: 6px; border: 2px solid var(--ink-950); }
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* --- Export PDF du tableau de bord (voir export/export-dashboard.mjs) :
+   Playwright imprime en media "print". On masque la sidebar (inutile sur un
+   PDF, elle prenait toute la hauteur de page sans apporter d'info) pour
+   redonner toute la largeur au contenu, et on evite de couper une carte
+   (donc un graphique Chart.js) au milieu d'un saut de page — sauf les
+   tableaux d'analyse mensuelle, trop hauts pour tenir sur une page : forcer
+   un avoid dessus laisserait un grand vide en bas de page precedente.
+   Placees en fin de fichier pour gagner la cascade : une regle @media print
+   serait ecrasee par une regle non conditionnelle de meme specificite qui la
+   suit dans le fichier, puisque les deux s'appliquent pendant l'impression. */
+/* En-têtes de colonnes triables (Tiers, Transactions, voir services/tableSort.js) :
+   bouton qui garde l'apparence de l'en-tête. */
+.sort-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sort-header .icon { color: var(--text-faint); }
+.sort-header:hover, .sort-header:hover .icon { color: var(--text-primary); }
+th[aria-sort="ascending"] .sort-header .icon,
+th[aria-sort="descending"] .sort-header .icon { color: var(--azure); }
+th[aria-sort="ascending"] .sort-header,
+th[aria-sort="descending"] .sort-header { color: var(--text-primary); }
+
+/* Contenu réservé à l'écran (consignes « cliquez sur… », liens d'aide) ou à
+   l'export PDF (légende remplaçant un contrôle interactif). */
+.print-only { display: none; }
+
+@media print {
+    .screen-only { display: none; }
+    .print-only { display: inline; }
+    .sidebar { display: none; }
+    .app-shell { display: block; min-height: auto; }
+    .main-content { max-width: none; padding-left: 0; padding-right: 0; }
+    .card { break-inside: avoid; page-break-inside: avoid; padding: 16px; }
+    /* Deplies en entier a l'impression (voir Dashboard.vue) et potentiellement
+       hauts (12 mois d'historique par categorie et sous-categorie) — forcer
+       un avoid dessus laisserait un grand vide en bas de page precedente.
+       Exclu : .monthly-summary-card ("Resume mensuel"), seulement 3 lignes,
+       qui elle doit rester entiere (avoid) : sans ca, ses lignes Revenus/
+       Depenses/Solde peuvent se retrouver coupees entre deux pages, avec la
+       derniere ligne isolee toute seule en haut de la page suivante. */
+    .monthly-analysis-card:not(.monthly-summary-card) { break-inside: auto; page-break-inside: auto; }
+
+    /* Chaque groupe categorie+sous-categories (voir Dashboard.vue : un
+       <tbody> par groupe) doit rester entier — sinon le saut de page peut
+       tomber au milieu d'un groupe, laissant ses dernieres sous-categories
+       (ou pire, juste la ligne de total qui suit) isolees seules en haut
+       d'une page presque vide. En le rendant indivisible, le moteur est
+       force de reculer jusqu'a la frontiere entre deux groupes pour placer
+       le saut de page. La ligne de total (elle aussi dans son propre
+       <tbody>) reste en plus attachee au groupe qui la precede si possible. */
+    .monthly-analysis-table tbody {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+    .monthly-analysis-table .total-row {
+        break-before: avoid;
+        page-break-before: avoid;
+    }
+
+    /* Export en 2 passes fusionnees (voir export/export-dashboard.mjs) :
+       le tableau de bord entier ne tient pas dans une seule orientation —
+       les tableaux d'analyse mensuelle (12 mois + moyenne/total) ont besoin
+       du paysage, mais le reste se lit mieux en portrait sur un telephone
+       (l'export est consulte a distance, voir ServiceExport). Le script
+       capture donc la meme page deux fois avec l'une ou l'autre de ces
+       classes sur <html>, puis fusionne les deux PDF resultants. */
+    .pdf-cacher-tableaux-larges .monthly-analysis-card { display: none; }
+    .pdf-ne-montrer-que-tableaux-larges .dashboard-page > *:not(.monthly-analysis-card):not(.page-header) {
+        display: none;
+    }
+}

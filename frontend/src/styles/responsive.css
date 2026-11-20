@@ -1,0 +1,237 @@
+/* Ergonomie responsive et micro-interactions. */
+
+/* ---------------- Itération 6 : ergonomie responsive et micro-interactions ---------------- */
+/* Retours d'interaction cohérents, sans animer les éléments purement statiques. */
+.nav-item,
+.sidebar-account,
+.btn,
+.chip,
+.month-nav-btn,
+button.icon-button {
+    -webkit-tap-highlight-color: transparent;
+}
+
+.btn:not(:disabled),
+.chip,
+.month-nav-btn {
+    transition:
+        color var(--motion-fast) ease,
+        background-color var(--motion-fast) ease,
+        border-color var(--motion-fast) ease,
+        box-shadow var(--motion-fast) ease,
+        transform var(--motion-fast) ease;
+}
+
+.btn:not(:disabled):active,
+.month-nav-btn:active {
+    transform: translateY(1px);
+}
+
+.table-scroll {
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--ink-600) transparent;
+}
+
+/* Sentinelle du chargement progressif (services/progressiveList.js), partagée
+   par Transactions et Tiers : juste un peu de hauteur pour que
+   l'IntersectionObserver ait quelque chose à observer ; le texte n'est qu'un
+   repli si elle reste visible plus que le temps d'un rendu. */
+.load-more-sentinel {
+    padding: 14px 0;
+    text-align: center;
+    color: var(--text-faint);
+    font-size: 12px;
+}
+
+.table-scroll:focus-visible {
+    outline: 2px solid var(--azure);
+    outline-offset: 3px;
+}
+
+/* Les tableaux conservent leur largeur utile et défilent dans leur panneau,
+   au lieu d'écraser les colonnes sur les écrans intermédiaires. */
+@media (max-width: 900px) {
+    .main-content,
+    .main-content.main-content-wide {
+        padding-left: 22px;
+        padding-right: 22px;
+    }
+
+    .page-header {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .page-header h1 {
+        font-size: 25px;
+    }
+
+    .card {
+        padding: 18px;
+    }
+}
+
+@media (max-width: 760px) {
+    /* Navigation horizontale compacte : les rubriques ne se dispersent plus
+       sur plusieurs lignes et restent accessibles au doigt. */
+    .sidebar {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        padding: 10px 14px 9px;
+        border-right: 0;
+        border-bottom: 1px solid var(--sidebar-border);
+        box-shadow: 0 5px 18px rgba(14, 20, 36, 0.12);
+    }
+
+    .brand {
+        padding: 0 3px;
+        margin: 0 0 8px;
+        min-height: 34px;
+    }
+
+    .brand-name {
+        font-size: 16px;
+    }
+
+    .sidebar nav {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 5px;
+        margin: 0 -2px;
+        padding: 0 2px 3px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .sidebar nav::-webkit-scrollbar {
+        display: none;
+    }
+
+    .nav-group,
+    .nav-group + .nav-group {
+        display: contents;
+    }
+
+    .nav-item {
+        flex: 0 0 auto;
+        min-height: 36px;
+        padding: 7px 11px;
+        margin: 0;
+        border: 1px solid transparent;
+        border-radius: 9px;
+        white-space: nowrap;
+        font-size: 12.5px;
+    }
+
+    .nav-item.active {
+        background: var(--sidebar-active-bg);
+        border-color: transparent;
+    }
+
+    .nav-item.active::before {
+        display: none;
+    }
+
+    .main-content,
+    .main-content.main-content-wide {
+        padding: 22px 14px 40px;
+    }
+
+    .page-header {
+        gap: 12px;
+        margin-bottom: 20px;
+    }
+
+    .page-header h1 {
+        font-size: 23px;
+    }
+
+    .page-header .subtitle {
+        font-size: 13px;
+    }
+
+    .toolbar {
+        gap: 8px;
+    }
+
+    .toolbar > * {
+        max-width: 100%;
+    }
+
+    .card {
+        padding: 15px;
+        border-radius: 12px;
+    }
+
+    .card-grid {
+        gap: 10px;
+        margin-bottom: 18px;
+    }
+
+    .stat-value {
+        font-size: clamp(20px, 5vw, 26px);
+        overflow-wrap: anywhere;
+    }
+
+    /* Mobile : les tableaux larges (Transactions, Tiers) défilent dans leur
+       cadre au lieu de faire défiler toute la page en largeur. Contrepartie
+       assumée : l'en-tête n'y reste plus collé en haut (voir le commentaire
+       de .table-scroll dans Transactions.vue). Le chargement progressif,
+       basé sur le défilement vertical de la page, n'est pas affecté. */
+    .table-scroll {
+        /* relative : les libellés .sr-only (position absolue) des cellules
+           se positionnent dans ce cadre et y sont découpés, au lieu
+           d'élargir toute la page. */
+        position: relative;
+        border-radius: 11px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .table-scroll table {
+        min-width: 640px;
+    }
+
+    .main-content .empty-state {
+        padding: 38px 16px;
+    }
+}
+
+@media (max-width: 420px) {
+    .main-content,
+    .main-content.main-content-wide {
+        padding-left: 11px;
+        padding-right: 11px;
+    }
+
+    .dashboard-page > .card-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dashboard-page > .card-grid > .card {
+        padding: 14px;
+    }
+
+    .page-header h1 {
+        font-size: 21px;
+    }
+
+    .btn {
+        min-height: 38px;
+        padding: 7px 11px;
+        font-size: 13px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .btn:not(:disabled),
+    .chip,
+    .month-nav-btn {
+        transition: none;
+    }
+}

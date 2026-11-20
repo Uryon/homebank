@@ -128,10 +128,11 @@ describe('highlightSegments', () => {
     expect(marked(highlightSegments(label, 'ete'))).toEqual(['été'])
   })
 
-  it('propose les créations et l’export, ouverts sur leur page via ?action=', () => {
+  it('propose les créations et la sauvegarde, ouvertes sur leur page via ?action=', () => {
     const virement = filterIndex(staticIndex, 'virement', 5)[0]
     expect(virement.to).toEqual({ path: '/accounts', query: { action: 'transfer' } })
-    expect(filterIndex(staticIndex, 'exporter pdf', 5)[0].to).toEqual({ path: '/', query: { action: 'export-pdf' } })
+    const backup = filterIndex(staticIndex, 'sauvegarde', 5).find(c => c.id === 'action-backup')
+    expect(backup.to).toEqual({ path: '/import', query: { action: 'backup' } })
   })
 
   it('indique le raccourci Alt+n des pages du menu, dans l’ordre du menu', () => {

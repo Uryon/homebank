@@ -27,8 +27,17 @@ avec un backend **Java / Spring Boot** et un frontend **Vue.js 3**.
   nettoyage avec aperçu des faux tiers copiés d'un libellé de virement ou d'ajustement
 - **Prêts** : échéancier d'amortissement, capital restant dû, intérêts totaux
 - **Tableau de bord** : évolution et prévision du solde, épargne mensuelle, répartition des dépenses,
+  cartes repliables (état mémorisé), couleur fixe par catégorie (la même dans les puces, la
+  répartition et les tableaux),
   analyse mensuelle par catégorie avec comparaison aux mêmes 12 mois de l'année précédente (colonnes
-  « 12 mois préc. » et « Évol. », ligne « vs … » des cartes du haut), export PDF
+  « 12 mois préc. » et « Évol. », ligne « vs … » des cartes du haut), export PDF automatique (à chaque rapprochement validé et à la fermeture de l'appli)
+- **Sauvegarde complète** (page Importer, ou `Ctrl+K` « Télécharger une sauvegarde ») : un fichier JSON
+  de toutes les données, restaurable tel quel (les données remplacées sont d'abord sauvegardées, et
+  « Annuler » les remet en place). Une sauvegarde est aussi écrite automatiquement au premier démarrage
+  de chaque jour dans `export/sortie/sauvegardes/` (30 conservées), voir `sauvegarde.*` dans
+  `application.properties` ; ce dossier contient toutes les données bancaires
+- **Transactions d'un compte** : en-tête avec le solde, les opérations à traiter et la date jusqu'à
+  laquelle tout est validé
 - **Export CSV** des transactions affichées (filtres et recherche compris), au format d'import
 - **Import CSV/QIF** avec détection des doublons et bouton « Annuler cet import » (les transactions
   créées sont supprimées, le relevé peut être réimporté) :
@@ -70,8 +79,12 @@ CREATE USER homebank WITH PASSWORD 'homebank';
 GRANT ALL PRIVILEGES ON DATABASE homebank TO homebank;
 ```
 
-Le schéma des tables est créé automatiquement au démarrage du backend
-(`spring.jpa.hibernate.ddl-auto=update` dans `application.properties`).
+Le schéma des tables est créé au démarrage du backend par **Flyway**, à partir des scripts
+versionnés de `backend/src/main/resources/db/migration`. Une base existante, créée par une
+version précédente (Hibernate `ddl-auto=update`), est simplement enregistrée en version 1
+sans qu'aucune donnée ne soit modifiée. Hibernate vérifie ensuite que le schéma correspond
+aux entités (`ddl-auto=validate`) ; en cas de blocage au démarrage, `JPA_DDL_AUTO=update`
+rétablit temporairement l'ancien comportement.
 
 Vous pouvez surcharger la connexion via variables d'environnement :
 
@@ -205,6 +218,9 @@ Le raccourci ouvre HomeBank dans une fenêtre Edge dédiée et gère les serveur
 - **Serveur lancé en premier** : il démarre avant même la vérification des ports (requête WMI de 0,3 à
   0,7 s). Si un autre serveur occupait déjà le port (IntelliJ), celui du raccourci est annulé et
   l'autre réutilisé.
+- **Google Drive** : `export/sortie` (PDF et sauvegardes) n'est envoyé sur Google Drive que si Google Drive pour
+  ordinateur tourne ; le raccourci le démarre s'il est fermé, une fois la fenêtre affichée puis après l'export de
+  fermeture (il continue ensuite de tourner pour terminer l'envoi).
 - **À la fermeture** : export PDF du tableau de bord, puis arrêt des seuls serveurs démarrés par le raccourci.
 
 En cas de souci, consulter `logs/lanceur.log` (journal horodaté de chaque lancement), puis

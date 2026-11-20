@@ -1,0 +1,114 @@
+/* États vides, notifications, confirmations et transitions de page. */
+
+/* Itération 7 — finition des états vides et des icônes d'action */
+.btn > .icon { margin-right: 2px; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.btn:disabled .icon { opacity: .55; }
+
+/* --- Feedback global : notifications, confirmations et transitions --- */
+.toast-region {
+  position: fixed;
+  z-index: 3000;
+  top: 18px;
+  right: 20px;
+  width: min(410px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.toast-stack { display: grid; gap: 10px; }
+.app-toast {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--text-faint);
+  border-radius: 12px;
+  background: var(--toast-bg);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-md);
+  pointer-events: auto;
+}
+.app-toast.is-success { border-left-color: var(--mint); }
+.app-toast.is-error { border-left-color: var(--coral); }
+.app-toast.is-warning { border-left-color: var(--amber); }
+.app-toast.is-info { border-left-color: var(--azure); }
+.toast-mark {
+  display: grid;
+  flex: 0 0 25px;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--ink-800);
+  color: var(--text-muted);
+  font-weight: 800;
+}
+.is-success .toast-mark { background: var(--mint-dim); color: var(--mint); }
+.is-error .toast-mark { background: var(--coral-dim); color: var(--coral); }
+.is-warning .toast-mark { background: var(--amber-dim); color: var(--amber); }
+.is-info .toast-mark { background: var(--azure-dim); color: var(--azure); }
+.toast-message { flex: 1; font-size: 13px; line-height: 1.45; }
+.toast-close { border: 0; background: transparent; color: var(--text-muted); font-size: 21px; cursor: pointer; padding: 0 3px; }
+.toast-enter-active, .toast-leave-active { transition: opacity .18s ease, transform .18s ease; }
+.toast-enter-from, .toast-leave-to { opacity: 0; transform: translateX(14px); }
+.toast-leave-active { position: absolute; right: 0; left: 0; }
+.feedback-overlay {
+  position: fixed;
+  z-index: 2990;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: var(--scrim);
+  backdrop-filter: blur(5px) saturate(115%);
+}
+.feedback-dialog {
+  width: min(440px, 100%);
+  padding: 25px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--ink-900);
+  box-shadow: 0 24px 70px rgba(8, 15, 30, .24);
+  animation: feedback-dialog-in .18s ease-out;
+}
+.feedback-dialog-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  margin-bottom: 15px;
+  border-radius: 13px;
+  background: var(--ink-800);
+  color: var(--text-muted);
+  font-size: 21px;
+  font-weight: 800;
+}
+.feedback-dialog-icon.destructive { background: var(--coral-dim); color: var(--coral); }
+.feedback-dialog h2 { margin: 0 0 8px; color: var(--text-primary); font-size: 18px; letter-spacing: -.02em; }
+.feedback-dialog p { margin: 0; color: var(--text-muted); font-size: 14px; line-height: 1.55; }
+.feedback-dialog-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 24px; }
+.feedback-dialog-actions .btn { min-width: 104px; }
+.dialog-fade-enter-active, .dialog-fade-leave-active { transition: opacity .16s ease; }
+.dialog-fade-enter-from, .dialog-fade-leave-to { opacity: 0; }
+@keyframes feedback-dialog-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+/* Indicateur de navigation discret, sans bloquer les interactions. */
+.route-progress { position: absolute; z-index: 1200; top: 0; left: 0; right: 0; height: 3px; overflow: hidden; pointer-events: none; }
+.route-progress span { display: block; width: 38%; height: 100%; border-radius: 0 3px 3px 0; background: var(--brand); animation: route-progress 1s ease-in-out infinite; }
+@keyframes route-progress { 0% { transform: translateX(-110%); } 100% { transform: translateX(370%); } }
+/* Fondu d'entrée seulement : en mode out-in (App.vue), une animation de sortie
+   retardait d'autant la construction de la page suivante, à chaque navigation. */
+.page-enter-active { transition: opacity .14s ease, transform .14s ease; }
+.page-enter-from { opacity: 0; transform: translateY(5px); }
+@media (max-width: 640px) {
+  .toast-region { top: 10px; right: 10px; width: calc(100vw - 20px); }
+  .feedback-dialog { padding: 21px; border-radius: 16px; }
+  .feedback-dialog-actions { flex-direction: column-reverse; }
+  .feedback-dialog-actions .btn { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast-enter-active, .toast-leave-active, .dialog-fade-enter-active, .dialog-fade-leave-active,
+  .page-enter-active { transition: none !important; }
+  .feedback-dialog { animation: none !important; }
+  .route-progress span { animation: none !important; width: 100%; opacity: .65; }
+}

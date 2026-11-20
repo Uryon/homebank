@@ -54,6 +54,34 @@ class ServiceDoublonTest {
         assertThat(service.findDuplicateGroups()).isEmpty();
     }
 
+    // --- countDuplicateGroups ---
+
+    @Test
+    void countDuplicateGroups_compteCertainsEtProbablesMaisPasLesRemboursements() {
+        Compte compte = compte(1L);
+        LocalDate date = LocalDate.of(2026, 1, 15);
+        Tiers edf = payee(1L, "EDF");
+        Transaction edf1 = transaction(compte, edf, date, "-80.00");
+        edf1.setId(1L);
+        Transaction edf2 = transaction(compte, edf, date, "-80.00");
+        edf2.setId(2L);
+        // Probable : meme compte/date/montant, l'une sans tiers (libelle brut).
+        Transaction nomme = transaction(compte, payee(2L, "Boulangerie"), date, "-4.20");
+        nomme.setId(3L);
+        Transaction brut = transaction(compte, null, date, "-4.20");
+        brut.setId(4L);
+        // Remboursement (meme tiers, montant oppose) : jamais compte comme doublon.
+        Tiers amazon = payee(3L, "Amazon");
+        Transaction achat = transaction(compte, amazon, LocalDate.of(2026, 1, 2), "-30.00");
+        achat.setId(5L);
+        Transaction rembourse = transaction(compte, amazon, LocalDate.of(2026, 1, 9), "30.00");
+        rembourse.setId(6L);
+        when(transactionRepository.findDuplicateCandidates())
+                .thenReturn(List.of(edf1, edf2, nomme, brut, achat, rembourse));
+
+        assertThat(service.countDuplicateGroups()).isEqualTo(2);
+    }
+
     // --- findDuplicateGroups ---
 
     @Test

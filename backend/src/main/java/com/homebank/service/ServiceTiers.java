@@ -61,6 +61,7 @@ public class ServiceTiers {
         this.transactionRepository = transactionRepository;
     }
 
+    @Transactional(readOnly = true)
     public List<TiersDTO> findAll() {
         return payeeRepository.findAll()
                 .stream()
@@ -647,53 +648,6 @@ public class ServiceTiers {
         }
 
         return payeeMapper.toDTO(payeeRepository.save(target));
-    }
-
-    /**
-     * Migration unique : relie chaque transaction pas encore rattachee a un
-     * tiers (payee_id) au Tiers correspondant a son ANCIEN texte libre
-     * (colonne "payee" desormais orpheline, lue en SQL natif — voir
-     * DepotTransaction#findLegacyPayeeTextForMigration), en reutilisant
-     * exactement la meme reconnaissance par motif qu'a l'import (matchPayee),
-     * pour que le passage a la relation ne perde aucune information et
-     * "repare" au passage les tiers restes orphelins (texte ne correspondant
-     * qu'a une fusion/suppression passee mal repercutee).
-     * Appelee au demarrage par config.PayeeRelationMigration ; idempotente
-     * (ne touche que les transactions dont payee_id est encore NULL).
-     */
-    @Transactional
-    public int migrateLegacyTransactionPayees() {
-        if (transactionRepository.countLegacyPayeeColumn() == 0) return 0;
-
-        List<Object[]> legacyRows = transactionRepository.findLegacyPayeeTextForMigration();
-        if (legacyRows.isEmpty()) return 0;
-
-        List<Tiers> knownPayees = findAllForMatching();
-
-        // Un seul findAllById groupé plutôt qu'un findById par ligne dans la
-        // boucle : evite un aller-retour SQL par transaction a migrer.
-        List<Long> transactionIds = legacyRows.stream().map(row -> ((Number) row[0]).longValue()).toList();
-        Map<Long, Transaction> transactionsById = transactionRepository.findAllById(transactionIds).stream()
-                .collect(Collectors.toMap(Transaction::getId, t -> t));
-
-        List<Transaction> transactionsToSave = new ArrayList<>();
-        int migrated = 0;
-        for (Object[] row : legacyRows) {
-            Long transactionId = ((Number) row[0]).longValue();
-            String rawText = (String) row[1];
-
-            Transaction t = transactionsById.get(transactionId);
-            if (t != null) {
-                Tiers resolved = resolveOrCreate(rawText, t.getAmount(), knownPayees);
-                if (resolved != null) {
-                    t.setPayee(resolved);
-                    transactionsToSave.add(t);
-                }
-            }
-            migrated++;
-        }
-        transactionRepository.saveAll(transactionsToSave);
-        return migrated;
     }
 
     /**

@@ -1,0 +1,70 @@
+/* Cartes du tableau de bord : éléments communs à la page (views/Dashboard.vue)
+   et à ses cartes (components/dashboard/), qui ne partagent pas leurs styles
+   scoped. Préfixés par .dashboard-page pour ne jamais toucher les autres pages. */
+
+.dashboard-page .card-title {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+}
+
+/* Titre suivi d'une ligne d'explication (.card-subtitle, AnalysisLegend). */
+.dashboard-page .card-title.has-subtitle {
+    margin-bottom: 4px;
+}
+
+.dashboard-page .chart-note {
+    margin: 12px 0 0;
+    font-size: 12px;
+    color: var(--text-faint);
+    line-height: 1.65;
+    max-width: 1050px;
+}
+
+/* Épargne mensuelle, périodiques et « Où va mon argent ? » : marge intérieure
+   réduite à l'écran. */
+.dashboard-page .compact-card {
+    padding: 16px 18px;
+}
+
+/* Ligne cliquable : ouvre la liste des transactions correspondantes. */
+.dashboard-page .drillable-row {
+    cursor: pointer;
+}
+
+.dashboard-page .drillable-row:hover td {
+    background: var(--ink-800);
+}
+
+/* PDF : même marge que les autres cartes imprimées (voir .card dans base.css). */
+@media print {
+    .dashboard-page .compact-card {
+        padding: 16px;
+    }
+}
+
+/* Couleur fixe d'une catégorie (pastilles, barres) : variables posées par
+   categoryColorStyle (services/categoryColors.js). */
+.dashboard-page .category-color {
+    background: hsl(var(--h) var(--category-s, var(--category-saturation)) calc(var(--category-lightness) + var(--l-offset, 0%)));
+}
+
+/* Cartes repliées (voir services/collapsibleSections.js) : seul le titre
+   reste, à l'écran uniquement — le PDF montre toujours tout. Une carte repliée
+   ne s'étire plus à la hauteur de ses voisines de rangée. */
+@media screen {
+    .dashboard-page .section-collapsed .section-body {
+        display: none;
+    }
+
+    .dashboard-page .section-collapsed {
+        align-self: start;
+    }
+
+    .dashboard-page .section-collapsed .card-title,
+    .dashboard-page .section-collapsed .chart-header {
+        margin-bottom: 0;
+    }
+}

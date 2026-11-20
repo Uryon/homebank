@@ -86,6 +86,7 @@ public class ServiceSuggestionPeriodique {
      * ci-dessous) et les virements internes (jamais une depense/revenu
      * periodique au sens metier).
      */
+    @Transactional(readOnly = true)
     public List<SuggestionPeriodiqueDTO> findPeriodicSuggestions() {
         List<Transaction> candidates = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
                 .filter(t -> !t.isPeriodicExpense())

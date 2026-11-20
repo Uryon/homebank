@@ -76,6 +76,7 @@ import { dataStore } from '../services/dataStore'
 import { pendingIdsUpTo } from '../services/accounts'
 import { alertApiError } from '../services/errors'
 import { notify } from '../services/feedback'
+import { exportDashboardAfterReconciliation } from '../services/dashboardExport'
 import { DEFAULT_CURRENCY, MIN_DATE, formatAmount, formatDate, pluralize, toLocalIsoDate } from '../services/format'
 import AmountInput from './AmountInput.vue'
 import FieldError from './FieldError.vue'
@@ -164,6 +165,8 @@ async function validatePending() {
     const { validatedCount } = await AccountsAPI.validateReconciled(props.account.id, result.value.date)
     notify(`${pluralize(validatedCount, 'opération validée', 'opérations validées')} : compte rapproché au ${formattedDate.value}.`, 'success')
     emit('validated', validatedIds)
+    // PDF du tableau de bord à jour des comptes vérifiés, en arrière-plan.
+    exportDashboardAfterReconciliation()
   } catch (e) {
     alertApiError('Validation des opérations impossible', e)
   } finally {

@@ -37,6 +37,7 @@ public class ServiceRapprochement {
         this.transactionRepository = transactionRepository;
     }
 
+    @Transactional(readOnly = true)
     public RapprochementDTO compare(Long accountId, LocalDate date, BigDecimal requestedBalance) {
         validateDate(date);
         BigDecimal statementBalance = Montant.auCentime(requestedBalance, "Le solde du relevé");

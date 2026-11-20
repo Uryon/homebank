@@ -34,7 +34,7 @@ export const ACTION_COMMANDS = [
   { id: 'action-new-payee', group: 'Actions', label: 'Nouveau tiers', icon: 'payees', to: routeAction('/payees', 'new-payee'), keywords: 'ajouter creer beneficiaire commercant' },
   { id: 'action-new-loan', group: 'Actions', label: 'Nouveau prêt', icon: 'loans', to: routeAction('/loans', 'new-loan'), keywords: 'ajouter creer emprunt credit' },
   { id: 'action-export-csv', group: 'Actions', label: 'Exporter les transactions en CSV', icon: 'transactions', to: { path: '/transactions', query: { export: 'csv' } }, keywords: 'telecharger sauvegarde homebank excel tableur' },
-  { id: 'action-export-pdf', group: 'Actions', label: 'Exporter le tableau de bord en PDF', icon: 'dashboard', to: routeAction('/', 'export-pdf'), keywords: 'imprimer telecharger rapport' },
+  { id: 'action-backup', group: 'Actions', label: 'Télécharger une sauvegarde des données', icon: 'archive', to: routeAction('/import', 'backup'), keywords: 'sauvegarder exporter json restaurer securite' },
   { id: 'action-shortcuts', group: 'Actions', label: 'Raccourcis clavier', hint: '?', icon: 'help', action: 'shortcuts', keywords: 'aide clavier touches' },
   { id: 'action-theme-light', group: 'Actions', label: 'Thème clair', icon: 'sun', action: 'theme:light', keywords: 'apparence mode jour' },
   { id: 'action-theme-dark', group: 'Actions', label: 'Thème sombre', icon: 'moon', action: 'theme:dark', keywords: 'apparence mode nuit' },

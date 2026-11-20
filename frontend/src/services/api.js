@@ -47,6 +47,7 @@ export const TransactionsAPI = {
     ignorePeriodicSuggestion: (ids) => api.post('/transactions/ignore-periodic-suggestion', ids).then(r => r.data),
     unignorePeriodicSuggestion: (ids) => api.post('/transactions/unignore-periodic-suggestion', ids).then(r => r.data),
     duplicates: () => api.get('/transactions/duplicates').then(r => r.data),
+    duplicateCount: () => api.get('/transactions/duplicates/count').then(r => r.data),
     // Annule une création ou un import : la ligne du relevé reste importable.
     undoCreation: (ids) => api.post('/transactions/undo-creation', ids).then(r => r.data),
     // Annule une suppression, à partir des transactions telles qu'elles étaient.
@@ -99,6 +100,19 @@ export const ImportAPI = {
         form.append('accountId', accountId)
         return api.post('/import/qif', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
     }
+}
+
+/** Sauvegarde complète des données et restauration (voir ServiceSauvegarde côté backend). */
+export const BackupAPI = {
+    /** Fichier JSON brut (Blob), tel que le serveur l'a produit. */
+    download: () => api.get('/sauvegarde', { responseType: 'blob' }).then(r => r.data),
+    info: () => api.get('/sauvegarde/info').then(r => r.data),
+    restore: (file) => {
+        const form = new FormData()
+        form.append('file', file)
+        return api.post('/sauvegarde/restauration', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
+    },
+    undoRestore: (fichier) => api.post('/sauvegarde/restauration/annulation', { fichier }).then(r => r.data)
 }
 
 export const ExportAPI = {
