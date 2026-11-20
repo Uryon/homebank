@@ -11,7 +11,7 @@
 
     <div v-if="loading" class="empty-state" role="status">Recherche des dépenses et revenus périodiques…</div>
     <div v-else-if="loadError" class="empty-state" role="alert">
-      <p>Impossible de charger les suggestions. Tes transactions n'ont pas été modifiées.</p>
+      <p>Impossible de charger les suggestions. Vos transactions n'ont pas été modifiées.</p>
       <button class="btn secondary" type="button" @click="load">Réessayer</button>
     </div>
 
@@ -53,6 +53,8 @@
       Aucune suggestion pour l'instant — HomeBank recherche les tiers dont le montant se répète
       (à ±10% près) sur au moins 3 transactions non encore marquées périodiques.
     </div>
+
+    <UndoBar :action="lastAction" :undoing="undoing" @undo="runLastAction" />
   </div>
 </template>
 
@@ -67,10 +69,16 @@
 import { ref, onMounted } from 'vue'
 import { TransactionsAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
-import { formatAmount, formatDate, formatFrequency } from '../services/format'
+import { formatAmount, formatDate, formatFrequency, pluralize } from '../services/format'
 import { alertApiError } from '../services/errors'
 import TransactionsSubNav from './TransactionsSubNav.vue'
 import Icon from '../components/Icon.vue'
+import UndoBar from '../components/UndoBar.vue'
+import { notify } from '../services/feedback'
+import { useLastAction } from '../services/lastAction'
+
+/** Annulation du dernier marquage ou masquage (voir services/lastAction.js). */
+const { lastAction, undoing, setLastAction, runLastAction } = useLastAction()
 
 const suggestions = ref([])
 const marking = ref(null)
@@ -105,9 +113,15 @@ async function load({ silent = false } = {}) {
 
 async function ignoreGroup(group) {
   ignoring.value = groupKey(group)
+  const ids = group.transactions.map(t => t.id)
   try {
-    await TransactionsAPI.ignorePeriodicSuggestion(group.transactions.map(t => t.id))
+    await TransactionsAPI.ignorePeriodicSuggestion(ids)
     await load({ silent: true })
+    notify(`Suggestion « ${group.payee} » masquée.`, 'success')
+    setLastAction('Suggestion masquée', async () => {
+      await TransactionsAPI.unignorePeriodicSuggestion(ids)
+      await load({ silent: true })
+    })
   } catch (e) {
     alertApiError('Erreur lors du masquage de la suggestion', e)
   } finally {
@@ -120,13 +134,18 @@ async function markPeriodic(group) {
   try {
     // Marquage explicite en une requête (et non une bascule par transaction,
     // qui démarquerait une transaction du groupe déjà marquée périodique).
-    await TransactionsAPI.bulkUpdate({
-      ids: group.transactions.map(t => t.id),
-      periodicExpenseProvided: true,
-      periodicExpense: true
-    })
+    const ids = group.transactions.map(t => t.id)
+    await TransactionsAPI.bulkUpdate({ ids, periodicExpenseProvided: true, periodicExpense: true })
     await dataStore.refreshTransactions()
     await load({ silent: true })
+    notify(`${pluralize(ids.length, 'transaction marquée', 'transactions marquées')} périodique${ids.length > 1 ? 's' : ''}.`, 'success')
+    // Une suggestion ne porte que sur des transactions pas encore périodiques
+    // (voir ServiceSuggestionPeriodique) : annuler les remet toutes à faux.
+    setLastAction('Marquage périodique', async () => {
+      await TransactionsAPI.bulkUpdate({ ids, periodicExpenseProvided: true, periodicExpense: false })
+      await dataStore.refreshTransactions()
+      await load({ silent: true })
+    })
   } catch (e) {
     alertApiError('Erreur lors du marquage en dépense périodique', e)
   } finally {

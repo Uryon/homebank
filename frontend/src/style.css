@@ -496,6 +496,12 @@ input[type="checkbox"] {
 /* Page Transactions : tableau très large, profite de tout l'écran
    (classe posée par App.vue sur la route "transactions"). */
 .main-content.main-content-wide { max-width: none; padding-left: 28px; padding-right: 28px; }
+/* Sur grand écran, le tableau a largement sa place (1 130 px requis) : même
+   marge que les autres pages, pour que le titre ne saute plus de 16 px en
+   passant d'une page à l'autre. */
+@media (min-width: 1600px) {
+    .main-content.main-content-wide { padding-left: 44px; padding-right: 44px; }
+}
 
 .page-header {
     display: flex;
@@ -640,6 +646,14 @@ table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
 .icon-btn:hover { background: var(--ink-700); color: var(--text-primary); }
 .icon-btn.danger:hover { background: var(--coral-dim); color: var(--coral); }
 .icon-btn.on { background: var(--amber-dim); color: var(--amber); }
+/* Action impossible sur cette ligne (raison en info-bulle) : atténuée, sans effet de survol.
+   Bouton laissé focusable et cliquable (aria-disabled, pas disabled) : le clic explique le refus. */
+.icon-btn[aria-disabled="true"],
+.icon-btn[aria-disabled="true"]:hover {
+    background: transparent;
+    color: color-mix(in srgb, var(--text-muted) 45%, transparent);
+    cursor: not-allowed;
+}
 .hover-actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
 /* Sur un appareil avec survol : les actions n'apparaissent que sur la ligne visée
    (ou au focus clavier). Un bouton à l'état actif (.on) reste visible en permanence.
@@ -712,6 +726,18 @@ table:not(.transactions-table):not(.payees-table):not(.monthly-analysis-table) {
     grid-template-columns: repeat(2, 1fr);
     gap: 14px;
 }
+/* Champ qui occupe toute la largeur de la grille du formulaire. */
+.form-grid > .span-2 { grid-column: 1 / -1; }
+/* Case à cocher suivie de son libellé, sur une seule ligne. */
+.form-field.checkbox-field { flex-direction: row; align-items: center; gap: 8px; }
+.form-field.checkbox-field input { width: auto; }
+.form-field.checkbox-field label { margin: 0; }
+/* Groupe de boutons à droite d'un en-tête de page. */
+.header-actions { display: flex; gap: 10px; }
+/* Bouton de barre d'outils aligné sur le bas des champs voisins (sous leur libellé). */
+.toolbar-action { align-self: flex-end; }
+/* Texte d'explication sous le titre d'une fenêtre. */
+.modal-intro { color: var(--text-muted); font-size: 14px; margin-bottom: 16px; }
 .form-field { display: flex; flex-direction: column; gap: 6px; }
 .form-field label, .form-field .form-field-label {
     font-size: 13px;
@@ -760,6 +786,10 @@ table input:not([type="checkbox"]):focus, table select:focus,
     animation: modal-in 0.16s ease-out;
 }
 .modal h2 { margin-top: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.015em; color: var(--text-primary); }
+/* Boutons en bas d'une fenêtre (Annuler / Enregistrer), alignés à droite. */
+.modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 20px; }
+/* Variante avec une action à part à gauche (ex : Supprimer). */
+.modal-actions .modal-actions-start { margin-right: auto; }
 @keyframes modal-in {
     from { opacity: 0; transform: translateY(6px) scale(0.985); }
     to { opacity: 1; transform: none; }
@@ -798,6 +828,19 @@ table input:not([type="checkbox"]):focus, table select:focus,
     background-size: 21px 21px;
 }
 .empty-state > * { max-width: 520px; }
+/* Texte avec liens : un paragraphe, sinon chaque lien devient un élément flex sur sa propre ligne. */
+.empty-state-text { margin: 0; }
+/* Champ refusé à l'enregistrement : bordure corail et message juste dessous. */
+/* Préfixe .form-field : doit l'emporter sur le focus bleu des champs (.form-field input:focus / :focus-visible plus bas). */
+input[aria-invalid="true"], select[aria-invalid="true"],
+.form-field :is(input, select)[aria-invalid="true"]:is(:focus, :focus-visible) {
+    border-color: var(--coral);
+    outline: 3px solid color-mix(in srgb, var(--coral) 28%, transparent);
+    outline-offset: 2px;
+}
+.field-error { margin: 4px 0 0; font-size: 12.5px; color: var(--coral); }
+.empty-state-text a { color: var(--azure); text-decoration: underline; text-underline-offset: 2px; }
+.empty-state-text a:hover { text-decoration-thickness: 2px; }
 .empty-state.compact-empty-state {
     min-height: 112px;
     padding: 20px 16px;
@@ -852,7 +895,33 @@ code {
    Placees en fin de fichier pour gagner la cascade : une regle @media print
    serait ecrasee par une regle non conditionnelle de meme specificite qui la
    suit dans le fichier, puisque les deux s'appliquent pendant l'impression. */
+/* En-têtes de colonnes triables (Tiers, Transactions, voir services/tableSort.js) :
+   bouton qui garde l'apparence de l'en-tête. */
+.sort-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sort-header .icon { color: var(--text-faint); }
+.sort-header:hover, .sort-header:hover .icon { color: var(--text-primary); }
+th[aria-sort="ascending"] .sort-header .icon,
+th[aria-sort="descending"] .sort-header .icon { color: var(--azure); }
+th[aria-sort="ascending"] .sort-header,
+th[aria-sort="descending"] .sort-header { color: var(--text-primary); }
+
+/* Contenu réservé à l'écran (consignes « cliquez sur… », liens d'aide) ou à
+   l'export PDF (légende remplaçant un contrôle interactif). */
+.print-only { display: none; }
+
 @media print {
+    .screen-only { display: none; }
+    .print-only { display: inline; }
     .sidebar { display: none; }
     .app-shell { display: block; min-height: auto; }
     .main-content { max-width: none; padding-left: 0; padding-right: 0; }
@@ -1275,7 +1344,7 @@ table select,
     }
 
     .modal .form-grid > * {
-        grid-column: 1 / -1 !important;
+        grid-column: 1 / -1;
     }
 
     .modal h2 {
@@ -1639,9 +1708,10 @@ button.icon-button {
 .route-progress { position: absolute; z-index: 1200; top: 0; left: 0; right: 0; height: 3px; overflow: hidden; pointer-events: none; }
 .route-progress span { display: block; width: 38%; height: 100%; border-radius: 0 3px 3px 0; background: var(--brand); animation: route-progress 1s ease-in-out infinite; }
 @keyframes route-progress { 0% { transform: translateX(-110%); } 100% { transform: translateX(370%); } }
-.page-enter-active, .page-leave-active { transition: opacity .14s ease, transform .14s ease; }
+/* Fondu d'entrée seulement : en mode out-in (App.vue), une animation de sortie
+   retardait d'autant la construction de la page suivante, à chaque navigation. */
+.page-enter-active { transition: opacity .14s ease, transform .14s ease; }
 .page-enter-from { opacity: 0; transform: translateY(5px); }
-.page-leave-to { opacity: 0; transform: translateY(-3px); }
 @media (max-width: 640px) {
   .toast-region { top: 10px; right: 10px; width: calc(100vw - 20px); }
   .feedback-dialog { padding: 21px; border-radius: 16px; }
@@ -1650,7 +1720,7 @@ button.icon-button {
 }
 @media (prefers-reduced-motion: reduce) {
   .toast-enter-active, .toast-leave-active, .dialog-fade-enter-active, .dialog-fade-leave-active,
-  .page-enter-active, .page-leave-active { transition: none !important; }
+  .page-enter-active { transition: none !important; }
   .feedback-dialog { animation: none !important; }
   .route-progress span { animation: none !important; width: 100%; opacity: .65; }
 }

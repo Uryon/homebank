@@ -1,66 +1,96 @@
-import { describe, expect, it } from 'vitest'
-import { planRestore, transactionPayloadFrom } from './undoRestore'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { previousTransactionPayload, restorationSnapshots, runOnePerPayee, transactionPayloadFrom } from './undoRestore'
+
+describe('runOnePerPayee', () => {
+  it('enchaîne les opérations d’un même tiers et laisse les autres en parallèle', async () => {
+    const enCours = new Set()
+    const chevauchements = []
+    const demarres = []
+    const run = async ({ id, payee }) => {
+      demarres.push(id)
+      if (enCours.has(payee.toLowerCase())) chevauchements.push(id)
+      enCours.add(payee.toLowerCase())
+      await new Promise(resolve => setTimeout(resolve, 1))
+      enCours.delete(payee.toLowerCase())
+    }
+    const fin = runOnePerPayee(
+      [{ id: 1, payee: 'Café' }, { id: 2, payee: 'CAFÉ' }, { id: 3, payee: 'Boulangerie' }],
+      item => item.payee,
+      run
+    )
+    expect(demarres).toEqual([1, 3])
+    await fin
+    expect(demarres).toEqual([1, 3, 2])
+    expect(chevauchements).toEqual([])
+  })
+
+  it('continue après l’échec d’une opération du même tiers, puis le signale', async () => {
+    const run = vi.fn().mockRejectedValueOnce(new Error('refus')).mockResolvedValue({})
+    await expect(runOnePerPayee([{ p: 'Café' }, { p: 'Café' }], i => i.p, run)).rejects.toThrow('refus')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(run).toHaveBeenCalledTimes(2)
+  })
+})
 
 const normale = {
-  id: 1, accountId: 10, date: '2026-03-01', payee: 'Boulangerie', amount: -4.5,
-  categoryId: 7, paymentMode: 'CARD', memo: 'pain',
-  transferTransactionId: null, periodicExpense: false, exceptional: false, validated: true
+  id: 1, accountId: 10, date: '2026-03-01', payee: 'Boulangerie', payeeId: 4, amount: -4.5,
+  categoryId: 7, paymentMode: 'CARD', memo: 'pain', bankLabel: 'CB BOULANGERIE', splitFromAmount: -9,
+  transferTransactionId: null, periodicExpense: false, exceptional: false, validated: true, duplicateIgnored: true
 }
-const debit = { id: 2, accountId: 10, date: '2026-03-05', amount: -200, memo: 'épargne', paymentMode: 'TRANSFER', transferTransactionId: 3 }
-const credit = { id: 3, accountId: 20, date: '2026-03-05', amount: 200, memo: 'épargne', paymentMode: 'TRANSFER', transferTransactionId: 2 }
+const debit = { id: 2, accountId: 10, date: '2026-03-05', payee: 'Virement vers Livret', payeeId: null, amount: -200, memo: 'épargne', paymentMode: 'TRANSFER', transferTransactionId: 3 }
+const credit = { id: 3, accountId: 20, date: '2026-03-05', payee: 'Virement depuis Courant', payeeId: null, amount: 200, memo: 'épargne', paymentMode: 'TRANSFER', transferTransactionId: 2 }
 const store = [normale, debit, credit]
 
 describe('transactionPayloadFrom', () => {
-  it('reprend tous les champs du TransactionDTO, sans l’id', () => {
+  it('reprend les champs saisissables, sans l’id', () => {
     const payload = transactionPayloadFrom(normale)
     expect(payload).not.toHaveProperty('id')
     expect(payload).toMatchObject({ accountId: 10, payee: 'Boulangerie', amount: -4.5, categoryId: 7, validated: true })
   })
+})
 
-  it("conserve le marqueur d'ajustement de solde, pour le recréer tel quel", () => {
-    expect(transactionPayloadFrom({ ...normale, balanceAdjustment: true }).balanceAdjustment).toBe(true)
-    expect(transactionPayloadFrom(normale).balanceAdjustment).toBe(false)
-    expect(transactionPayloadFrom({ ...normale, bankLabel: 'ACHAT CB ALCEL 08.11.26' }).bankLabel).toBe('ACHAT CB ALCEL 08.11.26')
-    expect(transactionPayloadFrom(normale).bankLabel).toBeNull()
+describe('previousTransactionPayload', () => {
+  it('garde le nom d’un vrai tiers', () => {
+    expect(previousTransactionPayload(normale).payee).toBe('Boulangerie')
+  })
+
+  it('ne prend pas le libellé calculé d’un virement pour un tiers', () => {
+    expect(previousTransactionPayload(debit).payee).toBeNull()
   })
 })
 
-describe('planRestore', () => {
-  it('recrée une transaction normale via create', () => {
-    const { steps, orphanTransferIds } = planRestore([normale], store)
-    expect(steps).toEqual([{ kind: 'create', ids: [1], payload: transactionPayloadFrom(normale) }])
-    expect(orphanTransferIds).toEqual([])
+describe('restorationSnapshots', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('conserve tous les champs, y compris ceux qui ne se saisissent pas', () => {
+    expect(restorationSnapshots([normale], store)).toEqual([normale])
   })
 
-  it('recrée un virement en paire, du compte débité vers le compte crédité, même si un seul côté est supprimé', () => {
-    const { steps } = planRestore([credit], store)
-    expect(steps).toEqual([{
-      kind: 'transfer',
-      ids: [3, 2],
-      payload: { fromAccountId: 10, toAccountId: 20, amount: 200, date: '2026-03-05', memo: 'épargne' }
-    }])
+  it('prend des copies : une modification ultérieure du cache ne les change pas', () => {
+    const cache = { ...normale }
+    const [copie] = restorationSnapshots([cache], [cache])
+    cache.memo = 'modifié'
+    expect(copie.memo).toBe('pain')
   })
 
-  it('ne recrée qu’une seule fois un virement dont les deux côtés sont dans le lot', () => {
-    const { steps } = planRestore([debit, credit, normale], store)
-    expect(steps.map(s => s.kind)).toEqual(['transfer', 'create'])
-    expect(steps[0].ids).toEqual([2, 3])
+  it('ajoute la jumelle d’un virement, même si un seul côté est supprimé', () => {
+    expect(restorationSnapshots([credit], store).map(t => t.id)).toEqual([3, 2])
   })
 
-  it('recrée en transaction simple un côté de virement dont la jumelle est introuvable, et le signale', () => {
-    const { steps, orphanTransferIds } = planRestore([debit], [normale, debit])
-    expect(steps).toEqual([{ kind: 'create', ids: [2], payload: transactionPayloadFrom(debit) }])
-    expect(orphanTransferIds).toEqual([2])
+  it('ne reprend qu’une fois un virement dont les deux côtés sont dans le lot', () => {
+    expect(restorationSnapshots([debit, credit, normale, normale], store).map(t => t.id)).toEqual([2, 3, 1])
   })
 
-  it('recrée simplement un paiement par virement non lié (ex : loyer), sans le signaler comme orphelin', () => {
-    const loyer = { id: 7, accountId: 10, date: '2026-03-01', amount: -800, paymentMode: 'TRANSFER', transferTransactionId: null }
-    const { steps, orphanTransferIds } = planRestore([loyer], [loyer])
-    expect(steps).toEqual([{ kind: 'create', ids: [7], payload: transactionPayloadFrom(loyer) }])
-    expect(orphanTransferIds).toEqual([])
+  it('signale une jumelle introuvable et garde le côté connu', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(restorationSnapshots([debit], [debit]).map(t => t.id)).toEqual([2])
+    expect(warn).toHaveBeenCalledOnce()
   })
 
-  it('ignore un id présent deux fois dans le lot', () => {
-    expect(planRestore([normale, normale], store).steps).toHaveLength(1)
+  it('ne cherche pas de jumelle pour un paiement par virement non lié (ex : loyer)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const loyer = { id: 7, accountId: 10, amount: -800, paymentMode: 'TRANSFER', transferTransactionId: null }
+    expect(restorationSnapshots([loyer], [loyer])).toEqual([loyer])
+    expect(warn).not.toHaveBeenCalled()
   })
 })

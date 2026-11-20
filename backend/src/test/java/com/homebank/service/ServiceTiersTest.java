@@ -152,6 +152,53 @@ class ServiceTiersTest {
     // --- resolveOrCreate : creation automatique a l'import ---
 
     @Test
+    void libelleAvecPointVirgule_neCreePasUnMotifTropLarge() {
+        when(payeeRepository.save(any(Tiers.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Tiers created = service.createFromBankLabel("VIR SEPA ACME; REF 2025", new ArrayList<>());
+
+        assertThat(created.getName()).isEqualTo("VIR SEPA ACME; REF 2025");
+        assertThat(created.getPattern()).isEqualTo("VIR SEPA ACME* REF 2025");
+        assertThat(ServiceTiers.matchesPatternField(created.getPattern(), "VIR SEPA ACME; REF 2025")).isTrue();
+        assertThat(ServiceTiers.matchesPatternField(created.getPattern(), "PRELEVEMENT ASSURANCE REF 2025")).isFalse();
+    }
+
+    @Test
+    void suggestFromBankLabel_commercantAvecPointVirgule_resteUnSeulMotif() {
+        assertThat(ServiceTiers.suggestFromBankLabel("ACHAT CB CAFE;BAR 09.08.26 CARTE NUMERO 697").pattern())
+                .isEqualTo("ACHAT CB CAFE*BAR");
+    }
+
+    @Test
+    void create_motifParDefautDUnNomAvecPointVirgule_resteUnSeulMotif() {
+        when(payeeRepository.save(any(Tiers.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        TiersDTO created = service.create(TiersDTO.builder().name("Cafe;Bar").pattern(" ").build());
+
+        assertThat(created.getPattern()).isEqualTo("Cafe*Bar");
+    }
+
+    @Test
+    void create_montantDeReferenceAuCentime() {
+        when(payeeRepository.save(any(Tiers.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        TiersDTO created = service.create(TiersDTO.builder().name("Free").amount(new BigDecimal("-19.995")).build());
+
+        assertThat(created.getAmount()).isEqualByComparingTo("20.00");
+    }
+
+    @Test
+    void deleteIfOrphan_reconnaitUnTiersAutoCreeDontLeLibelleContenaitUnPointVirgule() {
+        Tiers ancien = tiers(1L, "CAFE; BAR", "CAFE* BAR", null);
+        when(payeeRepository.findById(1L)).thenReturn(Optional.of(ancien));
+        when(transactionRepository.existsByPayee(ancien)).thenReturn(false);
+
+        service.deleteIfOrphan(1L);
+
+        verify(payeeRepository).delete(ancien);
+    }
+
+    @Test
     void resolveOrCreate_creeUnTiersGeneriqueSansMontantQuandAucunMotifNeCorrespond() {
         when(payeeRepository.findAll()).thenReturn(new ArrayList<>());
         when(payeeRepository.save(any(Tiers.class))).thenAnswer(inv -> {
@@ -176,6 +223,40 @@ class ServiceTiersTest {
 
         assertThat(result).isSameAs(renomme);
         verify(payeeRepository, never()).save(any());
+    }
+
+    @Test
+    void findExisting_leNomExactPasseAvantLeMotifGeneriqueDUnAutreTiers() {
+        Tiers court = tiers(1L, "Carrefour", "Carrefour", null);
+        Tiers precis = tiers(2L, "Carrefour Market", "Rayon", null);
+
+        assertThat(service.findExisting("carrefour market", new BigDecimal("-12.00"), List.of(court, precis)))
+                .containsSame(precis);
+    }
+
+    @Test
+    void findExisting_leMotifAvecMontantExactResteprioritaire() {
+        Tiers generique = tiers(1L, "Bouygues", "Autre", null);
+        Tiers ligneMel = tiers(2L, "Bouygues Mel", "Bouygues", new BigDecimal("10.00"));
+
+        assertThat(service.findExisting("Bouygues", new BigDecimal("-10.00"), List.of(generique, ligneMel)))
+                .containsSame(ligneMel);
+    }
+
+    @Test
+    void resolveOrCreate_texteFaitDeCaracteresDeControle_neCreeRien() {
+        assertThat(service.resolveOrCreate("\u0000", BigDecimal.ONE, new ArrayList<>())).isNull();
+        verify(payeeRepository, never()).save(any());
+    }
+
+    @Test
+    void create_motifSansTexte_estRefuse() {
+        for (String motif : List.of(";", " ; ", "\u0000")) {
+            TiersDTO demande = TiersDTO.builder().name("Nom").pattern(motif).build();
+            assertThatThrownBy(() -> service.create(demande))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("texte à reconnaître");
+        }
     }
 
     // --- merge : fusion de tiers ---
@@ -417,6 +498,40 @@ class ServiceTiersTest {
     }
 
     @Test
+    void create_refuseUnMotifQuiReconnaitraitToutesLesOperations() {
+        for (String motif : List.of("*", "**", "* *", "Carrefour; * ")) {
+            TiersDTO payload = TiersDTO.builder().name("Tout").pattern(motif).build();
+
+            assertThatThrownBy(() -> service.create(payload))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("toutes les opérations");
+        }
+        verify(payeeRepository, never()).save(any(Tiers.class));
+    }
+
+    @Test
+    void merge_refuseUnMotifAttrapeToutAvantToutChangement() {
+        assertThatThrownBy(() -> service.merge(List.of(1L), 2L, "*"))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        verify(transactionRepository, never()).reassignPayee(any(), any());
+    }
+
+    @Test
+    void deleteIfOrphan_gardeUnTiersAutoCreeMaisCompleteParLUtilisateur() {
+        Tiers avecCategorie = tiers(1L, "EDF", "EDF", null);
+        avecCategorie.setCategory(new Categorie());
+        Tiers avecMontant = tiers(2L, "Free", "Free", new BigDecimal("19.99"));
+        when(payeeRepository.findById(1L)).thenReturn(Optional.of(avecCategorie));
+        when(payeeRepository.findById(2L)).thenReturn(Optional.of(avecMontant));
+
+        service.deleteIfOrphan(1L);
+        service.deleteIfOrphan(2L);
+
+        verify(payeeRepository, never()).delete(any(Tiers.class));
+    }
+
+    @Test
     void deleteIfOrphan_supprimeAussiUnTiersCreeDepuisUnLibelleBancaire() {
         Tiers ancien = tiers(1L, "SumUp DOMOUS", "ACHAT CB SumUp DOMOUS", null);
         when(payeeRepository.findById(1L)).thenReturn(Optional.of(ancien));
@@ -425,6 +540,31 @@ class ServiceTiersTest {
         service.deleteIfOrphan(1L);
 
         verify(payeeRepository).delete(ancien);
+    }
+
+    @Test
+    void deleteOrphans_neSupprimeQueLesTiersAutoCreesSansTransaction() {
+        Tiers orphelin = tiers(1L, "SUMUP CAFE", "SUMUP CAFE", null);
+        Tiers encoreUtilise = tiers(2L, "EDF", "EDF", null);
+        Tiers personnalise = tiers(3L, "Free", "FREE MOBILE", null);
+        List<Long> ids = List.of(1L, 2L, 3L, 4L);
+        when(payeeRepository.findAllById(ids)).thenReturn(List.of(orphelin, encoreUtilise, personnalise));
+        when(transactionRepository.findPayeeIdsInUse(List.of(1L, 2L))).thenReturn(List.of(2L));
+
+        service.deleteOrphans(ids);
+
+        verify(payeeRepository).deleteAllByIdInBatch(List.of(1L));
+    }
+
+    @Test
+    void deleteOrphans_sansOrphelin_neSupprimeRien() {
+        Tiers encoreUtilise = tiers(2L, "EDF", "EDF", null);
+        when(payeeRepository.findAllById(List.of(2L))).thenReturn(List.of(encoreUtilise));
+        when(transactionRepository.findPayeeIdsInUse(List.of(2L))).thenReturn(List.of(2L));
+
+        service.deleteOrphans(List.of(2L));
+
+        verify(payeeRepository, never()).deleteAllByIdInBatch(any());
     }
 
     // --- suggestFromBankLabel : tiers cree a l'import depuis un libelle bancaire ---
@@ -486,6 +626,26 @@ class ServiceTiersTest {
         verify(transactionRepository).saveAll(List.of(sansCategorie));
         assertThat(result.getPayeesUpdated()).isEqualTo(1);
         assertThat(result.getTransactionsUpdated()).isEqualTo(1);
+        assertThat(result.getPayeeIds()).containsExactly(1L);
+        assertThat(result.getTransactionIds()).containsExactly(3L);
+    }
+
+    @Test
+    void autoCategorize_categorieUnanimeMaisMasquee_neLaReportePas() {
+        Categorie resilie = categorie(10L, "Ancien abonnement");
+        resilie.setHidden(true);
+        Tiers salle = tiers(1L, "Salle de sport", "Salle de sport", null);
+        Transaction ancienne = transaction(1L, salle, resilie);
+        Transaction sansCategorie = transaction(2L, salle, null);
+        when(payeeRepository.findAll()).thenReturn(List.of(salle));
+        when(transactionRepository.findAllWithPayeeAndCategory()).thenReturn(List.of(ancienne, sansCategorie));
+
+        CategorisationAutoResultatDTO result = service.autoCategorize();
+
+        assertThat(salle.getCategory()).isNull();
+        assertThat(sansCategorie.getCategory()).isNull();
+        assertThat(result.getPayeesUpdated()).isZero();
+        assertThat(result.getTransactionsUpdated()).isZero();
     }
 
     @Test
@@ -524,5 +684,20 @@ class ServiceTiersTest {
         // Le tiers avait deja sa categorie : il n'est pas compte comme "categorise".
         assertThat(result.getPayeesUpdated()).isZero();
         assertThat(result.getTransactionsUpdated()).isEqualTo(1);
+    }
+
+    @Test
+    void normalizeWhitespaceDonneLeMemeResultatQueLExpressionReguliere() {
+        // Reference : l'expression complete, sans le raccourci isWhitespaceNormalized.
+        java.util.regex.Pattern reference = java.util.regex.Pattern.compile("[\\s\\u00A0\\u2007\\u202F]+");
+        List<String> samples = List.of(
+                "", " ", "Carrefour", "SGC TOURCOING", "SGC  TOURCOING", " Carrefour", "Carrefour ",
+                "CB\tSGC", "CB\u00A0SGC", "CB\u202FSGC", "CB\u2007SGC", "a\nb", "\u0001x", "x\u0001",
+                "a\u0001b", "Café du coin", "PRLV SEPA EDF 12/03");
+        for (String sample : samples) {
+            String expected = reference.matcher(sample).replaceAll(" ").trim();
+            assertThat(ServiceTiers.normalizeWhitespace(sample)).as("« %s »", sample).isEqualTo(expected);
+        }
+        assertThat(ServiceTiers.normalizeWhitespace(null)).isNull();
     }
 }

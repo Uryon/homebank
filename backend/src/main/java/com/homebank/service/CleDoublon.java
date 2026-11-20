@@ -8,7 +8,7 @@ import java.util.Locale;
 /**
  * Cle de deduplication (date+montant+tiers canonique, insensible a la casse),
  * partagee entre ServiceImport#isAlreadyKnown (detection a l'import) et
- * ServiceTransaction#findDuplicateGroups (detection sur les donnees deja en
+ * ServiceDoublon#findDuplicateGroups (detection sur les donnees deja en
  * base, pour l'onglet "Doublons") : montant toujours ramene a l'echelle 2
  * (comme la colonne SQL "amount", numeric(19,2)) pour qu'un texte source sans
  * decimales ("150") et un montant deja enregistre ("150.00") soient bien

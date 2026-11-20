@@ -5,7 +5,7 @@
         <h1>Comptes</h1>
         <div class="subtitle">Gérez vos comptes bancaires</div>
       </div>
-      <div style="display:flex; gap:10px;">
+      <div class="header-actions">
         <button class="btn secondary" @click="openTransfer" :disabled="transferableAccounts.length < 2">
           Transfert entre comptes
         </button>
@@ -37,6 +37,11 @@
           <span class="allocation-name">{{ part.name }}</span>
           <span class="allocation-share">{{ formatShare(part.share) }}</span>
         </li>
+        <li v-for="debt in debts" :key="debt.id" class="allocation-debt" title="Solde négatif : déduit du patrimoine net, hors de la barre">
+          <span class="allocation-dot" :class="debt.type.toLowerCase()" aria-hidden="true" />
+          <span class="allocation-name">{{ debt.name }}</span>
+          <Money :value="debt.balance" :currency="debt.currency" class="allocation-share negative" />
+        </li>
       </ul>
     </section>
 
@@ -45,9 +50,9 @@
       <thead>
         <tr>
           <th>Nom</th>
-          <th>Type</th>
+          <th class="col-type">Type</th>
           <th class="num">Solde courant</th>
-          <th>Devise</th>
+          <th class="col-currency">Devise</th>
           <th></th>
         </tr>
       </thead>
@@ -56,12 +61,18 @@
           <td class="account-name">
             <RouterLink :to="{ path: '/transactions', query: { account: String(a.id) } }" class="account-link" :title="'Voir les transactions de ' + a.name">{{ a.name }}</RouterLink>
             <span v-if="a.archived" class="archived-tag">Archivé</span>
+            <RouterLink
+              v-if="pendingCountByAccountId.get(a.id)"
+              class="pending-tag"
+              :to="{ path: '/transactions', query: { account: String(a.id), pending: '1' } }"
+              :title="'Voir les opérations à traiter (non validées) de ' + a.name"
+            >{{ pendingCountByAccountId.get(a.id) }} à traiter</RouterLink>
           </td>
-          <td><span class="badge" :class="typeClass">{{ accountTypeLabel(a.type) }}</span></td>
+          <td class="col-type"><span class="badge" :class="typeClass">{{ accountTypeLabel(a.type) }}</span></td>
           <td class="num amount" :class="balanceClass">
             {{ formattedBalance }}
           </td>
-          <td>{{ a.currency }}</td>
+          <td class="col-currency">{{ a.currency }}</td>
           <td>
             <div class="hover-actions">
               <button class="icon-btn" title="Rapprocher avec un relevé bancaire" :aria-label="'Rapprocher ' + a.name" @click="reconciling = a"><Icon name="check" /></button>
@@ -87,9 +98,12 @@
       </tbody>
       <tfoot v-if="accounts.length > 1">
         <tr>
-          <td colspan="2">Total</td>
+          <!-- Une cellule par colonne (pas de colspan) : les colonnes masquées en mobile restent alignées. -->
+          <td>Total</td>
+          <td class="col-type"></td>
           <td class="num amount" :class="netWorthClass">{{ formattedNetWorth }}</td>
-          <td colspan="2"></td>
+          <td class="col-currency"></td>
+          <td></td>
         </tr>
       </tfoot>
     </table>
@@ -123,20 +137,20 @@
     <div v-if="showTransferModal" class="modal-overlay" @click.self="showTransferModal = false">
       <div v-dialog="() => (showTransferModal = false)" class="modal" role="dialog" aria-modal="true">
         <h2>Transfert entre comptes</h2>
-        <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 16px;">
+        <p class="modal-intro">
           Débite le compte source et crédite le compte destination du même montant.
           Ce mouvement n'est jamais compté comme une dépense ou un revenu dans les rapports.
         </p>
         <div class="form-grid">
           <div class="form-field">
             <label for="transfer-from">Compte source</label>
-            <select id="transfer-from" v-model.number="transferForm.fromAccountId">
+            <select id="transfer-from" v-model.number="transferForm.fromAccountId" @change="clear('toAccount')">
               <option v-for="a in transferOptions" :key="a.id" :value="a.id">{{ a.label }}</option>
             </select>
           </div>
           <div class="form-field">
             <label for="transfer-to">Compte destination</label>
-            <select id="transfer-to" v-model.number="transferForm.toAccountId">
+            <select id="transfer-to" v-model.number="transferForm.toAccountId" v-bind="invalidAttrs('toAccount')" @change="clear('toAccount')">
               <option
                 v-for="a in transferOptions"
                 :key="a.id"
@@ -146,21 +160,23 @@
                 {{ a.label }}
               </option>
             </select>
+            <FieldError id="transfer-to-error" :message="errors.toAccount" />
           </div>
           <div class="form-field">
             <label for="transfer-amount">Montant</label>
-            <AmountInput id="transfer-amount" v-model="transferForm.amount" placeholder="0,00" />
+            <AmountInput id="transfer-amount" v-model="transferForm.amount" placeholder="0,00" v-bind="invalidAttrs('amount')" @input="clear('amount')" />
+            <FieldError id="transfer-amount-error" :message="errors.amount" />
           </div>
           <div class="form-field">
             <label for="transfer-date">Date</label>
-            <input id="transfer-date" v-model="transferForm.date" type="date" />
+            <input id="transfer-date" v-model="transferForm.date" type="date" :min="MIN_DATE" :max="MAX_DATE" />
           </div>
-          <div class="form-field" style="grid-column: span 2;">
+          <div class="form-field span-2">
             <label for="transfer-memo">Mémo (facultatif)</label>
-            <input id="transfer-memo" v-model="transferForm.memo" placeholder="Ex : Épargne du mois" />
+            <input id="transfer-memo" v-model="transferForm.memo" maxlength="255" placeholder="Ex : Épargne du mois" />
           </div>
         </div>
-        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+        <div class="modal-actions">
           <button class="btn secondary" @click="showTransferModal = false">Annuler</button>
           <button class="btn" :disabled="transferring" @click="submitTransfer">
             {{ transferring ? 'Transfert en cours…' : 'Confirmer le transfert' }}
@@ -168,28 +184,44 @@
         </div>
       </div>
     </div>
+
+    <UndoBar :action="lastAction" :undoing="undoing" @undo="runLastAction" />
   </div>
 </template>
 
 <script setup>
 import { notify, askConfirm } from '../services/feedback'
 import { ref, computed, onMounted } from 'vue'
+import { useRouteActions } from '../services/routeActions'
 import { AccountsAPI, TransactionsAPI } from '../services/api'
-import { formatAmount, toLocalIsoDate } from '../services/format'
+import { MAX_DATE, MIN_DATE, formatAmount, toLocalIsoDate } from '../services/format'
 import { dataStore } from '../services/dataStore'
 import { alertApiError } from '../services/errors'
 import AmountInput from '../components/AmountInput.vue'
+import FieldError from '../components/FieldError.vue'
+import { useFieldErrors } from '../services/fieldErrors'
 import AccountModal from '../components/AccountModal.vue'
 import ReconciliationModal from '../components/ReconciliationModal.vue'
 import BalanceAdjustmentModal from '../components/BalanceAdjustmentModal.vue'
 import Icon from '../components/Icon.vue'
 import Money from '../components/Money.vue'
-import { accountBalanceRows, accountCountLabel, accountTypeLabel, activeAccounts, amountToneClass, computeAllocation, computeNetWorth, sortAccountsForDisplay } from '../services/accounts'
+import UndoBar from '../components/UndoBar.vue'
+import { useLastAction } from '../services/lastAction'
+import { accountBalanceRows, accountCountLabel, accountDeletionBlocker, accountPayloadFrom, accountTypeLabel, activeAccounts, amountToneClass, computeAllocation, computeDebts, computeNetWorth, sortAccountsForDisplay } from '../services/accounts'
 
 // Comptes et soldes partagés avec la sidebar (voir App.vue / dataStore.js) :
 // une modification ici (création, édition, suppression, virement) se
 // répercute automatiquement dans la sidebar sans code supplémentaire.
 const accounts = computed(() => dataStore.state.accounts)
+
+/** Opérations en attente de validation (rapprochement) par compte, en un seul passage sur le cache. */
+const pendingCountByAccountId = computed(() => {
+  const counts = new Map()
+  for (const t of dataStore.state.transactions) {
+    if (t.validated === false) counts.set(t.accountId, (counts.get(t.accountId) ?? 0) + 1)
+  }
+  return counts
+})
 const balances = computed(() => dataStore.state.balances)
 // « Aucun compte » seulement après un chargement réussi (sinon : bandeau « serveur injoignable » d'App.vue).
 const accountsLoaded = computed(() => dataStore.state.loaded.accounts)
@@ -226,6 +258,8 @@ const netWorth = computed(() => computeNetWorth(accounts.value, balances.value))
 const netWorthClass = computed(() => amountToneClass(netWorth.value))
 const formattedNetWorth = computed(() => formatAmount(netWorth.value))
 const allocation = computed(() => computeAllocation(accounts.value, balances.value))
+/** Comptes à solde négatif, listés après la répartition (voir computeDebts). */
+const debts = computed(() => computeDebts(accounts.value, balances.value))
 
 const shareFormatter = new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 0 })
 function formatShare(share) {
@@ -235,6 +269,7 @@ function formatShare(share) {
 /** Description textuelle de la barre de répartition, pour les lecteurs d'écran. */
 const allocationDescription = computed(() =>
   'Répartition du patrimoine : ' + allocation.value.map(p => `${p.name} ${formatShare(p.share)}`).join(', ')
+  + debts.value.map(d => `, ${d.name} ${formatAmount(d.balance, d.currency)} déduit`).join('')
 )
 
 function openCreate() {
@@ -247,34 +282,78 @@ function openEdit(account) {
   showModal.value = true
 }
 
-async function onSaved() {
+// Transactions rechargées avec les comptes (refreshTransactions inclut les
+// soldes) : le libellé « Virement vers <compte> » d'une transaction suit le
+// nom du compte (voir MappeurTransaction#payeeLabel).
+async function onSaved(saved) {
+  const before = editing.value
   showModal.value = false
-  await dataStore.refreshAccounts()
+  await dataStore.refreshTransactions()
+  if (before) {
+    const previous = accountPayloadFrom(before)
+    setLastAction('Compte modifié', async () => {
+      await AccountsAPI.update(before.id, previous)
+      await dataStore.refreshTransactions()
+    })
+  } else if (saved?.id) {
+    // Un compte tout juste créé est vide : sa suppression est toujours acceptée.
+    setLastAction('Compte créé', async () => {
+      await AccountsAPI.remove(saved.id)
+      await dataStore.refreshAccounts()
+    })
+  }
 }
 
+// Seul un compte sans transaction peut être supprimé (voir ServiceCompte#delete).
 async function onDeleted() {
+  const deleted = editing.value
   showModal.value = false
   await dataStore.refreshAccounts()
+  if (deleted) offerUndoDeletion(deleted)
+}
+
+/** Un compte supprimé est toujours vide : le recréer avec ses champs suffit à annuler. */
+function offerUndoDeletion(account) {
+  const payload = accountPayloadFrom(account)
+  setLastAction('Compte supprimé', async () => {
+    await AccountsAPI.create(payload)
+    await dataStore.refreshAccounts()
+  })
 }
 
 /** Compte en cours de rapprochement avec un relevé bancaire (voir ReconciliationModal). */
 const reconciling = ref(null)
 
-async function onReconciled() {
+async function onReconciled(validatedIds = []) {
   reconciling.value = null
   // Statuts « validé » modifiés côté serveur : rafraîchit le cache partagé des transactions.
   await dataStore.refreshTransactions()
+  if (!validatedIds.length) return
+  setLastAction('Rapprochement validé', async () => {
+    await TransactionsAPI.bulkUpdate({ ids: validatedIds, validatedProvided: true, validated: false })
+    await dataStore.refreshTransactions()
+  })
 }
 
 /** Compte dont on actualise le solde (voir BalanceAdjustmentModal). */
 const adjusting = ref(null)
 const adjustingBalance = computed(() => Number(balances.value[adjusting.value?.id] ?? 0))
 
-async function onBalanceAdjusted() {
+async function onBalanceAdjusted(adjustment) {
   adjusting.value = null
   // Nouvelle transaction « Ajustement de solde » : rafraîchit transactions et soldes.
   await dataStore.refreshTransactions()
+  // Annuler : supprime la transaction d'ajustement, le solde revient à l'ancien.
+  if (adjustment?.id) {
+    setLastAction('Solde actualisé', async () => {
+      await TransactionsAPI.undoCreation([adjustment.id])
+      await dataStore.refreshTransactions()
+    })
+  }
 }
+
+/** Annulation de la dernière action sur les comptes : virement, (dés)archivage, création, modification, suppression (voir services/lastAction.js). */
+const { lastAction, undoing, setLastAction, runLastAction } = useLastAction()
 
 /** Archivage/désarchivage direct depuis la ligne du tableau, sans passer par la modale. */
 const archivingId = ref(null)
@@ -286,6 +365,10 @@ async function toggleArchived(account) {
     await AccountsAPI.update(account.id, { ...account, archived })
     await dataStore.refreshAccounts()
     notify(archived ? `Compte « ${account.name} » archivé.` : `Compte « ${account.name} » désarchivé.`, 'success')
+    setLastAction(archived ? 'Compte archivé' : 'Compte désarchivé', async () => {
+      await AccountsAPI.update(account.id, { ...account, archived: !archived })
+      await dataStore.refreshAccounts()
+    })
   } catch (e) {
     alertApiError("Erreur lors de l'archivage du compte", e)
   } finally {
@@ -296,12 +379,19 @@ async function toggleArchived(account) {
 /** Suppression directe depuis la ligne du tableau (raccourci sans passer par la modale). */
 async function remove(account) {
   // Le backend refuse (409) la suppression d'un compte qui contient des
-  // transactions (voir ServiceCompte#delete) : proposer plutôt l'archivage.
-  if (!(await askConfirm(`Supprimer le compte "${account.name}" ? Seul un compte sans transaction peut être supprimé ; sinon, archivez-le.`))) return
+  // transactions (voir ServiceCompte#delete) : prévenu ici, sans demander
+  // une confirmation qui aboutirait forcément à un refus.
+  const blocker = accountDeletionBlocker(account, dataStore.state.transactions)
+  if (blocker) {
+    notify(blocker, 'warning', 6000)
+    return
+  }
+  if (!(await askConfirm(`Supprimer le compte "${account.name}" ?`))) return
   try {
     await AccountsAPI.remove(account.id)
     await dataStore.refreshAccounts()
     notify('Compte supprimé.', 'success')
+    offerUndoDeletion(account)
   } catch (e) {
     alertApiError('Suppression du compte impossible', e)
   }
@@ -309,7 +399,17 @@ async function remove(account) {
 
 /* --- Virement entre comptes --- */
 
+const { errors, check, clear, invalidAttrs } = useFieldErrors({ toAccount: 'transfer-to', amount: 'transfer-amount' })
+
+/** Erreur du compte destination (sélection manquante, ou identique au compte source), vide si valide. */
+function transferAccountsError(f) {
+  if (!f.fromAccountId || !f.toAccountId) return 'Choisissez les deux comptes.'
+  if (f.fromAccountId === f.toAccountId) return 'Choisissez un compte différent du compte source.'
+  return ''
+}
+
 function openTransfer() {
+  clear()
   transferForm.value = emptyTransferForm()
   const candidates = transferableAccounts.value
   if (candidates.length >= 2) {
@@ -321,21 +421,14 @@ function openTransfer() {
 
 async function submitTransfer() {
   const f = transferForm.value
-  if (!f.fromAccountId || !f.toAccountId) {
-    notify('Veuillez sélectionner les deux comptes.', 'warning')
-    return
-  }
-  if (f.fromAccountId === f.toAccountId) {
-    notify('Le compte source et le compte destination doivent être différents.', 'warning')
-    return
-  }
-  if (!f.amount || f.amount <= 0) {
-    notify('Le montant du transfert doit être positif.', 'warning')
-    return
-  }
+  const valid = check({
+    toAccount: transferAccountsError(f),
+    amount: f.amount > 0 ? '' : 'Saisissez un montant positif.'
+  })
+  if (!valid) return
   transferring.value = true
   try {
-    await TransactionsAPI.transfer({
+    const [debit] = await TransactionsAPI.transfer({
       fromAccountId: f.fromAccountId,
       toAccountId: f.toAccountId,
       amount: f.amount,
@@ -347,6 +440,11 @@ async function submitTransfer() {
     // transactions du cache partagé, pas seulement les soldes.
     await dataStore.refreshTransactions()
     notify('Virement effectué.', 'success')
+    // Supprimer un côté du virement supprime aussi sa jumelle (voir ServiceTransaction#undoCreation).
+    setLastAction('Virement effectué', async () => {
+      await TransactionsAPI.undoCreation([debit.id])
+      await dataStore.refreshTransactions()
+    })
   } catch (e) {
     alertApiError('Erreur lors du transfert', e)
   } finally {
@@ -359,6 +457,9 @@ onMounted(() => {
   // on évite seulement qu'il remonte en erreur non gérée.
   dataStore.ensureLoaded().catch(() => {})
 })
+
+// Actions lancées depuis la palette de commandes (Ctrl+K), voir services/routeActions.js.
+useRouteActions({ 'new-account': openCreate, transfer: openTransfer })
 </script>
 
 
@@ -375,6 +476,9 @@ onMounted(() => {
 .allocation-segment { flex-basis: 0; min-width: 6px; transition: flex-grow 0.4s ease; }
 .allocation-legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 14px 0 0; padding: 0; list-style: none; font-size: 13px; }
 .allocation-legend li { display: flex; align-items: center; gap: 8px; }
+/* Soldes négatifs : séparés de la répartition par un filet (ils n'ont pas de part dans la barre). */
+.allocation-legend li:not(.allocation-debt) + .allocation-debt { border-left: 1px solid var(--line); padding-left: 22px; }
+.allocation-share.negative { color: var(--coral); }
 .allocation-dot { width: 9px; height: 9px; border-radius: 3px; }
 .allocation-name { color: var(--text-primary); font-weight: 500; }
 .allocation-share { color: var(--text-muted); font-variant-numeric: tabular-nums; }
@@ -401,6 +505,26 @@ onMounted(() => {
 .accounts-table tbody tr.account-archived td:first-child { color: var(--text-muted); }
 .accounts-table tbody tr.account-archived .badge,
 .accounts-table tbody tr.account-archived .amount { opacity: .6; }
+/* Opérations à traiter du compte : lien vers la liste filtrée (même teinte que le liseré « à traiter » des transactions). */
+.pending-tag { margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: var(--amber-dim); color: var(--amber); font-size: 11.5px; font-weight: 600; text-decoration: none; vertical-align: middle; white-space: nowrap; }
+.pending-tag:hover { text-decoration: underline; }
 .archived-tag { margin-left: 8px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line-strong); font-size: 11.5px; font-weight: 600; color: var(--text-muted); vertical-align: middle; }
-@media (max-width: 680px) { .accounts-page .page-header { align-items: flex-start; flex-direction: column; } .accounts-table thead th, .accounts-table tbody td { padding: 11px 12px; } }
+@media (max-width: 680px) { .accounts-page .page-header { align-items: flex-start; flex-direction: column; } .accounts-table thead th, .accounts-table tbody td, .accounts-table tfoot td { padding: 11px 12px; } }
+/* Téléphone : le type (déjà signalé par la couleur de la pastille de la barre de
+   navigation) et la devise laissent la place au solde, qui sinon sortait de l'écran. */
+@media (max-width: 520px) {
+  .accounts-table .col-type, .accounts-table .col-currency { display: none; }
+  /* Tient dans l'écran sans défilement horizontal (la règle mobile générale de
+     style.css impose 640 px aux tableaux) : actions sur deux lignes, marges réduites. */
+  .accounts-table-panel .accounts-table { min-width: 0; }
+  /* Chaque compte sur deux lignes : nom et solde, puis ses actions sur toute la largeur. */
+  .accounts-table, .accounts-table thead, .accounts-table tbody, .accounts-table tfoot { display: block; }
+  .accounts-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .accounts-table thead th:last-child, .accounts-table tfoot td:last-child { display: none; }
+  .accounts-table tbody tr { border-bottom: 1px solid var(--line); }
+  .accounts-table tbody tr:last-child { border-bottom: 0; }
+  .accounts-table tbody td { border-bottom: 0; }
+  .accounts-table tbody td:last-child { grid-column: 1 / -1; padding-top: 0; }
+  .accounts-table .hover-actions { justify-content: flex-start; }
+}
 </style>

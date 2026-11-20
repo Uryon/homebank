@@ -45,7 +45,8 @@ export function importOutcome(result) {
     }
   }
   if (imported === 0) {
-    return { type: 'warning', message: 'Aucune transaction trouvée dans ce fichier.' }
+    // Fichier vide, en-tête seule ou mauvais format choisi (voir ServiceImport#reportFileWithoutOperation).
+    return { type: 'warning', message: 'Aucune transaction trouvée dans ce fichier : vérifiez le format choisi (CSV ou QIF).' }
   }
   return { type: 'success', message: `${pluralize(imported, 'transaction importée', 'transactions importées')}.` }
 }

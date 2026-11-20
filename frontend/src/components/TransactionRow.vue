@@ -13,22 +13,26 @@
     @click="!isEditing && $emit('start-edit')"
     @keydown.esc="$emit('cancel-edit')"
     @keydown.enter="onEnter"
+    @keydown="onActionKey"
   >
     <!-- Mode édition -->
     <template v-if="isEditing && editForm">
-      <td class="num" @click.stop>
+      <td class="num cell-select" @click.stop>
         <input type="checkbox" :checked="selected" title="Sélectionner cette transaction" aria-label="Sélectionner cette transaction" @change="$emit('toggle-select', transaction)" />
       </td>
-      <td class="num" @click.stop>
+      <!-- data-label : libellé affiché à côté de la case sur téléphone, où les en-têtes de colonnes sont masqués -->
+      <td class="num" data-label="Validée" @click.stop>
         <input type="checkbox" v-model="editForm.validated" title="Transaction validée (rapprochement bancaire)" aria-label="Transaction validée (rapprochement bancaire)" />
       </td>
       <td @click.stop>
-        <input v-model="editForm.date" type="date" ref="firstEditField" aria-label="Date" />
+        <input id="tx-edit-date" v-model="editForm.date" type="date" :min="MIN_DATE" :max="MAX_DATE" ref="firstEditField" aria-label="Date" v-bind="invalidAttrs('date')" @input="clear('date')" />
+        <FieldError id="tx-edit-date-error" :message="errors.date" />
       </td>
       <td @click.stop>
-        <select v-model.number="editForm.accountId" aria-label="Compte">
+        <select id="tx-edit-account" v-model.number="editForm.accountId" aria-label="Compte" v-bind="invalidAttrs('accountId')" @change="clear('accountId')">
           <option v-for="a in editableAccounts" :key="a.id" :value="a.id">{{ accountOptionLabel(a) }}</option>
         </select>
+        <FieldError id="tx-edit-account-error" :message="errors.accountId" />
       </td>
       <td @click.stop>
         <label for="tx-edit-payee" class="sr-only">Tiers</label>
@@ -45,15 +49,17 @@
         />
       </td>
       <td @click.stop>
-        <input v-model="editForm.memo" aria-label="Mémo" placeholder="Note libre" />
+        <input v-model="editForm.memo" maxlength="255" aria-label="Mémo" placeholder="Note libre" />
       </td>
       <td class="num" colspan="2" @click.stop>
-        <AmountInput v-model="editForm.amount" aria-label="Montant" />
+        <AmountInput id="tx-edit-amount" v-model="editForm.amount" aria-label="Montant" v-bind="invalidAttrs('amount')" @input="clear('amount')" />
+        <FieldError id="tx-edit-amount-error" :message="errors.amount" />
       </td>
-      <td class="num" @click.stop>
+      <td v-if="showBalance"></td>
+      <td class="num" data-label="Dépense périodique" @click.stop>
         <input type="checkbox" v-model="editForm.periodicExpense" title="Dépense périodique récurrente" aria-label="Dépense périodique récurrente" />
       </td>
-      <td class="num" @click.stop>
+      <td class="num" data-label="Exceptionnelle (exclue des tableaux de bord)" @click.stop>
         <input type="checkbox" v-model="editForm.exceptional" title="Transaction exceptionnelle : exclue des tableaux de bord (ex : achat d'une voiture)" aria-label="Transaction exceptionnelle" />
       </td>
       <td @click.stop>
@@ -66,11 +72,11 @@
 
     <!-- Mode lecture -->
     <template v-else>
-      <td class="num" @click.stop>
+      <td class="num cell-select" @click.stop>
         <label :for="'tx-select-' + transaction.id" class="sr-only">Sélectionner cette transaction</label>
-        <input :id="'tx-select-' + transaction.id" type="checkbox" :checked="selected" title="Sélectionner cette transaction" :aria-label="'Sélectionner la transaction ' + (transaction.payee || 'sans tiers') + ' du ' + formatDate(transaction.date)" @change="$emit('toggle-select', transaction)" />
+        <input :id="'tx-select-' + transaction.id" type="checkbox" :checked="selected" title="Sélectionner cette transaction (Maj+clic : toute la plage depuis la dernière cochée)" :aria-label="'Sélectionner la transaction ' + (transaction.payee || 'sans tiers') + ' du ' + formatDate(transaction.date)" @mousedown="preventShiftTextSelection" @click="onSelectClick" />
       </td>
-      <td class="num" @click.stop>
+      <td class="num cell-status" @click.stop>
         <button
           type="button"
           class="status-dot"
@@ -87,7 +93,7 @@
         {{ formatDate(transaction.date) }}
         <span v-if="isFuture(transaction.date)" class="future-badge" title="Transaction prévue à une date future : elle n'a pas encore réellement eu lieu et n'est pas comptée dans les statistiques.">Prévu</span>
       </td>
-      <td>{{ accountName(transaction.accountId) }}</td>
+      <td class="cell-account">{{ accountName(transaction.accountId) }}</td>
       <!-- Texte complet au survol s'il est tronqué : infobulle globale (OverflowTooltip.vue) -->
       <td class="col-payee" :title="bankLabelTitle">{{ transaction.payee }}</td>
       <td class="col-cat">
@@ -95,10 +101,11 @@
         <span v-else-if="awaitsCategory" class="cat-none">Sans catégorie</span>
         <span v-else class="cat-none" title="Virement entre comptes ou ajustement de solde : ni dépense ni revenu, pas de catégorie">—</span>
       </td>
-      <td class="text-muted">{{ displayMemo(transaction.memo) }}</td>
-      <td class="num amount negative"><Money v-if="transaction.amount < 0" :value="transaction.amount" :currency="accountCurrency" /></td>
-      <td class="num amount positive"><Money v-if="transaction.amount > 0" :value="transaction.amount" :currency="accountCurrency" /></td>
-      <td class="num" @click.stop>
+      <td class="text-muted cell-memo">{{ displayMemo(transaction.memo) }}</td>
+      <td class="num amount negative cell-expense"><Money v-if="transaction.amount < 0" :value="transaction.amount" :currency="accountCurrency" /></td>
+      <td class="num amount positive cell-income"><Money v-if="transaction.amount > 0" :value="transaction.amount" :currency="accountCurrency" /></td>
+      <td v-if="showBalance" class="num amount cell-balance" :class="{ negative: balanceAfter < 0 }"><Money v-if="balanceAfter != null" :value="balanceAfter" :currency="accountCurrency" /></td>
+      <td class="num cell-periodic" @click.stop>
         <label :for="'tx-periodic-' + transaction.id" class="sr-only">Dépense périodique récurrente</label>
         <input
           :id="'tx-periodic-' + transaction.id"
@@ -109,7 +116,7 @@
           @change="$emit('toggle-periodic', transaction)"
         />
       </td>
-      <td class="num" @click.stop>
+      <td class="num cell-exceptional" @click.stop>
         <label :for="'tx-exceptional-' + transaction.id" class="sr-only">Transaction exceptionnelle</label>
         <input
           :id="'tx-exceptional-' + transaction.id"
@@ -120,9 +127,22 @@
           @change="$emit('toggle-exceptional', transaction)"
         />
       </td>
-      <td @click.stop>
+      <td class="cell-actions" @click.stop>
         <span class="row-actions">
-          <button class="icon-btn" title="Diviser cette transaction en deux" aria-label="Diviser cette transaction" @click="$emit('split', transaction)"><Icon name="split" /></button>
+          <button
+            class="icon-btn"
+            :title="duplicateBlockedReason || 'Dupliquer : nouvelle transaction pré-remplie, datée d’aujourd’hui'"
+            aria-label="Dupliquer cette transaction"
+            :aria-disabled="duplicateBlockedReason ? 'true' : undefined"
+            @click="$emit('duplicate', transaction)"
+          ><Icon name="copy" /></button>
+          <button
+            class="icon-btn"
+            :title="splitBlockedReason || 'Diviser cette transaction en deux'"
+            aria-label="Diviser cette transaction"
+            :aria-disabled="splitBlockedReason ? 'true' : undefined"
+            @click="$emit('split', transaction)"
+          ><Icon name="split" /></button>
           <button class="icon-btn danger" title="Supprimer cette transaction" aria-label="Supprimer cette transaction" @click="$emit('remove', transaction)"><Icon name="trash" /></button>
         </span>
       </td>
@@ -131,7 +151,6 @@
 </template>
 
 <script setup>
-import { notify } from '../services/feedback'
 /**
  * Une ligne de la table Transactions, en composant a part entiere : c'est
  * ce qui permet a l'edition inline de rester fluide meme sur un tres grand
@@ -153,13 +172,16 @@ import { ref, computed, watch, nextTick } from 'vue'
 import PayeeAutocomplete from './PayeeAutocomplete.vue'
 import CategoryAutocomplete from './CategoryAutocomplete.vue'
 import AmountInput from './AmountInput.vue'
+import FieldError from './FieldError.vue'
 import Icon from './Icon.vue'
 import Money from './Money.vue'
 import CategoryChip from './CategoryChip.vue'
-import { formatAmount, formatDate, displayMemo } from '../services/format'
+import { MAX_DATE, MIN_DATE, amountFieldError, dateFieldError, formatAmount, formatDate, displayMemo } from '../services/format'
 import { findPayeeByName } from '../services/payee'
 import { accountOptionLabel } from '../services/accounts'
 import { categoryChipInfo, needsCategory } from '../services/categories'
+import { useFieldErrors } from '../services/fieldErrors'
+import { transactionRowAction } from '../services/rowKeyboard'
 
 const props = defineProps({
   transaction: { type: Object, required: true },
@@ -177,7 +199,11 @@ const props = defineProps({
   // pour la categorisation automatique par tiers pendant l'edition.
   payeeIndex: { type: Map, required: true },
   todayIso: { type: String, required: true },
-  selected: { type: Boolean, default: false }
+  selected: { type: Boolean, default: false },
+  // Colonne « Solde » (liste filtrée sur un compte, voir Transactions.vue#runningBalanceById).
+  showBalance: { type: Boolean, default: false },
+  // Solde du compte juste après cette transaction (ordre chronologique), null si inconnu.
+  balanceAfter: { type: Number, default: null }
 })
 
 /**
@@ -200,11 +226,18 @@ const emit = defineEmits([
   'toggle-exceptional',
   'toggle-select',
   'remove',
-  'split'
+  'split',
+  'duplicate'
 ])
 
 const editForm = ref(null)
 const firstEditField = ref(null)
+/** Erreurs de saisie de la ligne en édition, sous les champs (une seule ligne est éditée à la fois : ids uniques). */
+const { errors, check, clear, invalidAttrs } = useFieldErrors({
+  date: 'tx-edit-date',
+  accountId: 'tx-edit-account',
+  amount: 'tx-edit-amount'
+})
 const rowRef = ref(null)
 
 function buildEditForm(t) {
@@ -232,6 +265,7 @@ let payeeAtEditStart = null
 
 watch(() => props.isEditing, (editing, wasEditing) => {
   if (editing) {
+    clear()
     editForm.value = buildEditForm(props.transaction)
     payeeAtEditStart = editForm.value.payee
     nextTick(() => firstEditField.value?.focus?.())
@@ -288,6 +322,25 @@ function accountName(id) {
 /** « Sans catégorie » seulement si une catégorie est attendue (pas pour un virement interne ou un ajustement). */
 const awaitsCategory = computed(() => needsCategory(props.transaction))
 
+/**
+ * Raison pour laquelle la transaction ne peut pas être divisée (mêmes règles
+ * que openSplit dans Transactions.vue), vide sinon : le bouton reste
+ * cliquable — le clic explique le refus, utile sans info-bulle (tactile) —
+ * mais apparaît désactivé, avec la raison en info-bulle.
+ */
+const splitBlockedReason = computed(() => {
+  if (props.transaction.transferTransactionId) return 'Un virement entre comptes ne peut pas être divisé'
+  if (props.transaction.balanceAdjustment) return 'Un ajustement de solde ne peut pas être divisé'
+  return ''
+})
+
+/** Raison pour laquelle la transaction ne peut pas être dupliquée (même règle que Transactions.vue#duplicateTransaction), vide sinon. */
+const duplicateBlockedReason = computed(() => {
+  if (props.transaction.transferTransactionId) return 'Un virement entre comptes se crée depuis la page Comptes'
+  if (props.transaction.balanceAdjustment) return 'Un ajustement de solde se crée depuis la page Comptes'
+  return ''
+})
+
 /** Devise du compte de la transaction : le montant s'affiche dans la monnaie réelle du compte. */
 const accountCurrency = computed(() => props.accountsById.get(props.transaction.accountId)?.currency)
 
@@ -308,8 +361,35 @@ function isFuture(iso) {
 const rowLabel = computed(() => {
   const t = props.transaction
   const parts = [formatDate(t.date), t.payee || 'sans tiers', formatAmount(t.amount, accountCurrency.value), categoryPath.value || 'sans catégorie']
-  return `${parts.join(', ')} — Entrée pour modifier`
+  return `${parts.join(', ')} — Entrée pour modifier, Espace pour sélectionner, V pour valider, D pour dupliquer`
 })
+
+/** Espace / V / Suppr sur la ligne qui a le focus : mêmes actions que ses cases et boutons (voir transactionRowAction). */
+function onActionKey(event) {
+  const action = transactionRowAction(event, props.isEditing)
+  if (!action) return
+  event.preventDefault()
+  // Maj+Espace : sélection de la plage depuis la dernière ligne cochée.
+  if (action === 'toggle-select') emit(action, props.transaction, { range: event.shiftKey })
+  else emit(action, props.transaction)
+}
+
+/**
+ * Clic sur la case de sélection (Maj : plage, voir Transactions.vue#toggleSelect).
+ * La case est ensuite recalée sur l'état réel : un Maj+clic sur une case déjà
+ * cochée la décoche nativement alors que la plage la garde sélectionnée, et
+ * Vue ne la corrigerait pas (la prop `selected` n'a pas changé).
+ */
+function onSelectClick(event) {
+  emit('toggle-select', props.transaction, { range: event.shiftKey })
+  const checkbox = event.target
+  nextTick(() => { checkbox.checked = props.selected })
+}
+
+/** Maj+clic sur la case : empêche le navigateur de surligner le texte entre les deux clics. */
+function preventShiftTextSelection(event) {
+  if (event.shiftKey) event.preventDefault()
+}
 
 /**
  * Entrée : enregistre en mode édition ; sinon ouvre l'édition, mais
@@ -328,10 +408,12 @@ function onEnter(event) {
 
 function confirmEdit() {
   if (!editForm.value) return
-  if (!editForm.value.accountId) {
-    notify('Veuillez sélectionner un compte.', 'warning')
-    return
-  }
+  const valid = check({
+    date: dateFieldError(editForm.value.date),
+    accountId: editForm.value.accountId ? '' : 'Choisissez un compte.',
+    amount: amountFieldError(editForm.value.amount, props.transaction.amount)
+  })
+  if (!valid) return
   emit('confirm-edit', {
     accountId: editForm.value.accountId,
     date: editForm.value.date,
@@ -524,7 +606,7 @@ tr.row-editing td:last-child {
   background: var(--ink-800);
 }
 /* Enregistrer / Annuler (.btn-icon, 30 px) tiennent dans la colonne
-   d'actions (72 px) sans déborder du tableau. */
+   d'actions (108 px) sans déborder du tableau. */
 tr.row-editing .row-actions { gap: 4px; }
 tr.row-future td:last-child {
   background: var(--ink-800);
@@ -547,21 +629,8 @@ tr.row-selected:hover td:last-child {
  * tableau consulté en permanence. Sur écran tactile (pas de survol), ils
  * restent toujours visibles.
  */
-.icon-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  transition: background 0.12s, color 0.12s;
-}
-.icon-btn .icon { width: 16px; height: 16px; }
-.icon-btn:hover { background: var(--ink-700); color: var(--text-primary); }
-.icon-btn.danger:hover { background: var(--coral-dim); color: var(--coral); }
+/* Styles communs des boutons-icônes dans style.css (.icon-btn) ; seulement plus compacts ici. */
+.icon-btn { width: 28px; height: 28px; }
 @media (hover: hover) {
   tr:not(.row-editing) .row-actions { opacity: 0; transition: opacity 0.12s; }
   tr:hover .row-actions,
@@ -575,4 +644,11 @@ tr.row-future .cat-chip { opacity: 0.6; }
 td.col-date { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .col-payee { font-weight: 500; }
 .status-dot .icon { width: 12px; height: 12px; stroke-width: 2.8; }
+/* Téléphone : zone de toucher agrandie sans changer le dessin ; un doigt qui
+   manquait la pastille ouvrait l'édition de la ligne. */
+@media (max-width: 600px) {
+  td.cell-status { overflow: visible; }
+  .status-dot { position: relative; }
+  .status-dot::after { content: ''; position: absolute; inset: -6px; }
+}
 </style>

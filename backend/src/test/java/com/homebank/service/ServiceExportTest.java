@@ -65,7 +65,7 @@ class ServiceExportTest {
         assertTimeoutPreemptively(Duration.ofSeconds(30), () ->
                 assertThatThrownBy(service::exporterTableauDeBord)
                         .isInstanceOf(IllegalStateException.class)
-                        .hasMessageContaining("delai depasse"));
+                        .hasMessageContaining("délai dépassé"));
     }
 
     @Test

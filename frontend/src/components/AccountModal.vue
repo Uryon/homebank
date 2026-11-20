@@ -3,9 +3,10 @@
     <div v-dialog="() => $emit('close')" class="modal" role="dialog" aria-modal="true">
       <h2>{{ isEdit ? 'Modifier le compte' : 'Nouveau compte' }}</h2>
       <div class="form-grid">
-        <div class="form-field" style="grid-column: span 2;">
+        <div class="form-field span-2">
           <label for="account-modal-name">Nom</label>
-          <input id="account-modal-name" v-model="form.name" placeholder="Ex : Compte courant" />
+          <input id="account-modal-name" v-model="form.name" maxlength="255" placeholder="Ex : Compte courant" v-bind="invalidAttrs('name')" @input="clear('name')" />
+          <FieldError id="account-modal-name-error" :message="errors.name" />
         </div>
         <div class="form-field">
           <label for="account-modal-type">Type</label>
@@ -25,11 +26,11 @@
           <label for="account-modal-balance">Solde initial</label>
           <AmountInput id="account-modal-balance" v-model="form.initialBalance" />
         </div>
-        <div class="form-field" style="grid-column: span 2;">
+        <div class="form-field span-2">
           <label for="account-modal-notes">Notes</label>
-          <textarea id="account-modal-notes" v-model="form.notes" rows="2"></textarea>
+          <textarea id="account-modal-notes" v-model="form.notes" maxlength="255" rows="2"></textarea>
         </div>
-        <div v-if="isEdit" class="form-field" style="grid-column: span 2;">
+        <div v-if="isEdit" class="form-field span-2">
           <label class="archive-toggle">
             <input v-model="form.archived" type="checkbox" />
             Compte archivé
@@ -40,12 +41,10 @@
           </p>
         </div>
       </div>
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px;">
-        <button v-if="isEdit" class="btn danger" @click="remove">Supprimer</button>
-        <div style="display:flex; gap:10px; margin-left:auto;">
-          <button class="btn secondary" @click="$emit('close')">Annuler</button>
-          <button class="btn" @click="save">Enregistrer</button>
-        </div>
+      <div class="modal-actions">
+        <button v-if="isEdit" class="btn danger modal-actions-start" @click="remove">Supprimer</button>
+        <button class="btn secondary" @click="$emit('close')">Annuler</button>
+        <button class="btn" @click="save">Enregistrer</button>
       </div>
     </div>
   </div>
@@ -61,7 +60,11 @@ import { notify, askConfirm } from '../services/feedback'
 import { ref, computed, watch } from 'vue'
 import { AccountsAPI } from '../services/api'
 import { alertApiError } from '../services/errors'
+import { dataStore } from '../services/dataStore'
+import { accountDeletionBlocker, accountNameError } from '../services/accounts'
 import AmountInput from './AmountInput.vue'
+import FieldError from './FieldError.vue'
+import { useFieldErrors } from '../services/fieldErrors'
 
 const props = defineProps({
   account: { type: Object, default: null }
@@ -76,15 +79,15 @@ function emptyForm() {
 
 const form = ref(props.account ? { ...props.account } : emptyForm())
 
+const { errors, check, clear, invalidAttrs } = useFieldErrors({ name: 'account-modal-name' })
+
 watch(() => props.account, (account) => {
   form.value = account ? { ...account } : emptyForm()
+  clear()
 })
 
 async function save() {
-  if (!form.value.name.trim()) {
-    notify('Le nom du compte est obligatoire.', 'warning')
-    return
-  }
+  if (!check({ name: accountNameError(form.value.name, dataStore.state.accounts, props.account) })) return
   try {
     const saved = isEdit.value
       ? await AccountsAPI.update(props.account.id, form.value)
@@ -98,9 +101,13 @@ async function save() {
 
 async function remove() {
   // Le backend refuse (409) la suppression d'un compte qui contient des
-  // transactions (voir ServiceCompte#delete) : le message ne doit plus
-  // laisser croire que l'historique serait supprime avec lui.
-  if (!(await askConfirm(`Supprimer le compte "${props.account.name}" ? Seul un compte sans transaction peut être supprimé.`))) return
+  // transactions (voir ServiceCompte#delete) : prévenu avant la confirmation.
+  const blocker = accountDeletionBlocker(props.account, dataStore.state.transactions)
+  if (blocker) {
+    notify(blocker, 'warning', 6000)
+    return
+  }
+  if (!(await askConfirm(`Supprimer le compte "${props.account.name}" ?`))) return
   try {
     await AccountsAPI.remove(props.account.id)
     notify('Compte supprimé.', 'success')

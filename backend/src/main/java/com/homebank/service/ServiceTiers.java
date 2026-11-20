@@ -8,6 +8,8 @@ import com.homebank.model.Tiers;
 import com.homebank.model.Transaction;
 import com.homebank.repository.DepotTiers;
 import com.homebank.repository.DepotTransaction;
+import com.homebank.utils.LongueurTexte;
+import com.homebank.utils.Montant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -16,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -24,6 +27,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -64,7 +68,8 @@ public class ServiceTiers {
                 .toList();
     }
 
-    private Tiers findEntityById(Long id) {
+    /** Entite tiers par id (404 si absente), pour les services qui l'affectent directement (voir ServiceTransaction#bulkUpdate). */
+    public Tiers findEntityById(Long id) {
         return payeeRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Tiers introuvable : " + id));
     }
@@ -72,7 +77,9 @@ public class ServiceTiers {
     public TiersDTO create(TiersDTO payload) {
         Tiers p = new Tiers();
         applyPayload(p, payload);
-        return payeeMapper.toDTO(payeeRepository.save(p));
+        Tiers saved = payeeRepository.save(p);
+        log.info("Tiers cree : {} ({})", saved.getName(), saved.getId());
+        return payeeMapper.toDTO(saved);
     }
 
     /**
@@ -83,6 +90,7 @@ public class ServiceTiers {
     public TiersDTO update(Long id, TiersDTO payload) {
         Tiers existing = findEntityById(id);
         applyPayload(existing, payload);
+        log.info("Tiers modifie : {} ({})", existing.getName(), id);
         return payeeMapper.toDTO(payeeRepository.save(existing));
     }
 
@@ -108,6 +116,7 @@ public class ServiceTiers {
         if (name.isEmpty()) {
             throw new IllegalArgumentException("Le nom du tiers est obligatoire.");
         }
+        LongueurTexte.verifier(name, "Le nom du tiers");
         p.setName(name);
 
         // Le champ "pattern" est du texte simple, stocke et affiche TEL QUEL
@@ -120,11 +129,12 @@ public class ServiceTiers {
                     ? p.getPattern()
                     : defaultPattern(name);
         } else {
-            pattern = normalizePatternSegments(pattern);
+            pattern = validatedPattern(pattern);
         }
         p.setPattern(pattern);
 
-        p.setAmount(payload.getAmount() != null ? payload.getAmount().abs() : null);
+        BigDecimal amount = Montant.auCentime(payload.getAmount(), "Le montant du tiers");
+        p.setAmount(amount != null ? amount.abs() : null);
         if (payload.getCategoryId() != null) {
             Categorie category = categoryService.findById(payload.getCategoryId());
             p.setCategory(category);
@@ -151,9 +161,14 @@ public class ServiceTiers {
     // ";" (utilise notamment lors d'une fusion de tiers) : le tiers matche si
     // AU MOINS UN des motifs correspond.
 
-    /** Motif par defaut a partir du nom d'un tiers : le nom lui-meme, tel quel (sans etoile). */
-    private static String defaultPattern(String name) {
-        return name != null ? name.trim() : "";
+    /**
+     * Motif par defaut a partir d'un nom ou d'un libelle : le texte lui-meme,
+     * sans etoile ajoutee. Un ";" y devient "*" : garde tel quel, il separait
+     * le texte en motifs independants, et "VIR ACME; REF 2025" reconnaissait
+     * alors tout libelle contenant "REF 2025", attribue au mauvais tiers.
+     */
+    private static String defaultPattern(String text) {
+        return text != null ? text.trim().replace(';', '*') : "";
     }
 
     /**
@@ -170,6 +185,26 @@ public class ServiceTiers {
             result.append(parts[i].trim());
         }
         return result.toString();
+    }
+
+    /**
+     * Motif saisi, normalise. Un morceau fait uniquement d'etoiles reconnaitrait
+     * n'importe quel texte : ce tiers absorberait alors toutes les operations
+     * importees et tous les tiers saisis (voir matchPayee), d'ou le refus.
+     */
+    private static String validatedPattern(String rawField) {
+        String pattern = normalizePatternSegments(rawField);
+        // Ex : ";" ou un caractere de controle seul, retire par le nettoyage.
+        if (pattern.replace(";", "").isBlank()) {
+            throw new IllegalArgumentException("Le motif doit contenir un texte à reconnaître.");
+        }
+        for (String part : pattern.split(";")) {
+            if (!part.isEmpty() && part.replace("*", "").isBlank()) {
+                throw new IllegalArgumentException(
+                        "Le motif « " + part + " » reconnaîtrait toutes les opérations : indiquez un texte à rechercher.");
+            }
+        }
+        return pattern;
     }
 
     /** Retire les etoiles en tete et en fin de motif ("*Carrefour*Paris*" -> "Carrefour*Paris"). */
@@ -200,8 +235,33 @@ public class ServiceTiers {
      * ne matcherait jamais ce genre de libelle, alors que visuellement le
      * texte "correspond" bien pour l'utilisateur.
      */
-    private static String normalizeWhitespace(String s) {
-        return s == null ? null : WHITESPACE_RUN.matcher(s).replaceAll(" ").trim();
+    static String normalizeWhitespace(String s) {
+        if (s == null || isWhitespaceNormalized(s)) return s;
+        return WHITESPACE_RUN.matcher(s).replaceAll(" ").trim();
+    }
+
+    /**
+     * Vrai si normalizeWhitespace laisserait le texte inchange : ni espace en
+     * bord, ni espaces consecutifs, ni autre caractere d'espacement (tabulation,
+     * insecable...) ou de controle. Cas de presque tous les motifs de tiers :
+     * evite l'expression reguliere, appelee pour chaque tiers et chaque ligne
+     * d'un import (5000 lignes x 600 tiers : ~6 s sur ~8 s d'un reimport).
+     * Dans le doute (caractere de controle...), renvoie false : le chemin
+     * complet donne alors le resultat exact.
+     */
+    private static boolean isWhitespaceNormalized(String s) {
+        int length = s.length();
+        if (length == 0) return true;
+        if (s.charAt(0) <= ' ' || s.charAt(length - 1) <= ' ') return false;
+        char previous = 0;
+        for (int i = 0; i < length; i++) {
+            char c = s.charAt(i);
+            boolean extraSpace = c == ' ' && previous == ' ';
+            boolean otherWhitespace = c < ' ' || c == '\u00A0' || c == '\u2007' || c == '\u202F';
+            if (extraSpace || otherWhitespace) return false;
+            previous = c;
+        }
+        return true;
     }
 
     /**
@@ -210,37 +270,79 @@ public class ServiceTiers {
      * ServiceTransaction#payeesMayBeSameMerchant (detection des doublons probables).
      */
     static boolean matchesPatternField(String patternField, String text) {
-        if (patternField == null || patternField.isBlank() || text == null || text.isBlank()) return false;
-        String normalizedText = normalizeWhitespace(text);
-        String lowerText = normalizedText.toLowerCase(Locale.ROOT);
+        if (text == null || text.isBlank()) return false;
+        return motifPrepare(patternField).reconnait(LibelleCompare.de(text));
+    }
+
+    /** Libelle prepare une seule fois pour etre compare a tous les tiers. */
+    private record LibelleCompare(String normalized, String lower) {
+        static LibelleCompare de(String text) {
+            String normalized = normalizeWhitespace(text);
+            return new LibelleCompare(normalized, normalized.toLowerCase(Locale.ROOT));
+        }
+    }
+
+    /**
+     * Champ "pattern" analyse une fois pour toutes : la comparaison est appelee
+     * pour chaque tiers et chaque ligne d'un import (des millions de fois), et
+     * redecoupait, normalisait et recompilait le meme motif a chaque appel.
+     */
+    private record MotifPrepare(List<String> texts, List<Pattern> wildcards, boolean matchesEverything) {
+        private static final MotifPrepare VIDE = new MotifPrepare(List.of(), List.of(), false);
+
+        boolean reconnait(LibelleCompare label) {
+            if (matchesEverything) return true;
+            for (String text : texts) {
+                if (label.lower().contains(text)) return true;
+            }
+            for (Pattern wildcard : wildcards) {
+                if (wildcard.matcher(label.normalized()).find()) return true;
+            }
+            return false;
+        }
+    }
+
+    /** Borne de securite du cache : largement au-dessus du nombre de tiers d'un utilisateur. */
+    private static final int MAX_MOTIFS_PREPARES = 20_000;
+    private static final Map<String, MotifPrepare> MOTIFS_PREPARES = new ConcurrentHashMap<>();
+
+    private static MotifPrepare motifPrepare(String patternField) {
+        if (patternField == null || patternField.isBlank()) return MotifPrepare.VIDE;
+        MotifPrepare known = MOTIFS_PREPARES.get(patternField);
+        if (known != null) return known;
+        if (MOTIFS_PREPARES.size() >= MAX_MOTIFS_PREPARES) MOTIFS_PREPARES.clear();
+        MotifPrepare prepared = preparerMotif(patternField);
+        MOTIFS_PREPARES.put(patternField, prepared);
+        return prepared;
+    }
+
+    private static MotifPrepare preparerMotif(String patternField) {
+        List<String> texts = new ArrayList<>();
+        List<Pattern> wildcards = new ArrayList<>();
         for (String rawPart : patternField.split(";")) {
             String part = normalizeWhitespace(rawPart);
             if (part == null || part.isEmpty()) continue;
-            // Le champ stocke/affiche est du texte simple, sans etoile
-            // ("Carrefour"), reconnu partout ou il apparait dans le libelle :
-            // simple test "contient", insensible a la casse. Appele pour chaque
-            // tiers et chaque ligne d'un import (des centaines de milliers de
-            // fois) : l'ancienne expression ".*Carrefour.*" etait ~100 fois plus
-            // lente, son ".*" initial essayant chaque position du libelle.
+            // Texte simple, sans etoile ("Carrefour"), reconnu partout ou il
+            // apparait dans le libelle : simple test "contient", insensible a
+            // la casse, bien plus rapide qu'une expression ".*Carrefour.*".
             if (part.indexOf('*') < 0) {
-                if (lowerText.contains(part.toLowerCase(Locale.ROOT))) return true;
+                texts.add(part.toLowerCase(Locale.ROOT));
                 continue;
             }
             // Motif avance avec etoile(s) (ex : "Carrefour*Paris") : expression
             // reguliere. Les etoiles de debut/fin sont inutiles (find() cherche
             // deja dans tout le libelle) et coutaient cher : retirees.
             String core = stripOuterStars(part);
-            if (core.isEmpty()) return true; // motif "*" : correspond a tout, comme avant
+            if (core.isEmpty()) return new MotifPrepare(List.of(), List.of(), true); // motif "*" : correspond a tout
             try {
-                Pattern compiled = Pattern.compile(wildcardToRegex(core), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
-                if (compiled.matcher(normalizedText).find()) return true;
+                wildcards.add(Pattern.compile(wildcardToRegex(core), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE));
             } catch (PatternSyntaxException e) {
                 // motif invalide (ne devrait plus arriver avec le systeme "joker") : ignore ce
                 // segment mais trace l'anomalie plutot que de la masquer silencieusement
                 log.warn("Motif de tiers invalide ignore : \"{}\" ({})", rawPart, e.getMessage());
             }
         }
-        return false;
+        return new MotifPrepare(List.copyOf(texts), List.copyOf(wildcards), false);
     }
 
     /**
@@ -271,9 +373,10 @@ public class ServiceTiers {
     Optional<Tiers> matchPayee(String text, BigDecimal amount, List<Tiers> candidates) {
         if (text == null || text.isBlank()) return Optional.empty();
         Tiers genericMatch = null;
+        LibelleCompare label = LibelleCompare.de(text);
 
         for (Tiers payee : candidates) {
-            if (!matchesPatternField(payee.getPattern(), text)) continue;
+            if (!motifPrepare(payee.getPattern()).reconnait(label)) continue;
 
             if (payee.getAmount() == null) {
                 if (genericMatch == null) genericMatch = payee;
@@ -318,9 +421,14 @@ public class ServiceTiers {
      * suivantes du meme lot le retrouvent sans requete supplementaire.
      */
     Tiers resolveOrCreate(String rawText, BigDecimal amount, List<Tiers> knownPayees) {
-        if (rawText == null || rawText.isBlank()) return null;
+        if (hasNoText(rawText)) return null;
         return findExisting(rawText, amount, knownPayees)
                 .orElseGet(() -> createFromText(rawText, knownPayees));
+    }
+
+    /** trim() retire aussi les caracteres de controle, que isBlank() laisse passer. */
+    private static boolean hasNoText(String text) {
+        return text == null || text.trim().isEmpty() || text.isBlank();
     }
 
     /**
@@ -330,25 +438,24 @@ public class ServiceTiers {
      * ServiceImport). Vide si le texte est vide ou ne correspond a aucun tiers.
      */
     Optional<Tiers> findExisting(String rawText, BigDecimal amount, List<Tiers> knownPayees) {
-        if (rawText == null || rawText.isBlank()) return Optional.empty();
+        if (hasNoText(rawText)) return Optional.empty();
         String trimmed = rawText.trim();
         BigDecimal normalizedAmount = amount != null ? amount.abs() : null;
 
+        // Motif + montant exact : c'est ce qui distingue deux tiers au meme libelle.
         Optional<Tiers> matched = matchPayee(trimmed, normalizedAmount, knownPayees);
-        if (matched.isPresent()) return matched;
+        if (matched.isPresent() && matched.get().getAmount() != null) return matched;
 
-        // Filet de securite : evite un doublon si un tiers de meme nom existe
-        // deja mais que son motif ne matchait pas ce texte precis (ex :
-        // l'utilisateur retape a la main le nom exact d'un tiers existant
-        // dans le champ "Tiers" d'une transaction). Un tiers generique
-        // (amount == null) matche quel que soit le montant, comme partout
-        // ailleurs dans ce fichier (voir matchPayee) : sans ce cas, retaper
-        // le nom d'un tiers generique sur une transaction d'un montant
-        // different creait un second tiers generique portant le meme nom.
-        return knownPayees.stream()
+        // Le nom exact passe avant un motif generique : choisir « Carrefour
+        // Market » ne doit pas donner « Carrefour », dont le motif est contenu
+        // dans ce nom. Il evite aussi un doublon si le motif du tiers ne
+        // reconnait pas son propre nom. Un tiers generique (amount == null)
+        // convient quel que soit le montant, comme dans matchPayee.
+        Optional<Tiers> sameName = knownPayees.stream()
                 .filter(p -> p.getName() != null && p.getName().equalsIgnoreCase(trimmed))
                 .filter(p -> p.getAmount() == null || sameAmount(p.getAmount(), normalizedAmount))
                 .findFirst();
+        return sameName.isPresent() ? sameName : matched;
     }
 
     /**
@@ -359,7 +466,8 @@ public class ServiceTiers {
     Tiers createFromText(String rawText, List<Tiers> knownPayees) {
         String trimmed = rawText.trim();
         Tiers created = new Tiers();
-        created.setName(trimmed);
+        // Texte issu d'un releve importe : tronque plutot que refuse.
+        created.setName(LongueurTexte.tronquer(trimmed));
         created.setPattern(defaultPattern(trimmed));
         // Toujours generique a la creation automatique (voir javadoc ci-dessus) :
         // le montant n'est jamais deduit de la transaction importee.
@@ -402,7 +510,7 @@ public class ServiceTiers {
         Matcher matcher = BANK_LABEL.matcher(label);
         if (!matcher.matches()) return new TiersSuggere(label, defaultPattern(label));
         String merchant = matcher.group(2).trim();
-        return new TiersSuggere(merchant, matcher.group(1) + " " + merchant);
+        return new TiersSuggere(merchant, defaultPattern(matcher.group(1) + " " + merchant));
     }
 
     /**
@@ -413,7 +521,7 @@ public class ServiceTiers {
     Tiers createFromBankLabel(String rawText, List<Tiers> knownPayees) {
         TiersSuggere suggested = suggestFromBankLabel(rawText);
         Tiers created = new Tiers();
-        created.setName(suggested.name());
+        created.setName(LongueurTexte.tronquer(suggested.name()));
         created.setPattern(suggested.pattern());
         created.setAmount(null);
         Tiers saved = payeeRepository.save(created);
@@ -422,15 +530,16 @@ public class ServiceTiers {
     }
 
     /**
-     * Le tiers est-il encore tel que cree automatiquement (motif = nom, ou
-     * prefixe bancaire + nom, voir suggestFromBankLabel) ? Un tiers renomme ou
-     * dont le motif a ete retouche ne l'est plus.
+     * Le tiers est-il encore tel que cree automatiquement (sans categorie ni
+     * montant, motif = nom ou prefixe bancaire + nom, voir suggestFromBankLabel) ?
+     * Un tiers renomme, complete ou dont le motif a ete retouche ne l'est plus.
      */
-    private static boolean isAutoCreatedState(Tiers payee) {
+    static boolean isAutoCreatedState(Tiers payee) {
+        if (payee.getCategory() != null || payee.getAmount() != null) return false;
         String pattern = payee.getPattern();
         String name = payee.getName();
         return pattern.equals(defaultPattern(name))
-                || BANK_PREFIXES.stream().anyMatch(prefix -> pattern.equalsIgnoreCase(prefix + " " + name));
+                || BANK_PREFIXES.stream().anyMatch(prefix -> pattern.equalsIgnoreCase(defaultPattern(prefix + " " + name)));
     }
 
     /** Charge tous les tiers, pour etre reutilise a travers tout un lot (import, migration...). */
@@ -446,8 +555,8 @@ public class ServiceTiers {
      * d'une transaction a la main.
      *
      * Par securite, ne supprime que les tiers encore dans leur etat
-     * "auto-cree" (motif = nom exact, jamais personnalise depuis) :
-     * un tiers renomme ou dont le motif a ete modifie a la main par l'utilisateur
+     * "auto-cree" (voir isAutoCreatedState) : un tiers renomme, dote d'une
+     * categorie ou d'un montant, ou dont le motif a ete modifie a la main
      * (page Tiers, fusion...) n'est jamais supprime automatiquement.
      *
      * Toujours dans sa propre transaction (REQUIRES_NEW), et appele APRES le
@@ -458,6 +567,27 @@ public class ServiceTiers {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void deleteIfOrphan(Long payeeId) {
         payeeRepository.findById(payeeId).ifPresent(this::pruneIfOrphan);
+    }
+
+    /**
+     * Meme nettoyage que deleteIfOrphan pour plusieurs tiers, en une seule
+     * transaction et quelques requetes : supprimer ou annuler un gros import
+     * touche des centaines de tiers. Tout ou rien : en cas d'echec, l'appelant
+     * reprend tiers par tiers (voir ServiceTransaction#prunePayees).
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void deleteOrphans(Collection<Long> payeeIds) {
+        List<Long> candidates = payeeRepository.findAllById(payeeIds).stream()
+                .filter(ServiceTiers::isAutoCreatedState)
+                .map(Tiers::getId)
+                .toList();
+        if (candidates.isEmpty()) return;
+
+        Set<Long> inUse = new HashSet<>(transactionRepository.findPayeeIdsInUse(candidates));
+        List<Long> orphans = candidates.stream().filter(id -> !inUse.contains(id)).toList();
+        if (!orphans.isEmpty()) {
+            payeeRepository.deleteAllByIdInBatch(orphans);
+        }
     }
 
     private void pruneIfOrphan(Tiers payee) {
@@ -489,11 +619,13 @@ public class ServiceTiers {
     @Transactional
     public TiersDTO merge(List<Long> sourceIds, Long targetId, String pattern) {
         if (targetId == null) {
-            throw new IllegalArgumentException("Le tiers a conserver est obligatoire");
+            throw new IllegalArgumentException("Le tiers à conserver est obligatoire.");
         }
         if (sourceIds == null) {
-            throw new IllegalArgumentException("La liste des elements a fusionner est obligatoire");
+            throw new IllegalArgumentException("La liste des tiers à fusionner est obligatoire.");
         }
+        // Controle avant toute reaffectation : un refus ne laisse rien a moitie fait.
+        String mergedPattern = pattern != null && !pattern.isBlank() ? validatedPattern(pattern) : null;
         Tiers target = findEntityById(targetId);
 
         for (Long sourceId : sourceIds) {
@@ -507,10 +639,11 @@ public class ServiceTiers {
             }
 
             payeeRepository.delete(source);
+            log.info("Tiers {} ({}) fusionne dans {} ({})", source.getName(), sourceId, target.getName(), targetId);
         }
 
-        if (pattern != null && !pattern.isBlank()) {
-            target.setPattern(pattern.trim());
+        if (mergedPattern != null) {
+            target.setPattern(mergedPattern);
         }
 
         return payeeMapper.toDTO(payeeRepository.save(target));
@@ -597,7 +730,9 @@ public class ServiceTiers {
         log.info("Categorisation automatique : {} tiers categorise(s), {} transaction(s) mise(s) a jour",
                 payeesToSave.size(), transactionsToSave.size());
 
-        return new CategorisationAutoResultatDTO(payeesToSave.size(), transactionsToSave.size());
+        return new CategorisationAutoResultatDTO(payeesToSave.size(), transactionsToSave.size(),
+                payeesToSave.stream().map(Tiers::getId).toList(),
+                transactionsToSave.stream().map(Transaction::getId).toList());
     }
 
     /** Regroupe les transactions par id de tiers ; les transactions sans tiers sont ignorees. */
@@ -614,7 +749,8 @@ public class ServiceTiers {
      * Categorie deja affectee au tiers, ou deduite si toutes ses transactions
      * deja categorisees s'accordent sur une seule (voir javadoc de
      * autoCategorize) — si deduite, le tiers est ajoute a payeesToSave. Null
-     * si le tiers n'a pas de categorie et qu'aucun signal consistant n'existe.
+     * si le tiers n'a pas de categorie et qu'aucun signal consistant n'existe,
+     * ou si la seule categorie trouvee est masquee.
      */
     private static Categorie resolveTargetCategory(Tiers payee, List<Transaction> transactions, List<Tiers> payeesToSave) {
         if (payee.getCategory() != null) return payee.getCategory();
@@ -626,6 +762,10 @@ public class ServiceTiers {
         if (distinctCategories.size() != 1) return null;
 
         Categorie deduced = distinctCategories.iterator().next();
+        // Categorie masquee = plus utilisee (ex : abonnement resilie) : la
+        // proposer pour les nouvelles transactions contredirait la saisie, qui
+        // ne la propose plus (CategoryAutocomplete).
+        if (deduced.isHidden()) return null;
         payee.setCategory(deduced);
         payeesToSave.add(payee);
         return deduced;

@@ -1,6 +1,7 @@
 package com.homebank.dto;
 
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.homebank.utils.ModePaiement;
 import lombok.Builder;
 import lombok.Getter;
@@ -28,9 +29,15 @@ public class TransactionDTO {
     private boolean validated;
     private boolean periodicExpense;
     private boolean exceptional;
-    /** Libelle bancaire d'origine (voir Transaction#bankLabel) : pris en compte a la creation seulement (restauration apres annulation). */
+    /** Libelle bancaire d'origine (voir Transaction#bankLabel) : repris uniquement par une restauration (voir ServiceRestaurationTransaction). */
     private String bankLabel;
     private boolean duplicateIgnored;
-    /** Ajustement de solde (voir Transaction#balanceAdjustment) : pris en compte a la creation seulement, jamais modifie par une mise a jour. */
+    /** Ajustement de solde (voir Transaction#balanceAdjustment) : repris uniquement par une restauration. */
     private boolean balanceAdjustment;
+    /** Montant d'avant division (voir Transaction#splitFromAmount), omis s'il est absent : la liste complete reste legere. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private BigDecimal splitFromAmount;
+    /** Suggestion periodique refusee (voir Transaction#periodicSuggestionIgnored), omis si faux, comme ci-dessus. */
+    @JsonInclude(JsonInclude.Include.NON_DEFAULT)
+    private boolean periodicSuggestionIgnored;
 }

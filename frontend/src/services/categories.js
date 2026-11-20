@@ -33,13 +33,31 @@ export function needsCategory(t) {
   return !t.categoryId && !t.transferTransactionId && !t.balanceAdjustment
 }
 
-export function flattenCategories(categories) {
-  const childrenByParentId = new Map()
+/**
+ * Sous-catégories regroupées par catégorie racine. L'application gère deux
+ * niveaux, mais une ancienne fusion a pu créer un niveau de plus : ces
+ * catégories sont rattachées à leur racine pour rester visibles et réparables.
+ */
+export function childrenByRootId(categories) {
+  const byId = new Map(categories.map(c => [c.id, c]))
+  const result = new Map()
   for (const c of categories) {
     if (!c.parentId) continue
-    if (!childrenByParentId.has(c.parentId)) childrenByParentId.set(c.parentId, [])
-    childrenByParentId.get(c.parentId).push(c)
+    const seen = new Set([c.id])
+    let root = byId.get(c.parentId)
+    while (root?.parentId && !seen.has(root.id)) {
+      seen.add(root.id)
+      root = byId.get(root.parentId)
+    }
+    if (!root || root.parentId) continue
+    if (!result.has(root.id)) result.set(root.id, [])
+    result.get(root.id).push(c)
   }
+  return result
+}
+
+export function flattenCategories(categories) {
+  const childrenByParentId = childrenByRootId(categories)
 
   const withIcon = (c) => (c.icon ? `${c.icon} ${c.name}` : c.name)
 
@@ -73,4 +91,39 @@ export function categoryChipInfo(categoryId, categoriesById) {
     hue: (root.id * 47) % 360,
     path: parent ? `${parent.name} › ${category.name}` : category.name
   }
+}
+
+/**
+ * Recherche de la page Transactions qui affiche les transactions d'une
+ * catégorie (entrée de flattenCategories) : son libellé « Parent : Enfant »
+ * à l'identique, entre guillemets. Pour une racine, la recherche exacte
+ * retrouve aussi ses sous-catégories (voir matchesSearchTerm), y compris
+ * quand des transactions sont rattachées directement à la racine.
+ */
+export function transactionSearchForCategory(entry) {
+  return `"${entry.label}"`
+}
+
+/** Recherche de la page Transactions qui affiche les transactions d'un tiers (nom exact, entre guillemets). */
+export function transactionSearchForPayee(payee) {
+  return `"${payee.name}"`
+}
+
+/** Types d'une catégorie (énumération TypeCategorie du backend), dans l'ordre des listes de choix. */
+export const CATEGORY_TYPE_OPTIONS = Object.freeze([
+  { value: 'EXPENSE', label: 'Dépense' },
+  { value: 'INCOME', label: 'Revenu' },
+  { value: 'BOTH', label: 'Les deux' }
+])
+
+const CATEGORY_TYPE_LABELS = Object.fromEntries(CATEGORY_TYPE_OPTIONS.map(o => [o.value, o.label]))
+
+/** Libellé d'un type de catégorie (« Dépense », « Revenu », « Les deux ») ; type inconnu rendu tel quel. */
+export function categoryTypeLabel(type) {
+  return CATEGORY_TYPE_LABELS[type] || type
+}
+
+/** Préfixe un nom de catégorie avec son icône (emoji) suivie d'un espace ; chaîne vide sans icône. */
+export function categoryIconPrefix(icon) {
+  return icon ? `${icon} ` : ''
 }

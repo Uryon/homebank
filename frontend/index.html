@@ -8,13 +8,14 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&family=Sora:wght@500..700&display=swap" rel="stylesheet">
-    <!-- Applique le thème choisi avant le premier affichage (évite un flash clair) ; voir src/services/theme.js -->
+    <!-- Polices chargées sans bloquer le premier affichage : l'appli reste immédiate si le réseau est lent ou coupé. -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&family=Sora:wght@500..700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <!-- Applique le thème choisi avant le premier affichage (évite un flash de l'autre thème) ; voir src/services/theme.js.
+         Clair par défaut ; « system » (choix explicite) laisse le système décider. -->
     <script>
-        try {
-            var theme = localStorage.getItem('homebank-theme');
-            if (theme === 'light' || theme === 'dark') document.documentElement.dataset.theme = theme;
-        } catch (e) { /* stockage indisponible : on suit le système */ }
+        var theme = 'light';
+        try { theme = localStorage.getItem('homebank-theme') || 'light'; } catch (e) { /* stockage indisponible : clair */ }
+        if (theme !== 'system') document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
     </script>
 </head>
 <body>

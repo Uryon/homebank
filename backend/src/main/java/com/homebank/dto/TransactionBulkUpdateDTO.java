@@ -25,6 +25,12 @@ public class TransactionBulkUpdateDTO {
 
     private boolean payeeProvided;
     private String payee;
+    /**
+     * Tiers existant designe par son id (prioritaire sur `payee` si fourni) :
+     * utilise par l'annulation d'une fusion de tiers, ou le texte serait
+     * reconnu par le motif du tiers cible plutot que par le tiers recree.
+     */
+    private Long payeeId;
 
     private boolean paymentModeProvided;
     private ModePaiement paymentMode;

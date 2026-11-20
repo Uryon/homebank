@@ -15,7 +15,7 @@ import java.time.ZoneId;
  * releve bancaire source la contient encore lors d'un futur import (voir
  * ServiceTransaction#delete). Sans cette trace, une transaction supprimee
  * (ex : paire "depense remboursee" totalement effacee, voir
- * ServiceTransaction#findReimbursementGroups) disparaissait bien de la base,
+ * ServiceDoublon#findReimbursementGroups) disparaissait bien de la base,
  * mais reapparaissait au prochain import faute d'un doublon deja en base
  * pour la reconnaitre.
  * <p>
@@ -25,7 +25,7 @@ import java.time.ZoneId;
  * cascade de suppression a gerer si le compte est supprime).
  */
 @Entity
-@Table(name = "transactions_supprimees")
+@Table(name = "transactions_supprimees", indexes = @Index(name = "idx_transactions_supprimees_compte", columnList = "account_id"))
 @Getter
 @Setter
 public class TransactionSupprimee {

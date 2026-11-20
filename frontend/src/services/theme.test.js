@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_THEME,
   THEME_STORAGE_KEY,
   applyThemePreference,
   normalizeThemePreference,
@@ -19,29 +20,31 @@ function memoryStorage(initial = {}) {
 }
 
 describe('theme', () => {
-  it('ramène toute valeur inconnue à « system »', () => {
+  it('ramène toute valeur inconnue au thème clair, par défaut', () => {
+    expect(DEFAULT_THEME).toBe('light')
     expect(normalizeThemePreference('dark')).toBe('dark')
-    expect(normalizeThemePreference('light')).toBe('light')
-    expect(normalizeThemePreference('violet')).toBe('system')
-    expect(normalizeThemePreference(null)).toBe('system')
+    expect(normalizeThemePreference('system')).toBe('system')
+    expect(normalizeThemePreference('violet')).toBe('light')
+    expect(normalizeThemePreference(null)).toBe('light')
   })
 
-  it('lit la préférence mémorisée', () => {
+  it('lit la préférence mémorisée, clair sans choix', () => {
     expect(readThemePreference(memoryStorage({ [THEME_STORAGE_KEY]: 'dark' }))).toBe('dark')
-    expect(readThemePreference(memoryStorage())).toBe('system')
+    expect(readThemePreference(memoryStorage({ [THEME_STORAGE_KEY]: 'system' }))).toBe('system')
+    expect(readThemePreference(memoryStorage())).toBe('light')
   })
 
-  it('suit le système si le stockage est inaccessible', () => {
+  it('reste en clair si le stockage est inaccessible', () => {
     const broken = { getItem: () => { throw new Error('bloqué') } }
-    expect(readThemePreference(broken)).toBe('system')
+    expect(readThemePreference(broken)).toBe('light')
   })
 
-  it('ne mémorise rien pour « system » et efface un choix précédent', () => {
+  it('mémorise « system » et « dark », pas le thème par défaut', () => {
     const storage = memoryStorage({ [THEME_STORAGE_KEY]: 'dark' })
     saveThemePreference('system', storage)
-    expect(storage.data[THEME_STORAGE_KEY]).toBeUndefined()
+    expect(storage.data[THEME_STORAGE_KEY]).toBe('system')
     saveThemePreference('light', storage)
-    expect(storage.data[THEME_STORAGE_KEY]).toBe('light')
+    expect(storage.data[THEME_STORAGE_KEY]).toBeUndefined()
   })
 
   it('pose ou retire data-theme sur la racine', () => {
@@ -59,6 +62,6 @@ describe('resolveTheme', () => {
     expect(resolveTheme('system', false)).toBe('light')
     expect(resolveTheme('light', true)).toBe('light')
     expect(resolveTheme('dark', false)).toBe('dark')
-    expect(resolveTheme('violet', true)).toBe('dark')
+    expect(resolveTheme('violet', true)).toBe('light')
   })
 })

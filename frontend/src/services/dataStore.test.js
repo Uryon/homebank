@@ -32,6 +32,90 @@ async function freshMocks() {
   return { AccountsAPI, CategoriesAPI, PayeesAPI, TransactionsAPI }
 }
 
+describe('affichage immédiat des changements confirmés', () => {
+  it('remplace une transaction connue et ajoute une nouvelle, sans requête', async () => {
+    const { TransactionsAPI } = await freshMocks()
+    TransactionsAPI.list.mockResolvedValue([{ id: 1, memo: 'a' }, { id: 2, memo: 'b' }])
+    const { dataStore } = await import('./dataStore')
+    await dataStore.prefetch()
+    TransactionsAPI.list.mockClear()
+
+    dataStore.showSavedTransaction({ id: 2, memo: 'modifié' })
+    dataStore.showSavedTransaction({ id: 3, memo: 'nouvelle' })
+
+    expect(dataStore.state.transactions.map(t => [t.id, t.memo])).toEqual([[3, 'nouvelle'], [1, 'a'], [2, 'modifié']])
+    expect(TransactionsAPI.list).not.toHaveBeenCalled()
+  })
+
+  it('retire les transactions supprimées et la jumelle de leur virement', async () => {
+    const { TransactionsAPI } = await freshMocks()
+    TransactionsAPI.list.mockResolvedValue([
+      { id: 1, transferTransactionId: 2 },
+      { id: 2, transferTransactionId: 1 },
+      { id: 3 },
+      { id: 4 }
+    ])
+    const { dataStore } = await import('./dataStore')
+    await dataStore.prefetch()
+
+    dataStore.hideDeletedTransactions([1, 3])
+
+    expect(dataStore.state.transactions.map(t => t.id)).toEqual([4])
+  })
+})
+
+describe('dataStore.applyTransactionUpdate', () => {
+  it('garde la liste hors du suivi réactif, sans perdre le signal de changement', async () => {
+    const { TransactionsAPI } = await freshMocks()
+    const { isReactive, computed } = await import('vue')
+    const { dataStore } = await import('./dataStore')
+    await dataStore.prefetch()
+    const count = computed(() => dataStore.state.transactions.length)
+    expect(count.value).toBe(1)
+
+    TransactionsAPI.list.mockResolvedValue([{ id: 1 }, { id: 2 }])
+    await dataStore.refreshTransactions()
+
+    expect(isReactive(dataStore.state.transactions)).toBe(false)
+    expect(count.value).toBe(2)
+  })
+
+  it('remplace la transaction, aligne la jumelle du virement et ne recharge rien', async () => {
+    const { TransactionsAPI } = await freshMocks()
+    TransactionsAPI.list.mockResolvedValue([
+      { id: 1, validated: false, transferTransactionId: 2, memo: 'a' },
+      { id: 2, validated: false, transferTransactionId: 1, memo: 'b' },
+      { id: 3, validated: false }
+    ])
+    const { dataStore } = await import('./dataStore')
+    await dataStore.prefetch()
+    const untouched = dataStore.state.transactions[2]
+
+    dataStore.applyTransactionUpdate({ id: 1, validated: true, transferTransactionId: 2, memo: 'a' })
+
+    expect(dataStore.state.transactions[0].validated).toBe(true)
+    expect(dataStore.state.transactions[1]).toMatchObject({ validated: true, memo: 'b' })
+    expect(dataStore.state.transactions[2]).toBe(untouched)
+    expect(TransactionsAPI.list).toHaveBeenCalledTimes(1)
+  })
+
+  it('remplace un chargement en cours, qui a pu lire l\'ancienne valeur', async () => {
+    const { TransactionsAPI } = await freshMocks()
+    const { dataStore } = await import('./dataStore')
+    await dataStore.prefetch()
+    let resolveOld
+    TransactionsAPI.list.mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve }))
+    const refresh = dataStore.refreshTransactions()
+    TransactionsAPI.list.mockResolvedValue([{ id: 1, validated: true }])
+
+    dataStore.applyTransactionUpdate({ id: 1, validated: true })
+    resolveOld([{ id: 1, validated: false }])
+    await refresh
+
+    expect(dataStore.state.transactions).toEqual([{ id: 1, validated: true }])
+  })
+})
+
 describe('dataStore.prefetch', () => {
   it('charge les quatre ressources et met a jour l\'etat et les flags "loaded"', async () => {
     const { AccountsAPI, CategoriesAPI, PayeesAPI, TransactionsAPI } = await freshMocks()
@@ -231,5 +315,43 @@ describe('chargements concurrents d\'une meme ressource', () => {
 
     await expect(premier).resolves.toBeUndefined()
     expect(dataStore.state.payees).toEqual([{ id: 3, name: 'EDF' }])
+  })
+})
+
+describe('dataStore.revalidate', () => {
+  it('ne redemande pas des données chargées il y a moins de FRESH_FOR_MS', async () => {
+    const { TransactionsAPI } = await freshMocks()
+    const { dataStore } = await import('./dataStore')
+
+    await dataStore.prefetch()
+    await dataStore.revalidate()
+
+    expect(TransactionsAPI.list).toHaveBeenCalledTimes(1)
+  })
+
+  it('recharge seulement les ressources devenues anciennes', async () => {
+    const { CategoriesAPI, TransactionsAPI } = await freshMocks()
+    const { dataStore, FRESH_FOR_MS } = await import('./dataStore')
+
+    await dataStore.prefetch()
+    // Seules les transactions ont été rechargées depuis : elles restent fraîches.
+    const later = Date.now() + FRESH_FOR_MS + 1
+    vi.spyOn(Date, 'now').mockReturnValue(later)
+    await dataStore.refreshTransactions()
+    await dataStore.revalidate(later)
+    vi.restoreAllMocks()
+
+    expect(CategoriesAPI.list).toHaveBeenCalledTimes(2)
+    expect(TransactionsAPI.list).toHaveBeenCalledTimes(2) // prefetch + refreshTransactions, pas revalidate
+  })
+
+  it('refreshAll recharge tout, même des données fraîches', async () => {
+    const { TransactionsAPI } = await freshMocks()
+    const { dataStore } = await import('./dataStore')
+
+    await dataStore.prefetch()
+    await dataStore.refreshAll()
+
+    expect(TransactionsAPI.list).toHaveBeenCalledTimes(2)
   })
 })

@@ -5,20 +5,25 @@ backend/target/
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/coverage/
+
+# Export PDF du tableau de bord (voir ServiceExport / export/export-dashboard.mjs) ;
+# export/sortie/ = dossier de sortie synchronise Google Drive, PDF generes uniquement
+/export/node_modules/
+
+# Lanceur HomeBank.vbs : profil Edge de la fenetre, journaux
+/.homebank-edge/*
+/logs/
+*.log
 
 # IDE / OS
 .idea/
 .vscode/
 *.iml
 .DS_Store
-/.homebank-edge/*
+
+# Fichiers locaux : notes, archives, releves bancaires et PDF (donnees personnelles)
 ideas.txt
 *.zip
-*.log
 *.csv
 *.pdf
-
-# Export PDF du tableau de bord (voir ServiceExport / export/export-dashboard.mjs)
-# export/sortie/ = dossier de sortie synchronise Google Drive, ne doit contenir que les PDF generes
-/export/*.pdf
-/export/node_modules/

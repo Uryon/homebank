@@ -6,6 +6,7 @@
  * - flèches : cellule voisine ; Début / Fin : première / dernière cellule de la ligne ;
  * - le focus d'une cellule déclenche le même détail que le survol (événement
  *   mouseenter rejoué sur la cellule), sa perte ou Échap le referme (mouseleave).
+ * - Entrée : comme un clic sur la cellule (ouvre ses transactions).
  * Le calcul de la cellule cible est dans nextGridPosition (testé).
  */
 
@@ -63,6 +64,12 @@ function onKeydown(event) {
   if (!cell || !table.contains(cell)) return
   if (event.key === 'Escape') {
     replay(cell, 'mouseleave')
+    return
+  }
+  // Entrée : même effet qu'un clic (ouvrir les transactions du montant, quand la case le permet).
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    cell.click()
     return
   }
   const matrix = cellMatrix(table)

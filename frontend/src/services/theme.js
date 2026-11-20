@@ -1,32 +1,35 @@
 import { computed, ref, watch } from 'vue'
 
 /**
- * Préférence de thème de l'interface : « system » suit le réglage clair/sombre
- * du système d'exploitation, « light » et « dark » le forcent.
+ * Préférence de thème de l'interface : « light » (par défaut) et « dark » le
+ * forcent, « system » suit le réglage clair/sombre du système d'exploitation.
  * Appliquée via l'attribut data-theme sur <html> (absent = suivre le système,
  * voir les variables de couleur de style.css). Un petit script dans
- * index.html applique la même préférence avant le premier affichage, pour
- * éviter un flash de thème clair au chargement.
+ * index.html (et public/demarrage.html) applique la même préférence avant le
+ * premier affichage, pour éviter un flash de l'autre thème au chargement.
  */
 export const THEME_STORAGE_KEY = 'homebank-theme'
 const THEME_CHOICES = ['system', 'light', 'dark']
+/** Thème sans choix mémorisé : clair, quel que soit le réglage du système. */
+export const DEFAULT_THEME = 'light'
 
 export function normalizeThemePreference(value) {
-  return THEME_CHOICES.includes(value) ? value : 'system'
+  return THEME_CHOICES.includes(value) ? value : DEFAULT_THEME
 }
 
-/** Lecture tolérante : stockage indisponible (navigation privée...) = suivre le système. */
+/** Lecture tolérante : stockage indisponible (navigation privée...) = thème par défaut. */
 export function readThemePreference(storage = globalThis.localStorage) {
   try {
     return normalizeThemePreference(storage?.getItem(THEME_STORAGE_KEY))
   } catch {
-    return 'system'
+    return DEFAULT_THEME
   }
 }
 
+/** Seul le thème par défaut n'est pas mémorisé ; « system » l'est, puisqu'il n'est plus le défaut. */
 export function saveThemePreference(preference, storage = globalThis.localStorage) {
   try {
-    if (preference === 'system') storage?.removeItem(THEME_STORAGE_KEY)
+    if (preference === DEFAULT_THEME) storage?.removeItem(THEME_STORAGE_KEY)
     else storage?.setItem(THEME_STORAGE_KEY, preference)
   } catch {
     // Préférence non mémorisée : le choix reste valable pour la session en cours.

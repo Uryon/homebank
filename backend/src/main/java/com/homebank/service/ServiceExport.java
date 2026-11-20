@@ -56,9 +56,9 @@ public class ServiceExport {
     public void exporterTableauDeBord() {
         if (dossierSortie == null || dossierSortie.isBlank()) {
             throw new IllegalStateException(
-                    "Export PDF non configure : renseigner export.dossier-sortie (variable "
-                            + "d'environnement EXPORT_DOSSIER_SORTIE) avec le dossier synchronise "
-                            + "(Google Drive pour ordinateur...).");
+                    "Export PDF non configuré : renseigner export.dossier-sortie (variable "
+                            + "d'environnement EXPORT_DOSSIER_SORTIE) avec le dossier synchronisé "
+                            + "(Google Drive pour ordinateur…).");
         }
 
         // Transmis au script au lieu de laisser Node calculer sa propre date
@@ -87,17 +87,17 @@ public class ServiceExport {
                 // Node : sans ca, il survivrait a l'arret force du script.
                 process.descendants().forEach(ProcessHandle::destroyForcibly);
                 process.destroyForcibly();
-                throw new IllegalStateException("Export PDF : delai depasse (" + delaiMaxSecondes + "s)");
+                throw new IllegalStateException("Export PDF : délai dépassé (" + delaiMaxSecondes + "s)");
             }
             String sortie = new String(Files.readAllBytes(journal), StandardCharsets.UTF_8).trim();
             if (process.exitValue() != 0) {
-                throw new IllegalStateException("Export PDF echoue : " + sortie);
+                throw new IllegalStateException("Export PDF échoué : " + sortie);
             }
             log.info("Export PDF du tableau de bord termine : {}", sortie);
         } catch (IOException e) {
             throw new IllegalStateException(
-                    "Impossible de lancer l'export PDF (node installe et dans le PATH ? "
-                            + "'npm install' lance dans export/ ? chemin " + cheminScript + " correct ?)", e);
+                    "Impossible de lancer l'export PDF (node installé et dans le PATH ? "
+                            + "'npm install' lancé dans export/ ? chemin " + cheminScript + " correct ?)", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Export PDF interrompu", e);

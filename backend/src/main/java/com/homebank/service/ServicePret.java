@@ -4,6 +4,11 @@ import com.homebank.dto.LigneAmortissementDTO;
 import com.homebank.dto.PretDTO;
 import com.homebank.model.Pret;
 import com.homebank.repository.DepotPret;
+import com.homebank.utils.LongueurTexte;
+import com.homebank.utils.Montant;
+import com.homebank.utils.Periode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -13,13 +18,19 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.NoSuchElementException;
 
 @Service
 public class ServicePret {
 
+    private static final Logger log = LoggerFactory.getLogger(ServicePret.class);
+
     private static final int SCALE = 2;
     private static final int RATE_DIVISION_SCALE = 10;
+    /** Taux tel que le stocke la colonne annual_rate, numeric(6,3). */
+    private static final int RATE_SCALE = 3;
+    private static final BigDecimal MAX_ANNUAL_RATE = new BigDecimal("999.999");
 
     /**
      * Au-dela de ce multiple de la mensualite, la derniere echeance (qui solde
@@ -27,6 +38,13 @@ public class ServicePret {
      * nettement trop basse pour la duree, plutot qu'un simple ecart d'arrondi.
      */
     private static final BigDecimal MAX_FINAL_PAYMENT_RATIO = BigDecimal.valueOf(2);
+
+    /**
+     * Duree maximale d'un pret (50 ans) : l'echeancier complet est calcule a
+     * chaque affichage du tableau de bord et de la page Prets ; une duree
+     * absurde (faute de frappe) en faisait des dizaines de milliers de lignes.
+     */
+    static final int MAX_TERM_MONTHS = 600;
 
     private final DepotPret loanRepository;
 
@@ -40,21 +58,51 @@ public class ServicePret {
 
     public Pret findById(Long id) {
         return loanRepository.findById(id)
-                .orElseThrow(() -> new NoSuchElementException("Pret introuvable : " + id));
+                .orElseThrow(() -> new NoSuchElementException("Prêt introuvable : " + id));
     }
 
     public Pret create(PretDTO payload) {
         Pret loan = new Pret();
+        normalize(payload);
         validate(payload, null);
         applyPayload(loan, payload);
-        return loanRepository.save(loan);
+        Pret saved = loanRepository.save(loan);
+        log.info("Pret cree : {} ({})", saved.getName(), saved.getId());
+        return saved;
     }
 
     public Pret update(Long id, PretDTO payload) {
         Pret existing = findById(id);
+        normalize(payload);
         validate(payload, existing);
         applyPayload(existing, payload);
+        log.info("Pret modifie : {} ({})", existing.getName(), id);
         return loanRepository.save(existing);
+    }
+
+    /**
+     * Ramene la saisie a ce que la base conserve, avant les controles : sinon
+     * ils portaient sur des valeurs que la base arrondissait ensuite, et un
+     * montant ou un taux hors limites n'echouait qu'a l'ecriture, avec un
+     * message sans rapport.
+     */
+    private static void normalize(PretDTO payload) {
+        if (payload.getName() != null) {
+            payload.setName(payload.getName().trim());
+        }
+        payload.setPrincipal(Montant.auCentime(payload.getPrincipal(), "Le capital emprunté"));
+        payload.setMonthlyPayment(Montant.auCentime(payload.getMonthlyPayment(), "Le montant de la mensualité"));
+        payload.setMonthlyInsurance(Montant.auCentime(payload.getMonthlyInsurance(), "Le montant de l'assurance"));
+        BigDecimal rate = payload.getAnnualRate();
+        if (rate != null) {
+            // Compare avant setScale, comme Montant : "1E999999" y developperait un million de chiffres.
+            if (rate.compareTo(MAX_ANNUAL_RATE) > 0) {
+                throw new IllegalArgumentException("Le taux annuel ne peut pas dépasser 999,999 %.");
+            }
+            if (rate.signum() > 0) {
+                payload.setAnnualRate(rate.setScale(RATE_SCALE, RoundingMode.HALF_UP));
+            }
+        }
     }
 
     private void applyPayload(Pret loan, PretDTO payload) {
@@ -84,25 +132,31 @@ public class ServicePret {
      */
     private void validate(PretDTO payload, Pret existing) {
         if (payload.getName() == null || payload.getName().isBlank()) {
-            throw new IllegalArgumentException("Le nom du pret est obligatoire");
+            throw new IllegalArgumentException("Le nom du prêt est obligatoire.");
         }
+        LongueurTexte.verifier(payload.getName(), "Le nom du prêt");
+        LongueurTexte.verifier(payload.getNotes(), "La note du prêt");
         if (payload.getPrincipal() == null || payload.getPrincipal().signum() <= 0) {
-            throw new IllegalArgumentException("Le capital emprunte doit etre positif");
+            throw new IllegalArgumentException("Le capital emprunté doit être positif.");
         }
         if (payload.getAnnualRate() == null || payload.getAnnualRate().signum() < 0) {
-            throw new IllegalArgumentException("Le taux annuel ne peut pas etre negatif");
+            throw new IllegalArgumentException("Le taux annuel ne peut pas être négatif.");
         }
         if (payload.getTermMonths() == null || payload.getTermMonths() <= 0) {
-            throw new IllegalArgumentException("La duree du pret doit etre d'au moins un mois");
+            throw new IllegalArgumentException("La durée du prêt doit être d'au moins un mois.");
+        }
+        if (payload.getTermMonths() > MAX_TERM_MONTHS) {
+            throw new IllegalArgumentException("La durée du prêt ne peut pas dépasser " + MAX_TERM_MONTHS + " mois (50 ans).");
         }
         if (payload.getStartDate() == null) {
-            throw new IllegalArgumentException("La date de premiere mensualite est obligatoire");
+            throw new IllegalArgumentException("La date de première mensualité est obligatoire.");
         }
+        Periode.verifierAnnee(payload.getStartDate(), "La date de première mensualité");
         if (payload.getMonthlyPayment() == null || payload.getMonthlyPayment().signum() <= 0) {
-            throw new IllegalArgumentException("La mensualite doit etre positive");
+            throw new IllegalArgumentException("La mensualité doit être positive.");
         }
         if (payload.getMonthlyInsurance() != null && payload.getMonthlyInsurance().signum() < 0) {
-            throw new IllegalArgumentException("L'assurance mensuelle ne peut pas etre negative");
+            throw new IllegalArgumentException("L'assurance mensuelle ne peut pas être négative.");
         }
 
         if (existing != null
@@ -118,8 +172,8 @@ public class ServicePret {
         BigDecimal firstMonthInterest = payload.getPrincipal().multiply(monthlyRate).setScale(SCALE, RoundingMode.HALF_UP);
         if (payload.getMonthlyPayment().compareTo(firstMonthInterest) <= 0) {
             throw new IllegalArgumentException(
-                    "La mensualite (" + payload.getMonthlyPayment() + ") ne couvre meme pas les interets du "
-                            + "premier mois (" + firstMonthInterest + ") : le capital ne serait jamais rembourse");
+                    "La mensualité (" + euros(payload.getMonthlyPayment()) + ") ne couvre même pas les intérêts du "
+                            + "premier mois (" + euros(firstMonthInterest) + ") : le capital ne serait jamais remboursé.");
         }
 
         ensureFinalPaymentIsReasonable(payload, monthlyRate);
@@ -141,11 +195,16 @@ public class ServicePret {
         List<LigneAmortissementDTO> schedule = computeSchedule(simulated);
         BigDecimal finalPayment = schedule.get(schedule.size() - 1).getPayment();
         if (finalPayment.compareTo(payload.getMonthlyPayment().multiply(MAX_FINAL_PAYMENT_RATIO)) > 0) {
-            throw new IllegalArgumentException("La mensualite (" + payload.getMonthlyPayment()
-                    + ") est trop faible pour rembourser le pret en " + payload.getTermMonths()
-                    + " mois : derniere echeance de " + finalPayment + ". Mensualite necessaire : "
-                    + annuityPayment(payload.getPrincipal(), monthlyRate, payload.getTermMonths()) + ".");
+            throw new IllegalArgumentException("La mensualité (" + euros(payload.getMonthlyPayment())
+                    + ") est trop faible pour rembourser le prêt en " + payload.getTermMonths()
+                    + " mois : dernière échéance de " + euros(finalPayment) + ". Mensualité nécessaire : "
+                    + euros(annuityPayment(payload.getPrincipal(), monthlyRate, payload.getTermMonths())) + ".");
         }
+    }
+
+    /** Montant affiche dans un message d'erreur, au format francais : "1 134,56 €". */
+    static String euros(BigDecimal amount) {
+        return String.format(Locale.FRANCE, "%,.2f €", amount).replace('\u202f', ' ').replace('\u00a0', ' ');
     }
 
     /** Mensualite constante (hors assurance) qui rembourse exactement `principal` en `termMonths` mois, arrondie au centime superieur. */
@@ -160,7 +219,9 @@ public class ServicePret {
     }
 
     public void delete(Long id) {
-        loanRepository.delete(findById(id));
+        Pret loan = findById(id);
+        loanRepository.delete(loan);
+        log.info("Pret supprime : {} ({})", loan.getName(), id);
     }
 
     /**

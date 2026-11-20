@@ -1,8 +1,11 @@
 package com.homebank.controller;
 
+import com.homebank.dto.ApercuFauxTiersDTO;
 import com.homebank.dto.CategorisationAutoResultatDTO;
 import com.homebank.dto.DemandeFusionDTO;
+import com.homebank.dto.ResultatNettoyageTiersDTO;
 import com.homebank.dto.TiersDTO;
+import com.homebank.service.ServiceNettoyageTiers;
 import com.homebank.service.ServiceTiers;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -14,9 +17,11 @@ import java.util.List;
 public class ControleurTiers {
 
     private final ServiceTiers payeeService;
+    private final ServiceNettoyageTiers cleanupService;
 
-    public ControleurTiers(ServiceTiers payeeService) {
+    public ControleurTiers(ServiceTiers payeeService, ServiceNettoyageTiers cleanupService) {
         this.payeeService = payeeService;
+        this.cleanupService = cleanupService;
     }
 
     @GetMapping
@@ -61,5 +66,22 @@ public class ControleurTiers {
     @PostMapping("/auto-categorize")
     public CategorisationAutoResultatDTO autoCategorize() {
         return payeeService.autoCategorize();
+    }
+
+    /** Apercu des faux tiers, sans rien modifier (voir ServiceNettoyageTiers). */
+    @GetMapping("/computed-label-cleanup")
+    public List<ApercuFauxTiersDTO> previewCleanup() {
+        return cleanupService.preview();
+    }
+
+    @PostMapping("/computed-label-cleanup")
+    public ResultatNettoyageTiersDTO cleanup(@RequestBody List<Long> payeeIds) {
+        return cleanupService.clean(payeeIds);
+    }
+
+    @PostMapping("/computed-label-cleanup/undo")
+    public ResponseEntity<Void> undoCleanup(@RequestBody List<ResultatNettoyageTiersDTO.TiersNettoye> cleaned) {
+        cleanupService.undo(cleaned);
+        return ResponseEntity.noContent().build();
     }
 }

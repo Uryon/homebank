@@ -1,13 +1,9 @@
 /**
- * Plan de restauration des transactions supprimees, pour l'action « Annuler »
- * de la page Transactions. Fonctions pures : l'appel API correspondant a
- * chaque etape est fait par le composant.
+ * Données nécessaires à l'action « Annuler » de la page Transactions.
+ * Fonctions pures : l'appel API correspondant est fait par le composant.
  */
 
-/**
- * Payload API (meme forme que TransactionDTO cote backend) reconstruit a
- * partir d'une transaction deja chargee, pour la recreer telle quelle.
- */
+/** Champs saisissables d'une transaction (même forme que TransactionDTO côté backend). */
 export function transactionPayloadFrom(t) {
   return {
     accountId: t.accountId,
@@ -20,68 +16,51 @@ export function transactionPayloadFrom(t) {
     transferTransactionId: t.transferTransactionId,
     periodicExpense: t.periodicExpense,
     exceptional: t.exceptional,
-    validated: t.validated,
-    // Recréé tel quel (pris en compte par le backend à la création seulement).
-    balanceAdjustment: !!t.balanceAdjustment,
-    // Libellé du relevé d'une transaction importée : restauré pour que l'import
-    // continue de la reconnaître (voir Transaction#bankLabel côté backend).
-    bankLabel: t.bankLabel || null
+    validated: t.validated
   }
 }
 
 /**
- * Côté d'un virement INTERNE : c'est la liaison à sa jumelle qui le définit
- * (voir Transaction#isInternalTransfer côté backend), pas le mode de
- * paiement « Virement », qui peut être celui d'un simple loyer.
+ * État d'une transaction chargée, à rétablir après une modification. Sans
+ * tiers lié, `payee` n'est qu'un libellé calculé (« Virement vers… ») : le
+ * renvoyer le ferait prendre pour un vrai nom de tiers.
  */
-function isTransferLeg(t) {
-  return !!t.transferTransactionId
+export function previousTransactionPayload(t) {
+  return { ...transactionPayloadFrom(t), payee: t.payeeId != null ? t.payee : null }
 }
 
 /**
- * Etapes de restauration d'un lot de transactions supprimees :
- * - `{ kind: 'create', ids, payload }` : transaction normale, recreee via create() ;
- * - `{ kind: 'transfer', ids, payload }` : virement, recree en paire via
- *   transfer(). Le backend supprime toujours les deux cotes ensemble (voir
- *   ServiceTransaction#delete), et create() ignore transferTransactionId :
- *   il faut donc retrouver la jumelle dans `allTransactions` (elle n'est pas
- *   forcement dans le lot) et recreer la paire. Une paire dont les deux cotes
- *   sont dans le lot ne donne qu'une seule etape.
- *
- * `orphanTransferIds` liste les cotes de virement dont la jumelle est
- * introuvable : ils sont recrees en transaction simple, sans appariement.
+ * Copies des transactions à restaurer après leur suppression (voir
+ * ServiceRestaurationTransaction côté backend), à prendre AVANT de supprimer.
+ * Le backend supprime toujours les deux côtés d'un virement ensemble : la
+ * jumelle, même absente du lot, est donc retrouvée dans `allTransactions`.
  */
-export function planRestore(transactionsToDelete, allTransactions) {
+export function restorationSnapshots(transactionsToDelete, allTransactions) {
   const byId = new Map(allTransactions.map(t => [t.id, t]))
-  const handledIds = new Set()
-  const steps = []
-  const orphanTransferIds = []
-
+  const snapshots = new Map()
   for (const t of transactionsToDelete) {
-    if (handledIds.has(t.id)) continue
-    handledIds.add(t.id)
-
-    const pair = isTransferLeg(t) ? byId.get(t.transferTransactionId) : null
-    if (pair) {
-      handledIds.add(pair.id)
-      const [from, to] = t.amount < 0 ? [t, pair] : [pair, t]
-      steps.push({
-        kind: 'transfer',
-        ids: [t.id, pair.id],
-        payload: {
-          fromAccountId: from.accountId,
-          toAccountId: to.accountId,
-          amount: Math.abs(t.amount),
-          date: t.date,
-          memo: t.memo
-        }
-      })
-      continue
-    }
-
-    if (isTransferLeg(t)) orphanTransferIds.push(t.id)
-    steps.push({ kind: 'create', ids: [t.id], payload: transactionPayloadFrom(t) })
+    snapshots.set(t.id, { ...t })
+    if (!t.transferTransactionId) continue
+    const twin = byId.get(t.transferTransactionId)
+    if (twin) snapshots.set(twin.id, { ...twin })
+    else console.warn(`Annulation : jumelle de virement introuvable pour ${t.id}, restauration sans appariement.`)
   }
+  return Array.from(snapshots.values())
+}
 
-  return { steps, orphanTransferIds }
+/**
+ * Lance les opérations en parallèle, sauf celles d'un même tiers, enchaînées :
+ * ce tiers a pu disparaître avec ses transactions, et plusieurs requêtes
+ * simultanées le recréaient chacune de leur côté, en double.
+ */
+export async function runOnePerPayee(items, payeeOf, run) {
+  const lastByPayee = new Map()
+  await Promise.all(items.map(item => {
+    const payee = payeeOf(item)?.trim().toLowerCase()
+    if (!payee) return run(item)
+    const previous = lastByPayee.get(payee)
+    const current = previous ? previous.catch(() => {}).then(() => run(item)) : run(item)
+    lastByPayee.set(payee, current)
+    return current
+  }))
 }

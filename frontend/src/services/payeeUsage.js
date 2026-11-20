@@ -1,3 +1,5 @@
+import { nextSort as nextTableSort } from './tableSort'
+
 /**
  * Utilisation des tiers (nombre de transactions, date de la dernière) et tri
  * de la liste des tiers, pour la page Tiers.
@@ -25,13 +27,9 @@ const nameCollator = new Intl.Collator('fr', { sensitivity: 'base', numeric: tru
 /** Sens par défaut au premier clic sur une colonne : A→Z pour le nom, le plus grand / le plus récent d'abord sinon. */
 const DEFAULT_SORT_DIRECTION = { name: 'asc', count: 'desc', lastDate: 'desc' }
 
-/**
- * Nouveau tri après un clic sur l'en-tête `key` : même colonne → sens inversé ;
- * autre colonne → son sens par défaut.
- */
+/** Nouveau tri de la liste des tiers après un clic sur l'en-tête `key` (voir tableSort.js). */
 export function nextSort(current, key) {
-  if (current?.key === key) return { key, dir: current.dir === 'asc' ? 'desc' : 'asc' }
-  return { key, dir: DEFAULT_SORT_DIRECTION[key] || 'asc' }
+  return nextTableSort(current, key, DEFAULT_SORT_DIRECTION)
 }
 
 function compareBy(key, usage) {

@@ -5,6 +5,8 @@ import com.homebank.dto.ValidationRapprochementDTO;
 import com.homebank.model.Compte;
 import com.homebank.model.Transaction;
 import com.homebank.repository.DepotTransaction;
+import com.homebank.utils.Montant;
+import com.homebank.utils.Periode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -35,8 +37,9 @@ public class ServiceRapprochement {
         this.transactionRepository = transactionRepository;
     }
 
-    public RapprochementDTO compare(Long accountId, LocalDate date, BigDecimal statementBalance) {
+    public RapprochementDTO compare(Long accountId, LocalDate date, BigDecimal requestedBalance) {
         validateDate(date);
+        BigDecimal statementBalance = Montant.auCentime(requestedBalance, "Le solde du relevé");
         if (statementBalance == null) {
             throw new IllegalArgumentException("Le solde du relevé est obligatoire.");
         }
@@ -84,5 +87,6 @@ public class ServiceRapprochement {
         if (date.isAfter(LocalDate.now(ZoneId.systemDefault()))) {
             throw new IllegalArgumentException("La date du relevé ne peut pas être dans le futur.");
         }
+        Periode.verifierAnnee(date, "La date du relevé");
     }
 }

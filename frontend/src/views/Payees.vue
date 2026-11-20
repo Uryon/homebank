@@ -5,7 +5,7 @@
         <h1>Tiers</h1>
         <div class="subtitle">Cliquez sur un tiers pour le modifier — catégorisation automatique à l'import</div>
       </div>
-      <div style="display:flex; gap:10px;">
+      <div class="header-actions">
         <button
           class="btn secondary"
           :disabled="autoCategorizing"
@@ -14,7 +14,7 @@
         >
           {{ autoCategorizing ? 'Catégorisation…' : 'Catégoriser automatiquement' }}
         </button>
-        <button class="btn" @click="openCreate">+ Nouveau tiers</button>
+        <button class="btn" @click="openCreate"><Icon name="plus" size="sm" /> Nouveau tiers</button>
       </div>
     </div>
 
@@ -24,7 +24,7 @@
         <input id="payees-search" v-model="searchQuery" class="toolbar-search" placeholder='Ex : Bouygues;29,99 ou "CAF"' />
       </div>
 
-      <div class="form-field" style="align-self: flex-end;">
+      <div class="form-field toolbar-action">
         <button
           class="btn"
           :class="{ secondary: !withoutCategoryOnly }"
@@ -35,12 +35,28 @@
         </button>
       </div>
 
-      <div v-if="selectedIds.length >= 2" class="form-field" style="align-self: flex-end;">
+      <div class="form-field toolbar-action">
+        <button
+          class="btn"
+          :class="{ secondary: !unusedOnly }"
+          @click="unusedOnly = !unusedOnly"
+          :title="unusedOnly ? 'Revenir à tous les tiers' : 'N\'afficher que les tiers sans aucune transaction (supprimables)'"
+        >
+          Inutilisés ({{ unusedCount }})
+        </button>
+      </div>
+
+      <div v-if="selectedIds.length >= 2" class="form-field toolbar-action">
         <button class="btn" @click="openMergeModal">
           Fusionner ({{ selectedIds.length }} sélectionnés)
         </button>
       </div>
-      <div v-if="selectedIds.length > 0" class="form-field" style="align-self: flex-end;">
+      <div v-if="selectedIds.length > 0 && selectionIsUnused" class="form-field toolbar-action">
+        <button class="btn danger" :disabled="removingSelection" @click="removeSelected">
+          {{ removingSelection ? 'Suppression…' : `Supprimer (${selectedIds.length})` }}
+        </button>
+      </div>
+      <div v-if="selectedIds.length > 0" class="form-field toolbar-action">
         <button class="btn secondary" @click="selectedIds = []">Annuler la sélection</button>
       </div>
     </div>
@@ -52,8 +68,13 @@
       <button type="button" class="auto-categorize-result-close" title="Fermer" aria-label="Fermer ce message" @click="autoCategorizeResult = null"><Icon name="x" size="sm" /></button>
     </div>
 
+    <div v-if="cleanupItems.length" class="cleanup-notice">
+      <span>{{ cleanupNotice }}</span>
+      <button type="button" class="btn secondary" @click="showCleanupModal = true">Voir l'aperçu</button>
+    </div>
+
     <div class="table-scroll" v-if="filteredPayees.length">
-      <table class="payees-table">
+      <table v-row-nav="'tr[data-payee-id]'" class="payees-table">
         <colgroup>
           <col style="width: 44px;" />
           <col style="width: 21%;" />
@@ -108,17 +129,23 @@
             @keydown.enter="onRowEnter($event, p)"
             @keydown.esc="cancelEdit"
           >
-            <td @click.stop><input type="checkbox" :value="p.id" v-model="selectedIds" :aria-label="'Sélectionner ' + p.name" /></td>
+            <td class="cell-select" @click.stop><input type="checkbox" :value="p.id" v-model="selectedIds" :aria-label="'Sélectionner ' + p.name" /></td>
 
             <template v-if="editingId === p.id">
-              <td @click.stop><input v-model="editForm.name" ref="firstEditField" aria-label="Nom" /></td>
-              <td @click.stop><input v-model="editForm.pattern" aria-label="Motif de reconnaissance" placeholder="Ex : Carrefour" /></td>
-              <td class="num" @click.stop>
+              <td class="cell-name" data-label="Nom" @click.stop>
+                <input id="payee-edit-name" v-model="editForm.name" maxlength="255" ref="firstEditField" aria-label="Nom" v-bind="editInvalidAttrs('name')" @input="clearEditError('name')" />
+                <FieldError id="payee-edit-name-error" :message="editErrors.name" />
+              </td>
+              <td class="cell-pattern" data-label="Motif de reconnaissance" @click.stop>
+                <input id="payee-edit-pattern" v-model="editForm.pattern" aria-label="Motif de reconnaissance" placeholder="Ex : Carrefour" v-bind="editInvalidAttrs('pattern')" @input="clearEditError('pattern')" />
+                <FieldError id="payee-edit-pattern-error" :message="editErrors.pattern" />
+              </td>
+              <td class="num cell-amount" data-label="Montant (vide : tous)" @click.stop>
                 <AmountInput v-model="editForm.amount" aria-label="Montant" placeholder="Tous" title="Vide : le tiers est reconnu quel que soit le montant" />
               </td>
               <td class="num usage-cell">{{ usageOf(p.id).count }}</td>
               <td class="num usage-cell usage-date">{{ usageOf(p.id).lastDate ? formatDate(usageOf(p.id).lastDate) : '—' }}</td>
-              <td @click.stop>
+              <td class="cell-category" data-label="Catégorie associée" @click.stop>
                 <label for="payee-edit-category" class="sr-only">Catégorie associée</label>
                 <CategoryAutocomplete
                   id="payee-edit-category"
@@ -133,18 +160,31 @@
               </td>
             </template>
             <template v-else>
-              <td>{{ p.name }}</td>
-              <td>
+              <td class="cell-name">{{ p.name }}</td>
+              <td class="cell-pattern">
                 <span class="pattern-segments">
                   <code v-for="(segment, index) in patternSegmentsById.get(p.id)" :key="index">{{ segment }}</code>
                 </span>
               </td>
-              <td class="num">{{ p.amount != null ? formatAmount(p.amount) : '' }}</td>
+              <td class="num cell-amount">{{ p.amount != null ? formatAmount(p.amount) : '' }}</td>
               <td class="num usage-cell" :class="{ unused: !usageOf(p.id).count }">
-                <span class="usage-count">{{ usageOf(p.id).count }}</span>
+                <RouterLink
+                  v-if="usageOf(p.id).count"
+                  class="usage-link"
+                  :to="{ path: '/transactions', query: { search: transactionSearchForPayee(p) } }"
+                  :title="'Voir les transactions de ' + p.name"
+                  @click.stop
+                >
+                  <span class="usage-count">{{ usageOf(p.id).count }}</span>
+                  <span class="usage-unit">{{ usageUnitLabel(usageOf(p.id).count) }}</span>
+                </RouterLink>
+                <template v-else>
+                  <span class="usage-count">0</span>
+                  <span class="usage-unit">{{ usageUnitLabel(0) }}</span>
+                </template>
               </td>
               <td class="num usage-cell usage-date">{{ usageOf(p.id).lastDate ? formatDate(usageOf(p.id).lastDate) : '—' }}</td>
-              <td>
+              <td class="cell-category">
                 <CategoryChip v-if="p.categoryId" :category-id="p.categoryId" :categories-by-id="categoriesById" />
                 <button
                   v-else-if="suggestedCategoryId(p)"
@@ -160,7 +200,13 @@
               </td>
               <td class="row-actions" @click.stop>
                 <div class="hover-actions">
-                  <button class="icon-btn danger" title="Supprimer le tiers" :aria-label="'Supprimer ' + p.name" @click="remove(p)"><Icon name="trash" /></button>
+                  <button
+                    class="icon-btn danger"
+                    :title="deleteTitle(p)"
+                    :aria-label="'Supprimer ' + p.name"
+                    :aria-disabled="usageOf(p.id).count ? 'true' : undefined"
+                    @click="remove(p)"
+                  ><Icon name="trash" /></button>
                 </div>
               </td>
             </template>
@@ -187,26 +233,28 @@
       <div v-dialog="() => (showModal = false)" class="modal" role="dialog" aria-modal="true">
         <h2>Nouveau tiers</h2>
         <div class="form-grid">
-          <div class="form-field" style="grid-column: span 2;">
+          <div class="form-field span-2">
             <label for="new-payee-name">Nom du tiers</label>
-            <input id="new-payee-name" v-model="form.name" placeholder="Ex : Carrefour" />
+            <input id="new-payee-name" v-model="form.name" maxlength="255" placeholder="Ex : Carrefour" v-bind="invalidAttrs('name')" @input="clear('name')" />
+            <FieldError id="new-payee-name-error" :message="errors.name" />
           </div>
-          <div class="form-field" style="grid-column: span 2;">
+          <div class="form-field span-2">
             <label for="new-payee-pattern">Motif de reconnaissance</label>
-            <input id="new-payee-pattern" v-model="form.pattern" placeholder="Ex : Carrefour" />
+            <input id="new-payee-pattern" v-model="form.pattern" placeholder="Ex : Carrefour" v-bind="invalidAttrs('pattern')" @input="clear('pattern')" />
+            <FieldError id="new-payee-pattern-error" :message="errors.pattern" />
             <div class="text-hint">
               Tapez simplement le texte à repérer (ex : <code>Carrefour</code>) : il sera
               reconnu partout où il apparaît dans le libellé de la transaction, quelle que
-              soit la casse (CARREFOUR, Carrefour, carrefour...). Pas besoin d'ajouter d'étoiles,
+              soit la casse (CARREFOUR, Carrefour, carrefour…). Pas besoin d'ajouter d'étoiles,
               c'est fait automatiquement. Pour des cas plus précis, vous pouvez tout de même
               utiliser <code>*</code> comme joker (ex : <code>Carrefour*Paris</code>).
             </div>
           </div>
-          <div class="form-field" style="grid-column: span 2;">
+          <div class="form-field span-2">
             <label for="new-payee-amount">Montant associé (laisser vide = s'applique à tous les montants)</label>
             <AmountInput id="new-payee-amount" v-model="form.amount" placeholder="Ex : 10" />
           </div>
-          <div class="form-field" style="grid-column: span 2;">
+          <div class="form-field span-2">
             <label for="new-payee-category">Catégorie associée (appliquée automatiquement aux transactions de ce tiers)</label>
             <CategoryAutocomplete
               id="new-payee-category"
@@ -216,7 +264,7 @@
             />
           </div>
         </div>
-        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+        <div class="modal-actions">
           <button class="btn secondary" @click="showModal = false">Annuler</button>
           <button class="btn" @click="save">Enregistrer</button>
         </div>
@@ -227,7 +275,7 @@
     <MergeModal
       v-if="showMergeModal"
       :title="`Fusionner ${selectedIds.length} tiers`"
-      description="Choisissez le tiers à conserver. Toutes les transactions des autres tiers sélectionnés lui seront réaffectées (elles porteront désormais son nom), puis les tiers fusionnés seront supprimés. Cette action est irréversible."
+      description="Choisissez le tiers à conserver. Toutes les transactions des autres tiers sélectionnés lui seront réaffectées (elles porteront désormais son nom), puis les tiers fusionnés seront supprimés. Vous pourrez l'annuler juste après avec le bouton « Annuler » (ou Ctrl+Z)."
       target-label="Tiers à conserver"
       :items="selectedPayeeObjects"
       :option-label="payeeOptionLabel"
@@ -247,7 +295,8 @@
 
       <div class="form-field">
         <label for="payee-merge-pattern">Motif de reconnaissance final</label>
-        <input id="payee-merge-pattern" v-model="mergePattern" placeholder="Ex : Carrefour" />
+        <input id="payee-merge-pattern" v-model="mergePattern" placeholder="Ex : Carrefour" v-bind="invalidAttrs('mergePattern')" @input="clear('mergePattern')" />
+        <FieldError id="payee-merge-pattern-error" :message="errors.mergePattern" />
         <div class="text-hint">
           Pré-rempli avec le motif du tiers conservé, ci-dessus pour référence.
           Modifiez-le comme vous le souhaitez : les motifs des tiers fusionnés ne
@@ -255,6 +304,16 @@
         </div>
       </div>
     </MergeModal>
+
+    <PayeeCleanupModal
+      v-if="showCleanupModal"
+      :items="cleanupItems"
+      :confirming="cleaning"
+      @confirm="confirmCleanup"
+      @cancel="showCleanupModal = false"
+    />
+
+    <UndoBar :action="lastAction" :undoing="undoing" @undo="runLastAction" />
   </div>
 </template>
 
@@ -262,22 +321,30 @@
 import { notify, askConfirm } from '../services/feedback'
 import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import { PayeesAPI } from '../services/api'
+import { useRouteActions } from '../services/routeActions'
+import { PayeesAPI, TransactionsAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { normalizeSearch, parseSearchTerms } from '../services/search'
-import { categoryChipInfo, flattenCategories } from '../services/categories'
+import { categoryChipInfo, flattenCategories, transactionSearchForPayee } from '../services/categories'
 import { splitPatternSegments } from '../services/payee'
 import { handleRowEnter, restoreFocusToRow } from '../services/rowKeyboard'
 import { nextSort, sortPayees, usageByPayeeId } from '../services/payeeUsage'
+import { ariaSortOf, sortIconOf } from '../services/tableSort'
 import { formatAmount, formatDate, pluralize } from '../services/format'
 import { alertApiError } from '../services/errors'
 import { useProgressiveList } from '../services/progressiveList'
 import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import AmountInput from '../components/AmountInput.vue'
+import FieldError from '../components/FieldError.vue'
+import { useFieldErrors } from '../services/fieldErrors'
 import MergeModal from '../components/MergeModal.vue'
+import PayeeCleanupModal from '../components/PayeeCleanupModal.vue'
 import Icon from '../components/Icon.vue'
 import CategoryChip from '../components/CategoryChip.vue'
 import SkeletonRows from '../components/SkeletonRows.vue'
+import UndoBar from '../components/UndoBar.vue'
+import { useLastAction } from '../services/lastAction'
+import { planPayeeMergeRestore, restorePayeeMerge } from '../services/payeeMergeRestore'
 
 const route = useRoute()
 
@@ -315,6 +382,10 @@ function emptyForm() {
 }
 
 const withoutCategoryCount = computed(() => payees.value.filter(p => !p.categoryId).length)
+
+/** Filtre « Inutilisés » : tiers sans aucune transaction, les seuls supprimables (voir ServiceTiers#delete). */
+const unusedOnly = ref(false)
+const unusedCount = computed(() => payees.value.filter(p => !usageOf(p.id).count).length)
 
 /**
  * Champs de recherche normalisés (nom, motif, catégorie, montant) par tiers,
@@ -371,7 +442,8 @@ function payeeMatchesTerm(idx, { term, exact }) {
  */
 const filteredPayees = computed(() => {
   const terms = parseSearchTerms(searchQuery.value)
-  const base = withoutCategoryOnly.value ? payees.value.filter(p => !p.categoryId) : payees.value
+  const base = payees.value.filter(p =>
+    (!withoutCategoryOnly.value || !p.categoryId) && (!unusedOnly.value || !usageOf(p.id).count))
   if (!terms.length) return base
   const index = payeeSearchIndexById.value
   return base.filter(p => {
@@ -436,6 +508,22 @@ function usageOf(payeeId) {
 }
 
 /**
+ * Info-bulle du bouton Supprimer : un tiers utilisé ne peut pas être supprimé
+ * (voir remove), le bouton apparaît alors désactivé et en donne la raison.
+ */
+function deleteTitle(payee) {
+  const usedBy = usageOf(payee.id).count
+  return usedBy
+    ? `Utilisé par ${pluralize(usedBy, 'transaction', 'transactions')} : fusionnez-le avec un autre tiers plutôt que de le supprimer`
+    : 'Supprimer le tiers'
+}
+
+/** Unité affichée après le nombre de transactions, seulement en disposition carte (téléphone) où la colonne n'a plus d'en-tête. */
+function usageUnitLabel(count) {
+  return count > 1 ? 'transactions' : 'transaction'
+}
+
+/**
  * Tri choisi en cliquant sur un en-tête ({ key, dir }, null = ordre d'origine).
  * Recliquer la même colonne inverse le sens (voir nextSort).
  */
@@ -454,29 +542,33 @@ const {
   revealIndex: revealPayeeIndex
 } = useProgressiveList(displayedPayees, { pageSize: 50 })
 
-watch([searchQuery, withoutCategoryOnly, sort], resetVisiblePayees)
+watch([searchQuery, withoutCategoryOnly, unusedOnly, sort], resetVisiblePayees)
 
 function toggleSort(key) {
   sort.value = nextSort(sort.value, key)
 }
 
 function ariaSort(key) {
-  if (sort.value?.key !== key) return 'none'
-  return sort.value.dir === 'asc' ? 'ascending' : 'descending'
+  return ariaSortOf(sort.value, key)
 }
 
-/** Flèche du sens actif sur la colonne triée, double flèche « triable » sur les autres. */
 function sortIcon(key) {
-  if (sort.value?.key !== key) return 'sortable'
-  return sort.value.dir === 'asc' ? 'arrowUp' : 'arrowDown'
+  return sortIconOf(sort.value, key)
 }
 
-/** Categorie suggeree pour un tiers sans categorie, ou null si aucun signal exploitable (aucune transaction categorisee, ou categories divergentes). */
+/**
+ * Categorie suggeree pour un tiers sans categorie, ou null si aucun signal
+ * exploitable (aucune transaction categorisee, ou categories divergentes) ou
+ * si la seule categorie trouvee est masquee (plus utilisee : la saisie ne la
+ * propose plus, voir CategoryAutocomplete — meme regle que
+ * ServiceTiers#autoCategorize).
+ */
 function suggestedCategoryId(payee) {
   if (payee.categoryId) return null
   const ids = categoryIdsByPayeeId.value.get(payee.id)
   if (!ids || ids.size !== 1) return null
-  return ids.values().next().value
+  const categoryId = ids.values().next().value
+  return categoriesById.value.get(categoryId)?.hidden ? null : categoryId
 }
 
 const applyingSuggestionId = ref(null)
@@ -487,13 +579,13 @@ async function applySuggestion(payee) {
   if (!categoryId) return
   applyingSuggestionId.value = payee.id
   try {
-    await PayeesAPI.update(payee.id, {
-      name: payee.name,
-      pattern: payee.pattern,
-      amount: payee.amount,
-      categoryId
-    })
+    const fields = { name: payee.name, pattern: payee.pattern, amount: payee.amount }
+    await PayeesAPI.update(payee.id, { ...fields, categoryId })
     await refreshAfterMutation()
+    setLastAction('Catégorie suggérée appliquée', async () => {
+      await PayeesAPI.update(payee.id, { ...fields, categoryId: null })
+      await refreshAfterMutation()
+    })
   } catch (e) {
     alertApiError("Erreur lors de l'application de la catégorie suggérée", e)
   } finally {
@@ -515,12 +607,36 @@ async function refreshAfterMutation() {
  * encore sans categorie. Revalide aussi le cache des transactions (pas
  * seulement celui des tiers), puisque des transactions peuvent avoir change.
  */
+/**
+ * Annule une catégorisation automatique : tiers et transactions concernés
+ * étaient tous sans catégorie avant (voir ServiceTiers#autoCategorize), ils
+ * le redeviennent.
+ */
+async function undoAutoCategorize({ payeeIds = [], transactionIds = [] }, payeesBefore) {
+  const payeeUpdates = payeeIds
+    .map(id => payeesBefore.get(id))
+    .filter(Boolean)
+    .map(p => PayeesAPI.update(p.id, { name: p.name, pattern: p.pattern, amount: p.amount, categoryId: null }))
+  const transactionUpdate = transactionIds.length
+    ? TransactionsAPI.bulkUpdate({ ids: transactionIds, categoryIdProvided: true, categoryId: null })
+    : null
+  await Promise.all([...payeeUpdates, transactionUpdate])
+  autoCategorizeResult.value = null
+  await Promise.all([refreshAfterMutation(), dataStore.refreshTransactions()])
+}
+
 async function runAutoCategorize() {
   autoCategorizing.value = true
   autoCategorizeResult.value = null
+  // Tiers tels qu'avant l'opération, pour pouvoir leur retirer la catégorie.
+  const payeesBefore = new Map(payees.value.map(p => [p.id, p]))
   try {
-    autoCategorizeResult.value = await PayeesAPI.autoCategorize()
+    const result = await PayeesAPI.autoCategorize()
+    autoCategorizeResult.value = result
     await Promise.all([dataStore.refreshPayees(), dataStore.refreshTransactions()])
+    if (result.payeeIds?.length || result.transactionIds?.length) {
+      setLastAction('Catégorisation automatique', () => undoAutoCategorize(result, payeesBefore))
+    }
   } catch (e) {
     alertApiError('Erreur lors de la catégorisation automatique', e)
   } finally {
@@ -528,16 +644,25 @@ async function runAutoCategorize() {
   }
 }
 
+/** Champs obligatoires de la création et de la fusion, erreurs affichées sous chaque champ. */
+const { errors, check, clear, invalidAttrs } = useFieldErrors({
+  name: 'new-payee-name',
+  pattern: 'new-payee-pattern',
+  mergePattern: 'payee-merge-pattern'
+})
+
 function openCreate() {
   form.value = emptyForm()
+  clear()
   showModal.value = true
 }
 
 async function save() {
-  if (!form.value.name.trim() || !form.value.pattern.trim()) {
-    notify('Le nom et le motif sont obligatoires.', 'warning')
-    return
-  }
+  const valid = check({
+    name: form.value.name.trim() ? '' : 'Saisissez le nom du tiers.',
+    pattern: form.value.pattern.trim() ? '' : 'Saisissez le texte à reconnaître.'
+  })
+  if (!valid) return
   try {
     await PayeesAPI.create(form.value)
     notify('Tiers créé.', 'success')
@@ -547,6 +672,9 @@ async function save() {
     alertApiError('Erreur lors de la création du tiers', e)
   }
 }
+
+/** Annulation de la dernière suppression ou modification (voir services/lastAction.js). */
+const { lastAction, undoing, setLastAction, runLastAction } = useLastAction()
 
 async function remove(payee) {
   // Même règle que le backend (ServiceTiers#delete) : prévenue ici pour ne
@@ -561,6 +689,13 @@ async function remove(payee) {
     await PayeesAPI.remove(payee.id)
     await refreshAfterMutation()
     notify('Tiers supprimé.', 'success')
+    // Un tiers supprimable n'a aucune transaction : le recréer à l'identique
+    // (motif, montant, catégorie par défaut) suffit à revenir en arrière.
+    const { name, pattern, amount, categoryId } = payee
+    setLastAction('Tiers supprimé', async () => {
+      await PayeesAPI.create({ name, pattern, amount, categoryId })
+      await refreshAfterMutation()
+    })
   } catch (e) {
     alertApiError('Erreur lors de la suppression du tiers', e)
   }
@@ -568,7 +703,16 @@ async function remove(payee) {
 
 /* --- Édition inline --- */
 
+/** Erreurs de l'édition en ligne, affichées sous les champs de la ligne (instance distincte de la création). */
+const {
+  errors: editErrors,
+  check: checkEdit,
+  clear: clearEditError,
+  invalidAttrs: editInvalidAttrs
+} = useFieldErrors({ name: 'payee-edit-name', pattern: 'payee-edit-pattern' })
+
 function startEdit(payee) {
+  clearEditError()
   editingId.value = payee.id
   editForm.value = {
     name: payee.name,
@@ -601,12 +745,20 @@ function restoreRowFocus(id) {
 
 async function confirmEdit() {
   if (!editingId.value || !editForm.value) return
-  if (!editForm.value.name.trim() || !editForm.value.pattern.trim()) {
-    notify('Le nom et le motif sont obligatoires.', 'warning')
-    return
-  }
+  const valid = checkEdit({
+    name: editForm.value.name.trim() ? '' : 'Saisissez le nom du tiers.',
+    pattern: editForm.value.pattern.trim() ? '' : 'Saisissez le texte à reconnaître.'
+  })
+  if (!valid) return
   const id = editingId.value
   const payload = { ...editForm.value }
+  // Le tiers affiché sur une transaction est le nom du tiers lu par le backend
+  // (voir MappeurTransaction#payeeLabel) : un renommage change donc aussi les
+  // transactions déjà en cache. Motif, montant et catégorie, eux, ne
+  // modifient aucune transaction existante.
+  const before = payees.value.find(p => p.id === id)
+  const renamed = before?.name !== payload.name.trim()
+  const previous = before && { name: before.name, pattern: before.pattern, amount: before.amount, categoryId: before.categoryId }
   // editingId/editForm ne sont effaces qu'apres le succes de l'appel :
   // sinon, un echec (validation, reseau) fermait silencieusement l'edition
   // sans rien enregistrer ni l'expliquer a l'utilisateur, qui devait tout
@@ -621,7 +773,13 @@ async function confirmEdit() {
   editingId.value = null
   editForm.value = null
   restoreRowFocus(id)
-  await refreshAfterMutation()
+  await Promise.all([refreshAfterMutation(), renamed && dataStore.refreshTransactions()])
+  if (previous) {
+    setLastAction('Tiers modifié', async () => {
+      await PayeesAPI.update(id, previous)
+      await Promise.all([refreshAfterMutation(), renamed && dataStore.refreshTransactions()])
+    })
+  }
 }
 
 // Set plutot que includes() : avec "tout selectionner" sur des milliers de
@@ -650,6 +808,33 @@ function toggleSelectAllFiltered() {
 
 const selectedPayeeObjects = computed(() => payees.value.filter(p => selectedIdSet.value.has(p.id)))
 
+/** Suppression groupée proposée seulement si aucun tiers sélectionné n'a de transaction (sinon : fusion). */
+const selectionIsUnused = computed(() => selectedPayeeObjects.value.every(p => !usageOf(p.id).count))
+const removingSelection = ref(false)
+
+/** Supprime les tiers sélectionnés (tous inutilisés) ; « Annuler » les recrée à l'identique. */
+async function removeSelected() {
+  const toRemove = selectedPayeeObjects.value
+  if (!toRemove.length) return
+  const question = toRemove.length === 1
+    ? `Supprimer le tiers « ${toRemove[0].name} » ? Il n'a aucune transaction.`
+    : `Supprimer les ${toRemove.length} tiers sélectionnés ? Ils n'ont aucune transaction.`
+  if (!(await askConfirm(question))) return
+  removingSelection.value = true
+  const results = await Promise.allSettled(toRemove.map(p => PayeesAPI.remove(p.id)))
+  removingSelection.value = false
+  const removed = toRemove.filter((_, i) => results[i].status === 'fulfilled')
+  const failure = results.find(r => r.status === 'rejected')
+  if (failure) alertApiError("Certains tiers n'ont pas pu être supprimés", failure.reason)
+  await refreshAfterMutation()
+  if (!removed.length) return
+  notify(`${pluralize(removed.length, 'tiers supprimé', 'tiers supprimés')}.`, 'success')
+  setLastAction(removed.length === 1 ? 'Tiers supprimé' : `${removed.length} tiers supprimés`, async () => {
+    await Promise.all(removed.map(({ name, pattern, amount, categoryId }) => PayeesAPI.create({ name, pattern, amount, categoryId })))
+    await refreshAfterMutation()
+  })
+}
+
 function payeeOptionLabel(p) {
   return p.name + (p.amount != null ? ' — ' + formatAmount(p.amount) : '')
 }
@@ -657,6 +842,7 @@ function payeeOptionLabel(p) {
 function openMergeModal() {
   mergeTargetId.value = selectedIds.value[0]
   mergePattern.value = selectedPayeeObjects.value.find(p => p.id === mergeTargetId.value)?.pattern || ''
+  clear()
   showMergeModal.value = true
 }
 
@@ -669,13 +855,12 @@ watch(mergeTargetId, (id) => {
 
 async function confirmMerge() {
   if (!mergeTargetId.value) return
-  if (!mergePattern.value.trim()) {
-    notify('Le motif de reconnaissance final est obligatoire.', 'warning')
-    return
-  }
+  if (!check({ mergePattern: mergePattern.value.trim() ? '' : 'Saisissez le motif de reconnaissance final.' })) return
   merging.value = true
+  const sourceIds = selectedIds.value.filter(id => id !== mergeTargetId.value)
+  // Établi avant la fusion : les tiers source n'existent plus après.
+  const restorePlan = planPayeeMergeRestore(dataStore.state, sourceIds, mergeTargetId.value)
   try {
-    const sourceIds = selectedIds.value.filter(id => id !== mergeTargetId.value)
     await PayeesAPI.merge(sourceIds, mergeTargetId.value, mergePattern.value.trim())
     showMergeModal.value = false
     selectedIds.value = []
@@ -683,6 +868,11 @@ async function confirmMerge() {
     // source (voir ServiceTiers#merge cote backend) : revalider aussi le
     // cache des transactions, pas seulement celui des tiers.
     await Promise.all([dataStore.refreshPayees(), dataStore.refreshTransactions()])
+    notify(`${pluralize(sourceIds.length, 'tiers fusionné', 'tiers fusionnés')} dans « ${restorePlan.target?.name ?? ''} ».`, 'success')
+    setLastAction('Fusion de tiers', async () => {
+      await restorePayeeMerge(restorePlan, { payees: PayeesAPI, transactions: TransactionsAPI })
+      await Promise.all([refreshAfterMutation(), dataStore.refreshTransactions()])
+    })
   } catch (e) {
     alertApiError('Erreur lors de la fusion', e)
   } finally {
@@ -690,7 +880,52 @@ async function confirmMerge() {
   }
 }
 
+/* --- Nettoyage des faux tiers (voir ServiceNettoyageTiers) --- */
+
+const cleanupItems = ref([])
+const showCleanupModal = ref(false)
+const cleaning = ref(false)
+
+const cleanupNotice = computed(() => {
+  const count = cleanupItems.value.length
+  return count === 1
+    ? '1 tiers a été créé à partir d’un libellé automatique de virement ou d’ajustement.'
+    : `${count} tiers ont été créés à partir de libellés automatiques de virement ou d’ajustement.`
+})
+
+/** Contrôle secondaire : s'il échoue, la page reste utilisable et le bandeau n'apparaît pas. */
+async function loadCleanupItems() {
+  try {
+    cleanupItems.value = await PayeesAPI.previewCleanup()
+  } catch {
+    cleanupItems.value = []
+  }
+}
+
+async function refreshAfterCleanup() {
+  await Promise.all([refreshAfterMutation(), dataStore.refreshTransactions(), loadCleanupItems()])
+}
+
+async function confirmCleanup(payeeIds) {
+  cleaning.value = true
+  try {
+    const result = await PayeesAPI.cleanup(payeeIds)
+    showCleanupModal.value = false
+    await refreshAfterCleanup()
+    notify(`${pluralize(result.detachedTransactions, 'transaction corrigée', 'transactions corrigées')}, ${pluralize(result.deletedPayees, 'tiers supprimé', 'tiers supprimés')}.`, 'success')
+    setLastAction('Faux tiers nettoyés', async () => {
+      await PayeesAPI.undoCleanup(result.payees)
+      await refreshAfterCleanup()
+    }, { retryable: true })
+  } catch (e) {
+    alertApiError('Erreur lors du nettoyage des tiers', e)
+  } finally {
+    cleaning.value = false
+  }
+}
+
 onMounted(async () => {
+  loadCleanupItems()
   // Si le prechargement lance au demarrage de l'app est deja termine (cas
   // courant), instantane. Sinon (arrivee directe sur /payees), on attend
   // juste cette premiere fois — meme pattern que Transactions.vue.
@@ -702,7 +937,7 @@ onMounted(async () => {
   }
   // Revalidation silencieuse en arriere-plan a chaque visite de la page, au
   // cas ou tiers/categories/transactions ont change depuis le prechargement.
-  dataStore.refreshAll()
+  dataStore.revalidate()
 
   applyRouteQuery(route.query)
 })
@@ -723,6 +958,7 @@ function applyRouteQuery(query) {
     if (!target) return
     searchQuery.value = ''
     withoutCategoryOnly.value = false
+    unusedOnly.value = false
     startEdit(target)
     // Apres le watch qui remet l'affichage progressif au premier lot (filtres
     // effaces ci-dessus) : on etend alors le lot jusqu'au tiers, puis on defile.
@@ -742,6 +978,9 @@ function applyRouteQuery(query) {
 watch(() => route.query, (query) => {
   if (dataStore.state.loaded.payees) applyRouteQuery(query)
 })
+
+// Actions lancées depuis la palette de commandes (Ctrl+K), voir services/routeActions.js.
+useRouteActions({ 'new-payee': openCreate })
 </script>
 
 <style scoped>
@@ -754,6 +993,20 @@ watch(() => route.query, (query) => {
   margin-bottom: 10px;
   background: var(--mint-dim);
   border: 1px solid var(--mint);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+.cleanup-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  padding: 10px 14px;
+  margin-bottom: 10px;
+  background: var(--amber-dim);
+  border: 1px solid var(--amber);
   border-radius: var(--radius-md);
   color: var(--text-primary);
   font-size: 14px;
@@ -828,6 +1081,10 @@ watch(() => route.query, (query) => {
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+}
+/* Téléphone : hauteur minimale d'une zone de toucher. */
+@media (max-width: 600px) {
+  .category-suggestion { min-height: 24px; }
 }
 .category-suggestion:hover:not(:disabled) {
   background: var(--amber);
@@ -925,28 +1182,12 @@ tr.row-editing td.row-actions {
 .payees-page .payees-table tbody tr:hover { background: var(--row-hover); }
 .payees-page .payees-table tbody tr.row-editing { background: var(--azure-dim); }
 .payees-page code { border-radius: 5px; padding: 3px 6px; background: var(--ink-800); color: var(--text-muted); }
-/* En-têtes triables : bouton qui garde l'apparence de l'en-tête. */
-.sort-header {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.sort-header .icon { color: var(--text-faint); }
-.sort-header:hover, .sort-header:hover .icon { color: var(--text-primary); }
-th[aria-sort="ascending"] .sort-header .icon,
-th[aria-sort="descending"] .sort-header .icon { color: var(--azure); }
-th[aria-sort="ascending"] .sort-header,
-th[aria-sort="descending"] .sort-header { color: var(--text-primary); }
-
 /* Utilisation : nombre de transactions et date de la dernière, tiers inutilisés atténués. */
 .usage-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .usage-count { font-weight: 600; color: var(--text-primary); }
+/* Nombre de transactions cliquable : ouvre la liste filtrée sur ce tiers. */
+.usage-link { color: inherit; text-decoration: none; }
+.usage-link:hover .usage-count, .usage-link:focus-visible .usage-count { color: var(--azure); text-decoration: underline; }
 .usage-date { color: var(--text-muted); font-size: 13px; }
 .usage-cell.unused .usage-count { color: var(--text-faint); font-weight: 500; }
 
@@ -954,4 +1195,63 @@ th[aria-sort="descending"] .sort-header { color: var(--text-primary); }
 .pattern-segments { display: flex; flex-wrap: wrap; gap: 4px; }
 .pattern-segments code { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 760px) { .payees-page .page-header { align-items: flex-start; flex-direction: column; } .payees-page .toolbar { align-items: stretch; } }
+.usage-unit { display: none; }
+
+/* Téléphone : chaque tiers devient une carte de deux lignes, au lieu d'un
+   tableau de 1000 px où seul le nom restait visible.
+     ligne 1 : sélection | nom                              | suppression
+     ligne 2 :           | catégorie (ou suggestion)
+     ligne 3 :           | n transactions · dernière le …
+   Motif et montant restent accessibles en touchant la carte (édition, où les
+   champs s'empilent avec leur libellé). Même principe que Transactions.vue. */
+@media (max-width: 600px) {
+  .payees-page .table-scroll { overflow: visible; }
+  .payees-page .payees-table { display: block; min-width: 0; }
+  .payees-table colgroup,
+  .payees-table thead { display: none; }
+  .payees-table tbody { display: block; }
+  .payees-table tbody tr {
+    display: grid;
+    grid-template-columns: 34px max-content minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .payees-table tbody tr:last-child { border-bottom: 0; }
+  .payees-page .payees-table tbody td {
+    border-bottom: 0;
+    padding: 6px 8px;
+    text-align: left;
+  }
+  /* La colonne d'actions n'est plus collée au bord droit (plus de défilement horizontal). */
+  .payees-table td:last-child,
+  .payees-table tbody tr:hover td:last-child { position: static; box-shadow: none; background: transparent; }
+  .payees-table tr:not(.row-editing) td:is(.cell-pattern, .cell-amount) { display: none; }
+  .payees-table td.cell-select { grid-area: 1 / 1; }
+  .payees-table td.cell-name { grid-area: 1 / 2 / 2 / 4; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .payees-table td.row-actions { grid-area: 1 / 4; padding-top: 0; padding-bottom: 0; }
+  .payees-table td.cell-category { grid-area: 2 / 2 / 3 / 5; padding-top: 0; padding-bottom: 2px; min-width: 0; }
+  .payees-table td.usage-cell { grid-area: 3 / 2; padding-top: 2px; padding-right: 0; font-size: 13px; }
+  .payees-table td.usage-date { grid-area: 3 / 3 / 4 / 5; padding-left: 0; overflow: hidden; text-overflow: ellipsis; }
+  .payees-table td.usage-date::before { content: '· dernière le '; }
+  .usage-unit { display: inline; margin-left: 0.25em; color: var(--text-muted); font-weight: 400; }
+  /* Suggestion trop longue : tronquée plutôt que d'élargir la carte. */
+  .category-suggestion { max-width: 100%; overflow: hidden; text-overflow: ellipsis; display: inline-block; }
+  .usage-cell .usage-count { font-weight: 600; }
+  /* Survol absent sur téléphone : bouton de suppression toujours visible. */
+  .payees-table .hover-actions .icon-btn { opacity: 1; }
+
+  /* Édition : un champ par ligne, sur toute la largeur, avec son libellé. */
+  .payees-table tbody tr.row-editing td { grid-column: 1 / -1; grid-row: auto; justify-self: stretch; max-width: none; }
+  .payees-table tr.row-editing td:is(.cell-select, .usage-cell) { display: none; }
+  .payees-table tr.row-editing td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  .payees-table tr.row-editing td.row-actions { text-align: right; padding-bottom: 10px; }
+}
 </style>

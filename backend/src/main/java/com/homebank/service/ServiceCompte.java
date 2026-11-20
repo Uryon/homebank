@@ -4,6 +4,8 @@ import com.homebank.dto.CompteDTO;
 import com.homebank.model.Compte;
 import com.homebank.repository.DepotCompte;
 import com.homebank.repository.DepotTransaction;
+import com.homebank.utils.LongueurTexte;
+import com.homebank.utils.Montant;
 import com.homebank.utils.TypeCompte;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,16 +59,52 @@ public class ServiceCompte {
     public Compte create(CompteDTO payload) {
         Compte account = new Compte();
         applyPayload(account, payload);
-        return accountRepository.save(account);
+        ensureUniqueName(account.getName(), null);
+        Compte saved = accountRepository.save(account);
+        log.info("Compte cree : {} ({})", saved.getName(), saved.getId());
+        return saved;
     }
 
     public Compte update(Long id, CompteDTO payload) {
         Compte existing = findById(id);
+        String previousName = existing.getName();
+        String previousCurrency = existing.getCurrency();
         if (existing.isArchived() != payload.isArchived()) {
             log.info("Compte {} {}", id, payload.isArchived() ? "archive" : "desarchive");
+        } else {
+            log.info("Compte modifie : {}", id);
         }
         applyPayload(existing, payload);
+        ensureUniqueName(existing.getName(), previousName);
+        ensureCurrencyCanChange(existing, previousCurrency);
         return accountRepository.save(existing);
+    }
+
+    /**
+     * Un virement relie deux comptes de meme devise (voir
+     * ServiceTransaction#ensureSameCurrency) : changer celle d'un seul cote
+     * rendait ses virements existants impossibles a modifier.
+     */
+    private void ensureCurrencyCanChange(Compte account, String previousCurrency) {
+        if (!account.getCurrency().equalsIgnoreCase(previousCurrency)
+                && transactionRepository.existsByAccount_IdAndTransferTransactionIsNotNull(account.getId())) {
+            throw new IllegalStateException("La devise de ce compte ne peut pas changer : il est lié à des virements "
+                    + "vers d'autres comptes, qui doivent rester dans la même devise.");
+        }
+    }
+
+    /**
+     * Deux comptes de meme nom etaient indiscernables dans les listes de
+     * choix (filtre, virement, import). Seul un nouveau nom est controle
+     * (creation ou renommage) : un compte deja homonyme reste modifiable
+     * tant qu'il garde son nom. `previousName` : nom avant modification,
+     * null en creation.
+     */
+    private void ensureUniqueName(String name, String previousName) {
+        boolean renamed = previousName == null || !previousName.equalsIgnoreCase(name);
+        if (renamed && accountRepository.existsByNameIgnoreCase(name)) {
+            throw new IllegalArgumentException("Un compte « " + name + " » existe déjà.");
+        }
     }
 
     /**
@@ -80,10 +118,13 @@ public class ServiceCompte {
         if (name.isEmpty()) {
             throw new IllegalArgumentException("Le nom du compte est obligatoire.");
         }
+        LongueurTexte.verifier(name, "Le nom du compte");
+        LongueurTexte.verifier(payload.getNotes(), "La note du compte");
         account.setName(name);
         account.setType(payload.getType() != null ? payload.getType() : TypeCompte.CHECKING);
         // Champ "Solde initial" laisse vide : equivalent a un solde de 0.
-        account.setInitialBalance(payload.getInitialBalance() != null ? payload.getInitialBalance() : BigDecimal.ZERO);
+        BigDecimal initialBalance = Montant.auCentime(payload.getInitialBalance(), "Le solde initial");
+        account.setInitialBalance(initialBalance != null ? initialBalance : BigDecimal.ZERO);
         account.setCurrency(normalizeCurrency(payload.getCurrency()));
         account.setNotes(payload.getNotes());
         account.setArchived(payload.isArchived());
@@ -113,6 +154,7 @@ public class ServiceCompte {
                     + " transaction(s). Archivez-le plutôt que de le supprimer afin de conserver votre historique.");
         }
         accountRepository.delete(account);
+        log.info("Compte supprime : {} ({})", account.getName(), id);
     }
 
     /**

@@ -42,6 +42,15 @@ export function splitPatternSegments(pattern) {
     .filter(Boolean)
 }
 
+/**
+ * Segment de motif tiré d'un libellé : un « ; » y devient « * », sinon il
+ * couperait le libellé en motifs indépendants, trop larges (miroir de
+ * ServiceTiers#defaultPattern).
+ */
+export function labelToPatternSegment(label) {
+  return label.trim().replaceAll(';', '*')
+}
+
 /** Échappe les caractères spéciaux d'une expression régulière, sauf l'étoile (gardée comme joker). */
 function escapeRegexChars(text) {
   return text.replace(/[.+?^${}()|[\]\\]/g, String.raw`\$&`)

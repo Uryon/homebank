@@ -11,7 +11,8 @@
       <div class="form-grid">
         <div class="form-field">
           <label for="adjust-date">Date de la valeur</label>
-          <input id="adjust-date" v-model="date" type="date" :max="todayIso" />
+          <input id="adjust-date" v-model="date" type="date" :min="MIN_DATE" :max="todayIso" v-bind="invalidAttrs('date')" @input="clear('date')" />
+          <FieldError id="adjust-date-error" :message="errors.date" />
         </div>
         <div class="form-field">
           <label for="adjust-balance">Solde réel ({{ currencyLabel }})</label>
@@ -42,8 +43,10 @@ import { computed, ref } from 'vue'
 import { AccountsAPI } from '../services/api'
 import { alertApiError } from '../services/errors'
 import { notify } from '../services/feedback'
-import { DEFAULT_CURRENCY, formatAmount, toLocalIsoDate } from '../services/format'
+import { DEFAULT_CURRENCY, MIN_DATE, formatAmount, toLocalIsoDate } from '../services/format'
 import AmountInput from './AmountInput.vue'
+import FieldError from './FieldError.vue'
+import { useFieldErrors } from '../services/fieldErrors'
 import Money from './Money.vue'
 
 const props = defineProps({
@@ -60,16 +63,15 @@ const saving = ref(false)
 
 const currencyLabel = computed(() => props.account.currency || DEFAULT_CURRENCY)
 
+const { errors, check, clear, invalidAttrs } = useFieldErrors({ date: 'adjust-date' })
+
 async function save() {
-  if (!date.value) {
-    notify('La date est obligatoire.', 'warning')
-    return
-  }
+  if (!check({ date: date.value ? '' : 'Choisissez la date de ce solde.' })) return
   saving.value = true
   try {
     const adjustment = await AccountsAPI.adjustBalance(props.account.id, date.value, actualBalance.value || 0)
     notify(`Solde actualisé : ajustement de ${formatAmount(adjustment.amount, props.account.currency)}.`, 'success')
-    emit('saved')
+    emit('saved', adjustment)
   } catch (e) {
     alertApiError("Impossible d'actualiser le solde", e)
   } finally {

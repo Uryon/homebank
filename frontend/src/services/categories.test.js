@@ -1,7 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import { categoryChipInfo, flattenCategories, needsCategory } from './categories'
+import { CATEGORY_TYPE_OPTIONS, categoryChipInfo, categoryIconPrefix, categoryTypeLabel, flattenCategories, needsCategory, transactionSearchForCategory, transactionSearchForPayee } from './categories'
 
 describe('flattenCategories', () => {
+  it('garde visible une catégorie de troisième niveau, rattachée à sa racine', () => {
+    const categories = [
+      { id: 1, name: 'Loisirs', type: 'EXPENSE', parentId: null },
+      { id: 2, name: 'Sport', type: 'EXPENSE', parentId: 1 },
+      { id: 3, name: 'Tennis', type: 'EXPENSE', parentId: 2 }
+    ]
+
+    expect(flattenCategories(categories).map(c => c.label)).toEqual(['Loisirs', 'Loisirs : Sport', 'Loisirs : Tennis'])
+  })
+
   it('une racine sans enfant reste selectable', () => {
     const result = flattenCategories([{ id: 1, name: 'Loisirs', type: 'EXPENSE', parentId: null }])
 
@@ -81,5 +91,32 @@ describe('categoryChipInfo', () => {
   it('renvoie null sans catégorie ou pour une catégorie inconnue', () => {
     expect(categoryChipInfo(null, byId)).toBeNull()
     expect(categoryChipInfo(42, byId)).toBeNull()
+  })
+})
+
+describe('liens vers les transactions', () => {
+  it('cherche le libellé exact de la catégorie, racine comprise', () => {
+    expect(transactionSearchForCategory({ label: 'Alimentation : Bio', selectable: true })).toBe('"Alimentation : Bio"')
+    expect(transactionSearchForCategory({ label: 'Alimentation', selectable: false })).toBe('"Alimentation"')
+  })
+
+  it('cherche le nom exact d’un tiers', () => {
+    expect(transactionSearchForPayee({ name: 'Carrefour' })).toBe('"Carrefour"')
+  })
+})
+
+describe('categoryTypeLabel', () => {
+  it('donne le libellé de chaque type proposé, et rend tel quel un type inconnu', () => {
+    expect(CATEGORY_TYPE_OPTIONS.map(o => categoryTypeLabel(o.value))).toEqual(['Dépense', 'Revenu', 'Les deux'])
+    expect(categoryTypeLabel('AUTRE')).toBe('AUTRE')
+    expect(categoryTypeLabel(undefined)).toBeUndefined()
+  })
+})
+
+describe('categoryIconPrefix', () => {
+  it("préfixe l'icône suivie d'une espace, rien sans icône", () => {
+    expect(categoryIconPrefix('🛒')).toBe('🛒 ')
+    expect(categoryIconPrefix('')).toBe('')
+    expect(categoryIconPrefix(null)).toBe('')
   })
 })

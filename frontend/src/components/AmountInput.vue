@@ -34,6 +34,7 @@
  * transaction qui se referme au moment meme de la confirmation).
  */
 import { ref, watch } from 'vue'
+import { parseAmountExpression } from '../services/amountText'
 import { formatAmountForInput as formatForDisplay } from '../services/format'
 
 const props = defineProps({
@@ -55,33 +56,8 @@ watch(() => props.modelValue, (value) => {
   text.value = formatForDisplay(value)
 })
 
-/**
- * Interprete le texte courant : { value, valid }. value peut etre null
- * (champ vide -> "aucun montant") sans que ce soit invalide. valid=false
- * signifie un texte illisible (ex : "abc"), a ignorer sans rien casser.
- */
-function resolve(raw) {
-  const trimmed = raw.trim()
-  if (trimmed === '') return { value: null, valid: true }
-
-  // Normalise virgule decimale et espaces (y compris un espace comme
-  // separateur de milliers, ex : "21 000") avant d'evaluer.
-  const normalized = trimmed.replaceAll(',', '.').replaceAll(/\s+/g, '')
-
-  // Chaine de termes +/- : un premier nombre optionnellement signe, puis
-  // autant de "+/- nombre" que voulu (ex : "21000-500+300", "-500+300").
-  if (/^[+-]?\d+(?:\.\d+)?([+-]\d+(?:\.\d+)?)*$/.test(normalized)) {
-    const terms = normalized.match(/[+-]?\d+(?:\.\d+)?/g) || []
-    const total = terms.reduce((sum, term) => sum + Number(term), 0)
-    return { value: Math.round(total * 100) / 100, valid: true }
-  }
-
-  const value = Number(normalized)
-  return Number.isFinite(value) ? { value, valid: true } : { value: null, valid: false }
-}
-
 function commit() {
-  const { value, valid } = resolve(text.value)
+  const { value, valid } = parseAmountExpression(text.value)
   if (!valid) {
     // Saisie illisible : on revient au montant precedent.
     text.value = formatForDisplay(props.modelValue)

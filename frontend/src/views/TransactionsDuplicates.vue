@@ -11,7 +11,7 @@
 
     <div v-if="loading" class="empty-state" role="status">Analyse des transactions en cours…</div>
     <div v-else-if="loadError" class="empty-state" role="alert">
-      <p>Impossible de charger les doublons. Tes transactions n'ont pas été modifiées.</p>
+      <p>Impossible de charger les doublons. Vos transactions n'ont pas été modifiées.</p>
       <button class="btn secondary" type="button" @click="load">Réessayer</button>
     </div>
 
@@ -84,7 +84,7 @@
       <div class="duplicate-section-subtitle">
         Même compte, date et montant, mais tiers différent — souvent le même paiement importé deux fois
         (une fois catégorisé/renommé à la main, une fois avec le libellé brut de la banque). Les occurrences
-        ne sont pas interchangeables : vérifie laquelle garder avant de supprimer.
+        ne sont pas interchangeables : vérifiez laquelle garder avant de supprimer.
       </div>
 
       <div class="duplicate-list">
@@ -136,8 +136,8 @@
       <h2 class="duplicate-section-title">Dépenses remboursées ({{ reimbursementGroups.length }})</h2>
       <div class="duplicate-section-subtitle">
         Même tiers, montants opposés de même valeur — probablement une dépense déjà remboursée par ce tiers
-        (achat annulé, note de frais avancée...). Si c'est bien le cas, tu peux supprimer les deux
-        transactions (elles s'annulent) ; sinon, ignore-les pour ne plus les voir ici.
+        (achat annulé, note de frais avancée…). Si c'est bien le cas, vous pouvez supprimer les deux
+        transactions (elles s'annulent) ; sinon, ignorez-les pour ne plus les voir ici.
       </div>
 
       <div class="duplicate-list">
@@ -191,6 +191,8 @@
       Aucun doublon détecté pour l'instant.
     </div>
     </template>
+
+    <UndoBar :action="lastAction" :undoing="undoing" @undo="runLastAction" />
   </div>
 </template>
 
@@ -221,10 +223,34 @@ import { notify, askText } from '../services/feedback'
 import { alertApiError } from '../services/errors'
 import { dataStore } from '../services/dataStore'
 import { formatAmount, formatDate, pluralize } from '../services/format'
-import { matchesPatternField } from '../services/payee'
+import { labelToPatternSegment, matchesPatternField } from '../services/payee'
+import { useLastAction } from '../services/lastAction'
+import { restorationSnapshots } from '../services/undoRestore'
 import TransactionsSubNav from './TransactionsSubNav.vue'
+import UndoBar from '../components/UndoBar.vue'
 
 const groups = ref([])
+
+/**
+ * Annulation de la derniere suppression (voir services/lastAction.js) : les
+ * suppressions de cette page se font sans confirmation, le bandeau
+ * « Annuler » rattrape un clic sur le mauvais groupe ou la mauvaise ligne.
+ */
+const { lastAction, undoing, setLastAction, runLastAction } = useLastAction()
+
+/**
+ * Prepare la restauration des transactions supprimees. Le groupe est ajoute
+ * aux transactions du cache pour retrouver la jumelle d'un virement meme si
+ * le cache n'est pas encore charge.
+ */
+function prepareRestore(transactionsToDelete) {
+  const snapshots = restorationSnapshots(transactionsToDelete, [...transactionsToDelete, ...dataStore.state.transactions])
+  return async () => {
+    await TransactionsAPI.restore(snapshots)
+    await dataStore.refreshTransactions()
+    await load()
+  }
+}
 const loading = ref(false)
 const loadError = ref(false)
 const certainGroups = computed(() => groups.value.filter(g => g.certain))
@@ -297,12 +323,15 @@ async function load() {
  */
 async function removeDuplicates(group) {
   const keepId = keeperId(group)
-  const idsToRemove = group.transactions.filter(t => t.id !== keepId).map(t => t.id)
+  const toRemove = group.transactions.filter(t => t.id !== keepId)
+  const undo = prepareRestore(toRemove)
   removingGroupKey.value = group.transactions[0].id
   try {
-    await Promise.all(idsToRemove.map(id => TransactionsAPI.remove(id)))
+    await Promise.all(toRemove.map(t => TransactionsAPI.remove(t.id)))
+    const label = pluralize(toRemove.length, 'doublon supprimé', 'doublons supprimés')
+    setLastAction(label.charAt(0).toUpperCase() + label.slice(1), undo, { retryable: true })
     await dataStore.refreshTransactions()
-    notify(`${pluralize(idsToRemove.length, 'doublon supprimé', 'doublons supprimés')}.`)
+    notify(`${label}.`)
     await load()
   } catch (error) {
     alertApiError('Erreur lors de la suppression des doublons', error)
@@ -315,6 +344,12 @@ async function removeDuplicates(group) {
   }
 }
 
+/** Annulation d'un marquage « pas un doublon » : le groupe réapparaît. */
+async function unmarkAndReload(ids) {
+  await TransactionsAPI.unmarkNotDuplicate(ids)
+  await load()
+}
+
 /**
  * Marque toutes les occurrences d'un groupe "certain" comme n'etant pas des
  * doublons (voir ServiceTransaction#markAsNotDuplicate) : le groupe entier
@@ -322,9 +357,11 @@ async function removeDuplicates(group) {
  */
 async function markGroupNotDuplicate(group) {
   markingGroupKey.value = group.transactions[0].id
+  const ids = group.transactions.map(t => t.id)
   try {
-    await TransactionsAPI.markNotDuplicate(group.transactions.map(t => t.id))
+    await TransactionsAPI.markNotDuplicate(ids)
     notify('Groupe marqué comme non doublon.')
+    setLastAction('Groupe ignoré', () => unmarkAndReload(ids))
     await load()
   } catch (error) {
     alertApiError('Erreur lors du marquage', error)
@@ -344,6 +381,7 @@ async function markSingleNotDuplicate(transaction) {
   try {
     await TransactionsAPI.markNotDuplicate([transaction.id])
     notify('Transaction marquée comme non doublon.')
+    setLastAction('Marquée comme non doublon', () => unmarkAndReload([transaction.id]))
     await load()
   } catch (error) {
     alertApiError('Erreur lors du marquage', error)
@@ -363,9 +401,11 @@ async function markSingleNotDuplicate(transaction) {
  * meme tiers, il n'y a rien a apprendre pour la reconnaissance automatique.
  */
 async function removeReimbursementGroup(group) {
+  const undo = prepareRestore(group.transactions)
   removingGroupKey.value = group.transactions[0].id
   try {
     await Promise.all(group.transactions.map(t => TransactionsAPI.remove(t.id)))
+    setLastAction(`${group.transactions.length} transactions supprimées`, undo, { retryable: true })
     await dataStore.refreshTransactions()
     notify(`${group.transactions.length} transactions supprimées.`)
     await load()
@@ -389,10 +429,12 @@ async function removeReimbursementGroup(group) {
  */
 async function removeSingle(transaction, group) {
   removingId.value = transaction.id
+  const undo = prepareRestore([transaction])
   let deleted = false
   try {
     await TransactionsAPI.remove(transaction.id)
     deleted = true
+    setLastAction('Transaction supprimée', undo, { retryable: true })
     notify('Transaction supprimée.')
     try {
       await suggestPatternUpdate(transaction, group)
@@ -444,7 +486,7 @@ async function suggestPatternUpdate(deletedTransaction, group) {
   )
   if (editedPattern === null) return // saisie annulée
 
-  const newPattern = [editedPattern.trim(), newEntry].filter(Boolean).join(';')
+  const newPattern = [editedPattern.trim(), labelToPatternSegment(newEntry)].filter(Boolean).join(';')
   if (!newPattern) return
 
   await PayeesAPI.update(payee.id, {

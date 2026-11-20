@@ -47,6 +47,8 @@ class ServiceCategorieTest {
         // save() renvoie l'entite telle que passee, comme le ferait Hibernate pour une entite deja porteuse de son etat.
         // lenient() : ce stub n'est pas utilise par les tests qui ne sauvegardent rien (ex : chemins en erreur).
         lenient().when(categoryRepository.save(any(Categorie.class))).thenAnswer(inv -> inv.getArgument(0));
+        // Par defaut aucune categorie principale ne porte le nom cherche.
+        lenient().when(categoryRepository.findByNameIgnoreCaseAndParentIsNull(any())).thenReturn(Optional.empty());
     }
 
     private static Categorie categorie(Long id, String name, TypeCategorie type, Categorie parent) {
@@ -122,23 +124,111 @@ class ServiceCategorieTest {
         assertThat(result.getType()).isEqualTo(TypeCategorie.BOTH);
     }
 
+    /** Une boucle (A sous B, B sous A) rendrait l'arbre des catégories infini. */
     @Test
-    void update_versUnNouveauParent_repercuteLeNouveauTypeSurSesPropresSousCategories() {
-        // "Restaurant" a elle-meme une sous-categorie ("Fast-food") : la reparenter
-        // sous "Loisirs" doit aussi retyper cette sous-categorie (petit-enfant du
-        // nouveau parent), pas seulement "Restaurant" elle-meme.
+    void update_sousUneDeSesPropresSousCategories_refuseSansRienModifier() {
+        Categorie existing = categorie(1L, "Alimentation", TypeCategorie.EXPENSE, null);
+        Categorie enfant = categorie(2L, "Restaurant", TypeCategorie.EXPENSE, existing);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(categoryRepository.findById(2L)).thenReturn(Optional.of(enfant));
+        CategorieDTO payload = CategorieDTO.builder().name("Alimentation").parentId(2L).build();
+
+        assertThatThrownBy(() -> service.update(1L, payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Une catégorie ne peut pas être déplacée sous l'une de ses propres sous-catégories.");
+        assertThat(existing.getParent()).isNull();
+        verify(categoryRepository, never()).save(any());
+    }
+
+    @Test
+    void toggleHidden_basculeDansLesDeuxSensSansToucherAuLissageAnnuel() {
+        Categorie c = categorie(1L, "Ancien abonnement", TypeCategorie.EXPENSE, null);
+        c.setAnnualized(true);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(c));
+
+        assertThat(service.toggleHidden(1L).isHidden()).isTrue();
+        assertThat(c.isAnnualized()).isTrue();
+        assertThat(service.toggleHidden(1L).isHidden()).isFalse();
+    }
+
+    @Test
+    void toggleAnnualized_basculeDansLesDeuxSensSansToucherAuMasquage() {
+        Categorie c = categorie(1L, "Taxe foncière", TypeCategorie.EXPENSE, null);
+        c.setHidden(true);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(c));
+
+        assertThat(service.toggleAnnualized(1L).isAnnualized()).isTrue();
+        assertThat(c.isHidden()).isTrue();
+        assertThat(service.toggleAnnualized(1L).isAnnualized()).isFalse();
+    }
+
+    @Test
+    void update_categorieAvecSousCategories_neDevientPasUneSousCategorie() {
         Categorie existing = categorie(1L, "Restaurant", TypeCategorie.EXPENSE, null);
-        Categorie grandchild = categorie(3L, "Fast-food", TypeCategorie.EXPENSE, existing);
+        Categorie enfant = categorie(3L, "Fast-food", TypeCategorie.EXPENSE, existing);
         Categorie newParent = categorie(2L, "Loisirs", TypeCategorie.BOTH, null);
         when(categoryRepository.findById(1L)).thenReturn(Optional.of(existing));
         when(categoryRepository.findById(2L)).thenReturn(Optional.of(newParent));
-        when(categoryRepository.findByParent(existing)).thenReturn(List.of(grandchild));
-        when(categoryRepository.findByParent(grandchild)).thenReturn(List.of());
-        CategorieDTO payload = CategorieDTO.builder().name("Restaurant").parentId(2L).type(TypeCategorie.INCOME).build();
+        when(categoryRepository.findByParent(existing)).thenReturn(List.of(enfant));
+        CategorieDTO payload = CategorieDTO.builder().name("Restaurant").parentId(2L).build();
 
-        service.update(1L, payload);
+        assertThatThrownBy(() -> service.update(1L, payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("contient des sous-catégories");
+        assertThat(existing.getParent()).isNull();
+    }
 
-        assertThat(grandchild.getType()).isEqualTo(TypeCategorie.BOTH);
+    @Test
+    void update_versUnNomDejaPris_refuseSansModifierLaCategorie() {
+        Categorie existing = categorie(1L, "Courses", TypeCategorie.EXPENSE, null);
+        Categorie homonyme = categorie(2L, "Loisirs", TypeCategorie.EXPENSE, null);
+        when(categoryRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(categoryRepository.findByNameIgnoreCaseAndParentIsNull("Loisirs")).thenReturn(Optional.of(homonyme));
+        CategorieDTO payload = CategorieDTO.builder().name("Loisirs").type(TypeCategorie.EXPENSE).build();
+
+        assertThatThrownBy(() -> service.update(1L, payload)).isInstanceOf(IllegalArgumentException.class);
+        assertThat(existing.getName()).isEqualTo("Courses");
+    }
+
+    @Test
+    void create_sousUneSousCategorie_estRefuse() {
+        Categorie racine = categorie(1L, "Loisirs", TypeCategorie.EXPENSE, null);
+        Categorie sous = categorie(2L, "Sport", TypeCategorie.EXPENSE, racine);
+        when(categoryRepository.findById(2L)).thenReturn(Optional.of(sous));
+        CategorieDTO payload = CategorieDTO.builder().name("Tennis").parentId(2L).build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("ne peut pas contenir");
+    }
+
+    @Test
+    void update_categorieDejaAuTroisiemeNiveau_resteModifiableSousSonParent() {
+        Categorie racine = categorie(1L, "Loisirs", TypeCategorie.EXPENSE, null);
+        Categorie sous = categorie(2L, "Sport", TypeCategorie.EXPENSE, racine);
+        Categorie ancienne = categorie(3L, "Tennis", TypeCategorie.EXPENSE, sous);
+        when(categoryRepository.findById(3L)).thenReturn(Optional.of(ancienne));
+        when(categoryRepository.findById(2L)).thenReturn(Optional.of(sous));
+
+        Categorie result = service.update(3L, CategorieDTO.builder().name("Padel").parentId(2L).build());
+
+        assertThat(result.getName()).isEqualTo("Padel");
+    }
+
+    @Test
+    void merge_sourceAvecEnfantsDansUneSousCategorie_estRefuseeSansRienDeplacer() {
+        Categorie racine = categorie(1L, "Loisirs", TypeCategorie.EXPENSE, null);
+        Categorie cible = categorie(2L, "Sport", TypeCategorie.EXPENSE, racine);
+        Categorie source = categorie(3L, "Courses", TypeCategorie.EXPENSE, null);
+        Categorie enfant = categorie(4L, "Bio", TypeCategorie.EXPENSE, source);
+        when(categoryRepository.findById(2L)).thenReturn(Optional.of(cible));
+        when(categoryRepository.findById(3L)).thenReturn(Optional.of(source));
+        when(categoryRepository.findByParent(source)).thenReturn(List.of(enfant));
+
+        assertThatThrownBy(() -> service.merge(List.of(3L), 2L)).isInstanceOf(IllegalArgumentException.class);
+
+        verifyNoInteractions(transactionRepository, payeeRepository);
+        assertThat(enfant.getParent()).isEqualTo(source);
     }
 
     // --- delete ---
@@ -200,6 +290,19 @@ class ServiceCategorieTest {
 
         assertThatThrownBy(() -> service.create(payload)).isInstanceOf(IllegalArgumentException.class);
         verify(categoryRepository, never()).save(any(Categorie.class));
+    }
+
+    @Test
+    void create_refuseUneIconeTropLongueEtIgnoreUneIconeVide() {
+        CategorieDTO tropLongue = CategorieDTO.builder().name("Divers").type(TypeCategorie.EXPENSE).icon("x".repeat(300)).build();
+        assertThatThrownBy(() -> service.create(tropLongue))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("L'icône de la catégorie ne peut pas dépasser 255 caractères");
+        verify(categoryRepository, never()).save(any(Categorie.class));
+
+        when(categoryRepository.save(any(Categorie.class))).thenAnswer(inv -> inv.getArgument(0));
+        Categorie sansIcone = service.create(CategorieDTO.builder().name("Divers").type(TypeCategorie.EXPENSE).icon("  ").build());
+        assertThat(sansIcone.getIcon()).isNull();
     }
 
     @Test
@@ -277,6 +380,15 @@ class ServiceCategorieTest {
     }
 
     // --- findOrCreateByName ---
+
+    @Test
+    void findOrCreateByName_nomAvecDeuxPointsDUneCategoriePrincipale_laRetrouve() {
+        Categorie existante = categorie(1L, "Auto:Moto", TypeCategorie.EXPENSE, null);
+        when(categoryRepository.findByNameIgnoreCaseAndParentIsNull("Auto:Moto")).thenReturn(Optional.of(existante));
+
+        assertThat(service.findOrCreateByName("Auto:Moto")).isSameAs(existante);
+        verify(categoryRepository, never()).save(any());
+    }
 
     @Test
     void findOrCreateByName_blancOuNull_renvoieNullSansAccederAuDepot() {

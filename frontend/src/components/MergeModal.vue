@@ -15,7 +15,7 @@
 
       <slot />
 
-      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+      <div class="modal-actions">
         <button class="btn secondary" @click="$emit('cancel')">Annuler</button>
         <button class="btn" :disabled="confirming" @click="$emit('confirm')">
           {{ confirming ? confirmingLabel : confirmLabel }}

@@ -34,17 +34,25 @@ export const TransactionsAPI = {
     update: (id, payload) => api.put(`/transactions/${id}`, payload).then(r => r.data),
     remove: (id) => api.delete(`/transactions/${id}`),
     removeBulk: (ids) => api.delete('/transactions/bulk', { data: ids }).then(r => r.data),
-    removePending: () => api.delete('/transactions/pending').then(r => r.data),
+    // accountId absent : toutes les transactions en attente, tous comptes confondus.
+    removePending: (accountId) => api.delete('/transactions/pending', { params: { accountId } }).then(r => r.data),
     split: (id, payload) => api.post(`/transactions/${id}/split`, payload).then(r => r.data),
-    validateAll: () => api.post('/transactions/validate-all').then(r => r.data),
+    undoSplit: (id, payload) => api.post(`/transactions/${id}/undo-split`, payload).then(r => r.data),
+    validateAll: (accountId) => api.post('/transactions/validate-all', null, { params: { accountId } }).then(r => r.data),
     toggleValidated: (id) => api.post(`/transactions/${id}/toggle-validated`).then(r => r.data),
     togglePeriodicExpense: (id) => api.post(`/transactions/${id}/toggle-periodic-expense`).then(r => r.data),
     toggleExceptional: (id) => api.post(`/transactions/${id}/toggle-exceptional`).then(r => r.data),
     bulkUpdate: (payload) => api.put('/transactions/bulk', payload).then(r => r.data),
     periodicSuggestions: () => api.get('/transactions/periodic-suggestions').then(r => r.data),
     ignorePeriodicSuggestion: (ids) => api.post('/transactions/ignore-periodic-suggestion', ids).then(r => r.data),
+    unignorePeriodicSuggestion: (ids) => api.post('/transactions/unignore-periodic-suggestion', ids).then(r => r.data),
     duplicates: () => api.get('/transactions/duplicates').then(r => r.data),
+    // Annule une création ou un import : la ligne du relevé reste importable.
+    undoCreation: (ids) => api.post('/transactions/undo-creation', ids).then(r => r.data),
+    // Annule une suppression, à partir des transactions telles qu'elles étaient.
+    restore: (snapshots) => api.post('/transactions/restore', snapshots).then(r => r.data),
     markNotDuplicate: (ids) => api.post('/transactions/mark-not-duplicate', ids).then(r => r.data),
+    unmarkNotDuplicate: (ids) => api.post('/transactions/unmark-not-duplicate', ids).then(r => r.data),
     transfer: (payload) => api.post('/transactions/transfer', payload).then(r => r.data)
 }
 
@@ -63,7 +71,10 @@ export const PayeesAPI = {
     update: (id, payload) => api.put(`/payees/${id}`, payload).then(r => r.data),
     remove: (id) => api.delete(`/payees/${id}`),
     merge: (sourceIds, targetId, pattern) => api.post('/payees/merge', { sourceIds, targetId, pattern }).then(r => r.data),
-    autoCategorize: () => api.post('/payees/auto-categorize').then(r => r.data)
+    autoCategorize: () => api.post('/payees/auto-categorize').then(r => r.data),
+    previewCleanup: () => api.get('/payees/computed-label-cleanup').then(r => r.data),
+    cleanup: (payeeIds) => api.post('/payees/computed-label-cleanup', payeeIds).then(r => r.data),
+    undoCleanup: (cleanedPayees) => api.post('/payees/computed-label-cleanup/undo', cleanedPayees)
 }
 
 export const LoansAPI = {

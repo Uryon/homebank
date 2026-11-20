@@ -5,11 +5,15 @@ import com.homebank.model.Transaction;
 import com.homebank.utils.ModePaiement;
 import org.springframework.stereotype.Component;
 
+import java.util.Locale;
+
 @Component
 public class MappeurTransaction {
 
     /** Libelle affiche a la place du tiers pour un ajustement de solde (voir Transaction#balanceAdjustment). */
     static final String BALANCE_ADJUSTMENT_LABEL = "Ajustement de solde";
+    private static final String TRANSFER_TO_PREFIX = "Virement vers ";
+    private static final String TRANSFER_FROM_PREFIX = "Virement depuis ";
 
     public TransactionDTO toDTO(Transaction transaction) {
         return TransactionDTO.builder()
@@ -35,6 +39,8 @@ public class MappeurTransaction {
                 .bankLabel(transaction.getBankLabel())
                 .duplicateIgnored(transaction.isDuplicateIgnored())
                 .balanceAdjustment(transaction.isBalanceAdjustment())
+                .splitFromAmount(transaction.getSplitFromAmount())
+                .periodicSuggestionIgnored(transaction.isPeriodicSuggestionIgnored())
                 .build();
     }
 
@@ -44,22 +50,41 @@ public class MappeurTransaction {
      * tiers) un libelle recalcule a partir du compte de destination/origine,
      * pour qu'il reste a jour meme si ce compte est renomme plus tard.
      */
-    private String payeeLabel(Transaction transaction) {
-        if (transaction.getPayee() != null) {
-            return transaction.getPayee().getName();
-        }
-        if (transaction.getPaymentMode() == ModePaiement.TRANSFER && transaction.getTransferTransaction() != null) {
+    public static String payeeLabel(Transaction transaction) {
+        return transaction.getPayee() != null
+                ? transaction.getPayee().getName()
+                : computedLabel(transaction);
+    }
+
+    /** Vrai si la transaction affiche un libelle calcule quand elle n'a pas de tiers. */
+    public static boolean hasComputedLabel(Transaction transaction) {
+        return isLinkedTransfer(transaction) || transaction.isBalanceAdjustment();
+    }
+
+    /** Vrai si ce nom a la forme d'un libelle calcule (casse ignoree, le compte a pu etre renomme depuis). */
+    public static boolean looksLikeComputedLabel(String name) {
+        if (name == null) return false;
+        String lower = name.trim().toLowerCase(Locale.ROOT);
+        return lower.equals(BALANCE_ADJUSTMENT_LABEL.toLowerCase(Locale.ROOT))
+                || lower.startsWith(TRANSFER_TO_PREFIX.toLowerCase(Locale.ROOT))
+                || lower.startsWith(TRANSFER_FROM_PREFIX.toLowerCase(Locale.ROOT));
+    }
+
+    /** Libelle affiche en l'absence de tiers, null si la transaction n'en a pas. */
+    public static String computedLabel(Transaction transaction) {
+        if (isLinkedTransfer(transaction)) {
             String counterpartAccount = transaction.getTransferTransaction().getAccount() != null
                     ? transaction.getTransferTransaction().getAccount().getName()
                     : "";
             String direction = transaction.getAmount() != null && transaction.getAmount().signum() < 0
-                    ? "Virement vers "
-                    : "Virement depuis ";
+                    ? TRANSFER_TO_PREFIX
+                    : TRANSFER_FROM_PREFIX;
             return direction + counterpartAccount;
         }
-        if (transaction.isBalanceAdjustment()) {
-            return BALANCE_ADJUSTMENT_LABEL;
-        }
-        return null;
+        return transaction.isBalanceAdjustment() ? BALANCE_ADJUSTMENT_LABEL : null;
+    }
+
+    private static boolean isLinkedTransfer(Transaction transaction) {
+        return transaction.getPaymentMode() == ModePaiement.TRANSFER && transaction.getTransferTransaction() != null;
     }
 }

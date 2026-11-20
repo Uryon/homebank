@@ -6,9 +6,19 @@
         <div class="subtitle">Historique des opérations — cliquez sur une ligne pour la modifier</div>
       </div>
 
-      <button class="btn" @click="openCreate" :disabled="!accounts.length">
-        + Nouvelle transaction
-      </button>
+      <div class="header-actions">
+        <button
+          class="btn secondary"
+          :disabled="!sortedTransactions.length"
+          :title="`Télécharger les ${sortedTransactions.length} transactions affichées au format CSV de HomeBank (réimportable)`"
+          @click="exportCsv"
+        >
+          Exporter en CSV
+        </button>
+        <button class="btn" @click="openCreate" :disabled="!accounts.length">
+          <Icon name="plus" size="sm" /> Nouvelle transaction
+        </button>
+      </div>
     </div>
 
     <TransactionsSubNav />
@@ -16,7 +26,7 @@
     <div ref="toolbarEl" class="toolbar transactions-toolbar">
       <div class="form-field">
         <label for="tx-filter-account">Compte</label>
-        <select id="tx-filter-account" v-model="filterAccount" @change="load">
+        <select id="tx-filter-account" v-model="filterAccount">
           <option :value="null">Tous les comptes</option>
           <option v-for="a in accounts" :key="a.id" :value="a.id">{{ accountOptionLabel(a) }}</option>
         </select>
@@ -76,38 +86,39 @@
         </template>
       </div>
 
-      <div class="form-field" style="margin-left: auto;">
+      <div v-if="drillDown" class="drill-down-filter" role="status">
+        <span class="form-field-label">Depuis le tableau de bord</span>
+        <span class="chip active drill-down-chip">
+          {{ drillDown.label }}
+          <button type="button" class="drill-down-clear" title="Retirer ce filtre" aria-label="Retirer le filtre du tableau de bord" @click="clearDrillDown">
+            <Icon name="x" size="sm" />
+          </button>
+        </span>
+        <span v-if="drillDownHasSmoothed" class="drill-down-note">
+          Le tableau de bord lisse les catégories annuelles sur 12 mois : le total ici peut donc différer.
+        </span>
+      </div>
+
+      <div class="form-field search-field">
         <label for="tx-search" title="Tiers, catégorie, mémo ou montant. Séparez plusieurs critères par point-virgule pour tous les exiger à la fois (ET), ex : Bouygues;29,99. Entre guillemets (&quot;CAF&quot;), le critère doit correspondre exactement au lieu de simplement le contenir. Ou &gt; / &lt; / = un montant seul.">Rechercher</label>
-        <input id="tx-search" v-model="searchQuery" placeholder="Tiers, catégorie, mémo, montant… ex : > 100" style="min-width: 280px;" />
+        <input id="tx-search" v-model="searchQuery" placeholder="Tiers, catégorie, mémo, montant… ex : > 100" />
         <div v-if="amountQuery" class="text-hint">
-          {{ amountSearchLoading ? 'Recherche…' : pluralize(filteredTransactions.length, 'transaction trouvée', 'transactions trouvées') }}
+          {{ pluralize(filteredTransactions.length, 'transaction trouvée', 'transactions trouvées') }}
         </div>
       </div>
     </div>
 
-    <!-- Barre flottante en bas de l'écran : reste visible même quand on coche
-         des lignes loin dans la liste (elle était auparavant au-dessus du tableau). -->
-    <Transition name="bulk-bar">
-      <div v-if="selectedIds.size" class="bulk-bar" role="region" aria-label="Actions sur la sélection">
-        <span class="bulk-count" aria-live="polite">
-          {{ selectedIds.size }} sélectionnée{{ selectedIds.size > 1 ? 's' : '' }}
-        </span>
-        <span class="bulk-total" :class="selectedTotal >= 0 ? 'positive' : 'negative'">
-          {{ formatAmount(selectedTotal) }}
-        </span>
-        <span class="bulk-separator" aria-hidden="true" />
-        <button class="btn" @click="openBulkEdit"><Icon name="edit" size="sm" /> Modifier</button>
-        <button class="btn danger" :disabled="deletingSelection" @click="deleteSelected">
-          <Icon name="trash" size="sm" /> {{ deletingSelection ? 'Suppression…' : 'Supprimer' }}
-        </button>
-        <button class="bulk-close" type="button" title="Désélectionner tout (Échap)" aria-label="Désélectionner tout" @click="clearSelection">
-          <Icon name="x" size="sm" />
-        </button>
-      </div>
-    </Transition>
+    <TransactionSelectionBar
+      :count="selectedIds.size"
+      :total="selectedTotal"
+      :deleting="deletingSelection"
+      @edit="openBulkEdit"
+      @delete="deleteSelected"
+      @clear="clearSelection"
+    />
 
     <div class="table-scroll" v-if="filteredTransactions.length">
-      <table class="transactions-table">
+      <table v-row-nav="'tr[data-transaction-id]'" class="transactions-table" :class="{ 'with-balance': showBalance }">
         <colgroup>
           <col class="col-select" />
           <col class="col-status" />
@@ -118,6 +129,7 @@
           <col class="col-memo" />
           <col class="col-amount" />
           <col class="col-amount" />
+          <col v-if="showBalance" class="col-amount" />
           <col class="col-monthly" />
           <col class="col-monthly" />
           <col class="col-actions" />
@@ -134,13 +146,30 @@
               />
             </th>
             <th title="Statut de validation (rapprochement bancaire)"><span class="sr-only">Statut</span></th>
-            <th>Date</th>
+            <th :aria-sort="ariaSort('date')">
+              <button type="button" class="sort-header" title="Trier par date" @click="toggleSort('date')">
+                Date <Icon :name="sortIcon('date')" size="sm" />
+              </button>
+            </th>
             <th>Compte</th>
-            <th>Tiers</th>
+            <th :aria-sort="ariaSort('payee')">
+              <button type="button" class="sort-header" title="Trier par tiers (A→Z)" @click="toggleSort('payee')">
+                Tiers <Icon :name="sortIcon('payee')" size="sm" />
+              </button>
+            </th>
             <th>Catégorie</th>
             <th>Mémo</th>
-            <th class="num">Dépense</th>
-            <th class="num">Revenu</th>
+            <th class="num" :aria-sort="ariaSort('expense')">
+              <button type="button" class="sort-header" title="Trier par dépense (la plus grosse en premier)" @click="toggleSort('expense')">
+                Dépense <Icon :name="sortIcon('expense')" size="sm" />
+              </button>
+            </th>
+            <th class="num" :aria-sort="ariaSort('income')">
+              <button type="button" class="sort-header" title="Trier par revenu (le plus gros en premier)" @click="toggleSort('income')">
+                Revenu <Icon :name="sortIcon('income')" size="sm" />
+              </button>
+            </th>
+            <th v-if="showBalance" class="num" title="Solde du compte après chaque opération, dans l'ordre chronologique (solde initial compris)">Solde</th>
             <th class="num th-icon" title="Dépense périodique récurrente">
               <Icon name="refresh" size="sm" /><span class="sr-only">Récurrent</span>
             </th>
@@ -155,7 +184,7 @@
           <template v-for="(t, index) in pagedTransactions" :key="t.id">
           <!-- Intertitre à chaque changement de mois (liste triée par date décroissante) -->
           <tr v-if="monthStartsAt(index)" class="month-row">
-            <th colspan="12" scope="rowgroup">
+            <th :colspan="showBalance ? 13 : 12" scope="rowgroup">
               <span class="month-row-label">{{ monthHeading(t.date) }}</span>
               <span class="month-row-meta">
                 {{ monthSummary(t.date).count }} transaction{{ monthSummary(t.date).count > 1 ? 's' : '' }}
@@ -175,6 +204,8 @@
             :payee-index="payeeByNormalizedName"
             :today-iso="todayIso"
             :selected="selectedIds.has(t.id)"
+            :show-balance="showBalance"
+            :balance-after="runningBalances?.get(t.id) ?? null"
             @start-edit="startEdit(t)"
             @cancel-edit="cancelEdit"
             @confirm-edit="confirmEdit"
@@ -184,6 +215,7 @@
             @toggle-select="toggleSelect"
             @remove="remove"
             @split="openSplit"
+            @duplicate="duplicateTransaction"
           />
           </template>
         </tbody>
@@ -213,316 +245,77 @@
       <button v-if="accounts.length && searchQuery.trim()" type="button" class="btn secondary" @click="searchQuery = ''">Effacer la recherche</button>
     </div>
 
-    <!-- Modal : création uniquement -->
-    <div v-if="showModal" class="modal-overlay" @click.self="showModal = false">
-      <div v-dialog="() => (showModal = false)" class="modal" role="dialog" aria-modal="true">
-        <h2>Nouvelle transaction</h2>
+    <TransactionCreateModal
+      v-if="newTransactionDraft"
+      :draft="newTransactionDraft"
+      :accounts="entryAccounts"
+      :payees="payees"
+      :payee-index="payeeByNormalizedName"
+      :categories="flatCategories"
+      @close="newTransactionDraft = null"
+      @submit="save"
+    />
 
-        <div class="form-grid">
-          <div class="form-field">
-            <label for="new-tx-account">Compte</label>
-            <select id="new-tx-account" v-model.number="form.accountId">
-              <option v-for="a in entryAccounts" :key="a.id" :value="a.id">{{ a.name }}</option>
-            </select>
-          </div>
+    <TransactionBulkEditModal
+      v-if="showBulkEditModal"
+      :count-label="selectedCountLabel"
+      :categories="flatCategories"
+      :payees="payees"
+      :saving="bulkSaving"
+      @close="showBulkEditModal = false"
+      @submit="saveBulkEdit"
+    />
 
-          <div class="form-field">
-            <label for="new-tx-date">Date</label>
-            <input id="new-tx-date" v-model="form.date" type="date" />
-          </div>
+    <TransactionSplitModal
+      v-if="splitTransaction"
+      :transaction="splitTransaction"
+      :currency="splitCurrency"
+      :categories="flatCategories"
+      :saving="splitSaving"
+      :error="splitError"
+      @close="closeSplitModal"
+      @submit="saveSplit"
+    />
 
-          <div class="form-field">
-            <label for="new-tx-payee">Tiers</label>
-            <PayeeAutocomplete id="new-tx-payee" v-model="form.payee" :payees="payees" placeholder="Ex : Supermarché" />
-          </div>
-
-          <div class="form-field">
-            <div class="amount-label-row">
-              <label for="new-tx-amount">Montant</label>
-              <div class="flow-toggle" role="radiogroup" aria-label="Sens de la transaction">
-                <button
-                  v-for="option in FLOW_OPTIONS"
-                  :key="option.value"
-                  type="button"
-                  role="radio"
-                  class="flow-option"
-                  :class="[option.value.toLowerCase(), { active: entryFlow === option.value }]"
-                  :aria-checked="entryFlow === option.value"
-                  @click="setEntryFlow(option.value)"
-                >{{ option.label }}</button>
-              </div>
-            </div>
-            <AmountInput id="new-tx-amount" v-model="form.amount" placeholder="0,00" />
-          </div>
-
-          <div class="form-field">
-            <label for="new-tx-category">Catégorie</label>
-            <CategoryAutocomplete
-              id="new-tx-category"
-              v-model="form.categoryId"
-              :categories="flatCategories"
-              :transaction-type="formAmountType"
-              placeholder="Rechercher (facultatif)"
-            />
-          </div>
-
-          <div class="form-field">
-            <label for="new-tx-payment-mode">Mode de paiement</label>
-            <select id="new-tx-payment-mode" v-model="form.paymentMode">
-              <option value="NONE">Aucun</option>
-              <option value="CASH">Espèces</option>
-              <option value="CHEQUE">Chèque</option>
-              <option value="TRANSFER">Virement</option>
-              <option value="CARD">Carte</option>
-              <option value="DIRECT_DEBIT">Prélèvement</option>
-              <option value="STANDING_ORDER">Virement permanent</option>
-            </select>
-          </div>
-
-          <div class="form-field" style="grid-column: span 2;">
-            <label for="new-tx-memo">Mémo</label>
-            <input id="new-tx-memo" v-model="form.memo" placeholder="Note libre" />
-          </div>
-
-          <div class="form-field" style="grid-column: span 2; flex-direction: row; align-items: center; gap: 8px;">
-            <input type="checkbox" v-model="form.periodicExpense" id="new-periodic-expense" style="width: auto;" />
-            <label for="new-periodic-expense" style="margin: 0;">Dépense périodique récurrente (loyer, abonnement...)</label>
-          </div>
-
-          <div class="form-field" style="grid-column: span 2; flex-direction: row; align-items: center; gap: 8px;">
-            <input type="checkbox" v-model="form.exceptional" id="new-exceptional" style="width: auto;" />
-            <label for="new-exceptional" style="margin: 0;">Transaction exceptionnelle (exclue des tableaux de bord, ex : achat d'une voiture)</label>
-          </div>
-        </div>
-
-        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-          <button class="btn secondary" @click="showModal = false">Annuler</button>
-          <button class="btn" @click="save">Enregistrer</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Modal : édition en masse des transactions sélectionnées -->
-    <div v-if="showBulkEditModal" class="modal-overlay" @click.self="showBulkEditModal = false">
-      <div v-dialog="() => (showBulkEditModal = false)" class="modal bulk-edit-modal inline-edit-fields" role="dialog" aria-modal="true">
-        <h2>Modifier {{ selectedCountLabel }}</h2>
-        <div class="text-hint" style="margin-bottom: 20px;">
-          Modifiez uniquement les champs à changer : un champ non touché reste inchangé sur chaque transaction.
-        </div>
-
-        <div class="bulk-section">
-          <div class="bulk-section-title">Catégorisation</div>
-
-          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.categoryTouched }">
-            <div class="bulk-field-label">Catégorie</div>
-            <div class="bulk-field-control">
-              <CategoryAutocomplete
-                id="bulk-category"
-                aria-label="Catégorie"
-                :model-value="bulkForm.categoryId"
-                @update:model-value="onBulkCategoryChange"
-                :categories="flatCategories"
-                placeholder="Ne pas modifier"
-              />
-            </div>
-            <span v-if="bulkForm.categoryTouched" class="bulk-field-check"><Icon name="check" /></span>
-          </div>
-
-          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.payeeTouched }">
-            <div class="bulk-field-label">Tiers</div>
-            <div class="bulk-field-control">
-              <PayeeAutocomplete
-                id="bulk-payee"
-                aria-label="Tiers"
-                :model-value="bulkForm.payee"
-                @update:model-value="onBulkPayeeChange"
-                :payees="payees"
-                placeholder="Ne pas modifier"
-              />
-            </div>
-            <span v-if="bulkForm.payeeTouched" class="bulk-field-check"><Icon name="check" /></span>
-          </div>
-
-          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.paymentMode !== null }">
-            <div class="bulk-field-label">Mode de paiement</div>
-            <div class="bulk-field-control">
-              <select v-model="bulkForm.paymentMode" aria-label="Mode de paiement">
-                <option :value="null">Ne pas modifier</option>
-                <option value="NONE">Aucun</option>
-                <option value="CASH">Espèces</option>
-                <option value="CHEQUE">Chèque</option>
-                <option value="TRANSFER">Virement</option>
-                <option value="CARD">Carte</option>
-                <option value="DIRECT_DEBIT">Prélèvement</option>
-                <option value="STANDING_ORDER">Virement permanent</option>
-              </select>
-            </div>
-            <span v-if="bulkForm.paymentMode !== null" class="bulk-field-check"><Icon name="check" /></span>
-          </div>
-        </div>
-
-        <div class="bulk-section">
-          <div class="bulk-section-title">Marqueurs</div>
-
-          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.periodicExpense !== null }">
-            <div class="bulk-field-label">Dépense périodique</div>
-            <div class="bulk-field-control">
-              <select v-model="bulkForm.periodicExpense" aria-label="Dépense périodique">
-                <option :value="null">Ne pas modifier</option>
-                <option :value="true">Oui</option>
-                <option :value="false">Non</option>
-              </select>
-            </div>
-            <span v-if="bulkForm.periodicExpense !== null" class="bulk-field-check"><Icon name="check" /></span>
-          </div>
-
-          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.exceptional !== null }">
-            <div class="bulk-field-label">Exceptionnelle</div>
-            <div class="bulk-field-control">
-              <select v-model="bulkForm.exceptional" aria-label="Exceptionnelle">
-                <option :value="null">Ne pas modifier</option>
-                <option :value="true">Oui</option>
-                <option :value="false">Non</option>
-              </select>
-            </div>
-            <span v-if="bulkForm.exceptional !== null" class="bulk-field-check"><Icon name="check" /></span>
-          </div>
-        </div>
-
-        <div class="bulk-section">
-          <div class="bulk-section-title">Statut</div>
-
-          <div class="bulk-field" :class="{ 'bulk-field-active': bulkForm.validated !== null }">
-            <div class="bulk-field-label">Validée / en attente</div>
-            <div class="bulk-field-control">
-              <select v-model="bulkForm.validated" aria-label="Validée / en attente">
-                <option :value="null">Ne pas modifier</option>
-                <option :value="true">Validée</option>
-                <option :value="false">En attente</option>
-              </select>
-            </div>
-            <span v-if="bulkForm.validated !== null" class="bulk-field-check"><Icon name="check" /></span>
-          </div>
-        </div>
-
-        <div class="bulk-footer">
-          <button
-            v-if="bulkHasAnyFieldEnabled"
-            type="button"
-            class="bulk-clear-link"
-            @click="resetBulkForm"
-          >
-            Réinitialiser ({{ bulkTouchedFieldCount }} champ{{ bulkTouchedFieldCount > 1 ? 's' : '' }} modifié{{ bulkTouchedFieldCount > 1 ? 's' : '' }})
-          </button>
-          <span v-else class="text-hint">Aucune modification pour l'instant</span>
-
-          <div class="bulk-footer-actions">
-            <button class="btn secondary" @click="showBulkEditModal = false">Annuler</button>
-            <button class="btn" :disabled="!bulkHasAnyFieldEnabled || bulkSaving" @click="saveBulkEdit">
-              {{ bulkSaving ? 'Application…' : `Appliquer à ${selectedCountLabel}` }}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Modal : division d'une transaction en deux -->
-    <div v-if="showSplitModal" class="modal-overlay" @click.self="closeSplitModal">
-      <div v-dialog="closeSplitModal" class="modal" role="dialog" aria-modal="true">
-        <h2>Diviser la transaction</h2>
-        <div class="text-hint" style="margin-bottom: 20px;">
-          {{ splitTransaction?.payee || 'Sans tiers' }} · {{ formatDate(splitTransaction?.date) }} ·
-          Montant total : {{ formatAmount(splitTransaction?.amount, splitCurrency) }}
-        </div>
-
-        <div class="form-grid">
-          <div class="form-field">
-            <label for="split-first-amount">Montant — 1ère partie {{ splitTransaction?.amount < 0 ? '(négatif = dépense)' : '(positif = revenu)' }}</label>
-            <AmountInput id="split-first-amount" v-model="splitForm.firstAmount" />
-          </div>
-          <div class="form-field">
-            <label for="split-first-category">Catégorie — 1ère partie</label>
-            <CategoryAutocomplete
-              id="split-first-category"
-              v-model="splitForm.firstCategoryId"
-              :categories="flatCategories"
-              :transaction-type="splitAmountType"
-              placeholder="Aucune"
-            />
-          </div>
-          <div class="form-field" style="grid-column: span 2;">
-            <label for="split-first-memo">Mémo — 1ère partie</label>
-            <input id="split-first-memo" v-model="splitForm.firstMemo" placeholder="Note libre" />
-          </div>
-
-          <div class="form-field">
-            <span class="form-field-label">Montant — 2e partie</span>
-            <div class="split-second-amount amount" :class="secondAmount >= 0 ? 'positive' : 'negative'">
-              {{ formatAmount(secondAmount, splitCurrency) }}
-            </div>
-          </div>
-          <div class="form-field">
-            <label for="split-second-category">Catégorie — 2e partie</label>
-            <CategoryAutocomplete
-              id="split-second-category"
-              v-model="splitForm.secondCategoryId"
-              :categories="flatCategories"
-              :transaction-type="splitAmountType"
-              placeholder="Aucune"
-            />
-          </div>
-          <div class="form-field" style="grid-column: span 2;">
-            <label for="split-second-memo">Mémo — 2e partie</label>
-            <input id="split-second-memo" v-model="splitForm.secondMemo" placeholder="Note libre" />
-          </div>
-        </div>
-
-        <p v-if="splitError" class="split-error">{{ splitError }}</p>
-
-        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-          <button class="btn secondary" @click="closeSplitModal">Annuler</button>
-          <button class="btn" :disabled="splitSaving" @click="saveSplit">
-            {{ splitSaving ? 'Division…' : 'Diviser' }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="lastAction" class="undo-bar" :class="{ 'above-bulk-bar': selectedIds.size }" role="status">
-      <span>{{ lastAction.label }}</span>
-      <button class="btn secondary" :disabled="undoing" @click="runLastAction">
-        {{ undoing ? 'Annulation…' : 'Annuler' }}
-      </button>
-    </div>
+    <UndoBar :action="lastAction" :undoing="undoing" :raised="selectedIds.size > 0" @undo="runLastAction" />
   </div>
 </template>
 
 <script setup>
 import { notify, askConfirm } from '../services/feedback'
+import { useLastAction } from '../services/lastAction'
+import UndoBar from '../components/UndoBar.vue'
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   TransactionsAPI
 } from '../services/api'
 import { dataStore } from '../services/dataStore'
-import { planRestore, transactionPayloadFrom } from '../services/undoRestore'
-import { normalizeSearch, parseAmountQuery, parseSearchTerms, matchesSearchTerm } from '../services/search'
+import { previousTransactionPayload, restorationSnapshots, runOnePerPayee, transactionPayloadFrom } from '../services/undoRestore'
+import { normalizeSearch, parseAmountQuery, matchesAmountQuery, parseSearchTerms, matchesSearchTerm } from '../services/search'
 import { flattenCategories, needsCategory } from '../services/categories'
-import PayeeAutocomplete from '../components/PayeeAutocomplete.vue'
-import CategoryAutocomplete from '../components/CategoryAutocomplete.vue'
 import TransactionRow from '../components/TransactionRow.vue'
-import AmountInput from '../components/AmountInput.vue'
+import TransactionCreateModal from '../components/TransactionCreateModal.vue'
+import TransactionSelectionBar from '../components/TransactionSelectionBar.vue'
+import TransactionBulkEditModal from '../components/TransactionBulkEditModal.vue'
+import TransactionSplitModal from '../components/TransactionSplitModal.vue'
+import { neighborRowId, restoreFocusToRow } from '../services/rowKeyboard'
+import { idsBetween } from '../services/selection'
+import { DEFAULT_TRANSACTION_SORT, TRANSACTION_SORT_DIRECTIONS, isChronologicalSort, sortTransactions } from '../services/transactionSort'
+import { ariaSortOf, nextSort, sortIconOf } from '../services/tableSort'
 import MonthYearFilter from '../components/MonthYearFilter.vue'
 import SkeletonRows from '../components/SkeletonRows.vue'
 import { formatMonthHeading, monthKey, startsNewMonth, summarizeByMonth } from '../services/monthGroups'
 import Icon from '../components/Icon.vue'
 import TransactionsSubNav from './TransactionsSubNav.vue'
 import { formatAmount, formatDate, pluralize, toLocalIsoDate } from '../services/format'
-import { findPayeeByName } from '../services/payee'
-import { accountOptionLabel, activeAccounts } from '../services/accounts'
+import { downloadCsv, safeFileName, transactionsToCsv } from '../services/csvExport'
+import { findIdenticalTransaction } from '../services/duplicateEntry'
+import { accountOptionLabel, activeAccounts, runningBalanceById } from '../services/accounts'
 import { alertApiError, apiErrorMessage } from '../services/errors'
-import { bulkTouchedFields, bulkUpdatePayload, countTouchedFields, emptyBulkForm } from '../services/bulkEdit'
+import { bulkTouchedFields, bulkUpdatePayload } from '../services/bulkEdit'
 import { useProgressiveList } from '../services/progressiveList'
+import { DRILL_DOWN_QUERY_KEYS, drillDownMatcher, hasSmoothedContribution, parseDrillDown } from '../services/drillDown'
 
 const route = useRoute()
 
@@ -553,6 +346,8 @@ const filterMonth = ref(null)
 const filterYear = ref(null)
 const pendingOnly = ref(false)
 const uncategorizedOnly = ref(false)
+// Critères reçus du tableau de bord (clic sur un montant), voir services/drillDown.js.
+const drillDown = ref(null)
 const searchQuery = ref('')
 
 // Donnees issues du cache partage (deja precharge au demarrage de l'app,
@@ -567,13 +362,19 @@ const loadFailed = computed(() => dataStore.state.loadFailed)
 const categories = computed(() => dataStore.state.categories)
 const payees = computed(() => dataStore.state.payees)
 
-// Liste "par defaut" (tous comptes confondus) issue du cache. Quand un
-// filtre par compte est actif, on utilise une liste chargee a la demande
-// (non mise en cache, car specifique au filtre).
-const filteredByAccount = ref(null)
-const transactions = computed(() =>
-  filterAccount.value !== null ? (filteredByAccount.value ?? []) : dataStore.state.transactions
-)
+/**
+ * Liste courante : le cache partagé (toutes les transactions, déjà triées
+ * comme le backend trie la liste d'un compte), filtré ici sur le compte
+ * choisi. Une seule source de données : une modification faite sous filtre
+ * met aussi à jour la sidebar et le tableau de bord, et changer de compte
+ * n'attend aucun appel réseau. Recalculé seulement quand le cache ou le
+ * compte change, jamais à la frappe.
+ */
+const transactions = computed(() => {
+  const all = dataStore.state.transactions
+  const accountId = filterAccount.value
+  return accountId === null ? all : all.filter(t => t.accountId === accountId)
+})
 
 /** Années distinctes présentes dans la liste courante (compte filtré ou non), pour peupler le filtre Année. Recalculé uniquement quand la liste change, pas à chaque frappe. */
 const availableYears = computed(() => {
@@ -584,72 +385,23 @@ const availableYears = computed(() => {
   return Array.from(years).sort((a, b) => b - a)
 })
 
-/**
- * Annulation de la derniere action destructive/de masse (creation, edition,
- * suppression, validation...) : un seul niveau (pas d'historique complet),
- * expose comme un bandeau "Annuler" tant que lastAction n'est pas null.
- * setLastAction remplace toujours l'action precedente (un seul "dernier" a
- * la fois) et se dissipe seule apres UNDO_TIMEOUT_MS pour ne pas rester
- * affichee indefiniment une fois qu'elle n'est plus pertinente.
- */
-const UNDO_TIMEOUT_MS = 10000
-const lastAction = ref(null) // { label, undo: () => Promise<void> }
-const undoing = ref(false)
-let lastActionTimer = null
+/** Annulation de la dernière action (voir services/lastAction.js et UndoBar.vue). */
+const { lastAction, undoing, setLastAction, runLastAction } = useLastAction()
 
-function setLastAction(label, undo) {
-  if (lastActionTimer) clearTimeout(lastActionTimer)
-  lastAction.value = { label, undo }
-  lastActionTimer = setTimeout(() => { lastAction.value = null }, UNDO_TIMEOUT_MS)
+/** Copies d'un lot de transactions sur le point d'etre supprimees, pour « Annuler » (voir services/undoRestore.js). */
+function snapshotsBeforeDeletion(transactionsToDelete) {
+  return restorationSnapshots(transactionsToDelete, dataStore.state.transactions)
 }
 
-function clearLastAction() {
-  if (lastActionTimer) clearTimeout(lastActionTimer)
-  lastActionTimer = null
-  lastAction.value = null
+function offerRestore(label, snapshots) {
+  setLastAction(label, async () => {
+    await TransactionsAPI.restore(snapshots)
+    await load()
+  }, { retryable: true })
 }
 
-async function runLastAction() {
-  if (!lastAction.value || undoing.value) return
-  const { undo } = lastAction.value
-  undoing.value = true
-  try {
-    await undo()
-  } catch (e) {
-    alertApiError("Erreur lors de l'annulation", e)
-  } finally {
-    undoing.value = false
-    clearLastAction()
-  }
-}
-
-onBeforeUnmount(clearLastAction)
-
-/**
- * Actions de restauration d'un lot de transactions sur le point d'etre
- * supprimees (voir planRestore dans services/undoRestore.js pour le cas des
- * virements). Chaque action garde les ids qu'elle restaure, pour pouvoir
- * ignorer celles dont la suppression a echoue (voir deletePending).
- */
-function buildRestoreActions(transactionsToDelete) {
-  const { steps, orphanTransferIds } = planRestore(transactionsToDelete, dataStore.state.transactions)
-  if (orphanTransferIds.length) {
-    // Jumelle introuvable (cas limite, ex : deja supprimee par ailleurs) :
-    // seul ce cote peut etre recree, sans appariement.
-    console.warn(`Annulation : jumelle de virement introuvable pour ${orphanTransferIds.join(', ')}, restauration en transaction simple sans appariement.`)
-  }
-  return steps.map(step => ({
-    ids: step.ids,
-    run: () => (step.kind === 'transfer' ? TransactionsAPI.transfer(step.payload) : TransactionsAPI.create(step.payload))
-  }))
-}
-
-async function restoreAll(actions) {
-  await Promise.all(actions.map(action => action.run()))
-}
-
-const showModal = ref(false)
-const form = ref(emptyForm())
+/** Valeurs de départ de la fenêtre « Nouvelle transaction » (TransactionCreateModal.vue), null fenêtre fermée. */
+const newTransactionDraft = ref(null)
 
 // --- Édition inline ---
 // L'etat du formulaire d'edition (editForm) vit desormais localement dans
@@ -679,7 +431,20 @@ const selectedCountLabel = computed(() => pluralize(selectedIds.value.size, 'tra
  */
 const lastSelectedId = ref(null)
 
-function toggleSelect(transaction) {
+/**
+ * Coche / décoche une transaction. Avec `range` (Maj+clic, Maj+Espace),
+ * coche toutes les transactions affichées entre la dernière cochée et
+ * celle-ci ; sans dernière cochée encore affichée, sélection simple.
+ */
+function toggleSelect(transaction, { range = false } = {}) {
+  const rangeIds = range && lastSelectedId.value != null
+    ? idsBetween(pagedTransactions.value, lastSelectedId.value, transaction.id)
+    : null
+  if (rangeIds) {
+    for (const id of rangeIds) selectedIds.value.add(id)
+    lastSelectedId.value = transaction.id
+    return
+  }
   if (selectedIds.value.has(transaction.id)) {
     selectedIds.value.delete(transaction.id)
     if (lastSelectedId.value === transaction.id) lastSelectedId.value = null
@@ -744,7 +509,6 @@ const amountById = computed(() => {
  */
 function selectedTransactionsSnapshot() {
   const byId = new Map(dataStore.state.transactions.map(t => [t.id, t]))
-  for (const t of transactions.value) if (!byId.has(t.id)) byId.set(t.id, t)
   return Array.from(selectedIds.value, id => byId.get(id)).filter(Boolean)
 }
 
@@ -756,55 +520,28 @@ const selectedTotal = computed(() => {
   return sum
 })
 
-/**
- * Édition en masse : plus de case à cocher par champ (voir modal
- * correspondant) — modifier un champ suffit a le marquer comme "a appliquer"
- * (voir emptyBulkForm/bulkTouchedFields dans services/bulkEdit.js).
- */
+/** Édition en masse des transactions sélectionnées (saisie : TransactionBulkEditModal.vue). */
 const showBulkEditModal = ref(false)
-const bulkForm = ref(emptyBulkForm())
 const bulkSaving = ref(false)
 
-const bulkTouchedFieldCount = computed(() => countTouchedFields(bulkTouchedFields(bulkForm.value)))
-
-const bulkHasAnyFieldEnabled = computed(() => bulkTouchedFieldCount.value > 0)
-
 function openBulkEdit() {
-  bulkForm.value = emptyBulkForm()
   showBulkEditModal.value = true
 }
 
-/** Reinitialise tous les champs (revient a l'etat "aucune modification"), sans fermer la modale. */
-function resetBulkForm() {
-  bulkForm.value = emptyBulkForm()
-}
-
-function onBulkCategoryChange(value) {
-  bulkForm.value.categoryId = value
-  bulkForm.value.categoryTouched = true
-}
-
-function onBulkPayeeChange(value) {
-  bulkForm.value.payee = value
-  bulkForm.value.payeeTouched = true
-}
-
-async function saveBulkEdit() {
-  if (!bulkHasAnyFieldEnabled.value || !selectedIds.value.size) return
+async function saveBulkEdit(bulkForm) {
+  if (!selectedIds.value.size) return
 
   // Champs effectivement touches par cette modification en masse : reutilises
-  // pour ne restaurer que ceux-la lors de l'annulation (voir plus bas), sans
-  // quoi passer par TransactionsAPI.update() (qui reenverrait TOUS les champs,
-  // y compris compte/date/montant) est systematiquement refuse par le backend
-  // des qu'une des transactions modifiees est un cote de virement (voir
-  // ServiceTransaction#update, qui interdit toute edition directe d'un
-  // virement) alors que bulkUpdate, lui, autorise deja categorie/tiers/
-  // marqueurs/statut sur un virement (voir ServiceTransaction#applyBulkFields).
-  const touchedFields = bulkTouchedFields(bulkForm.value)
-  const payload = bulkUpdatePayload(Array.from(selectedIds.value), touchedFields, bulkForm.value)
+  // pour ne restaurer que ceux-la lors de l'annulation (voir plus bas), via
+  // bulkUpdate. TransactionsAPI.update() reenverrait TOUS les champs (compte,
+  // date, montant...) et, sur un cote de virement, les repercuterait sur sa
+  // jumelle (voir ServiceTransaction#syncTransferTwin) : l'annulation doit
+  // defaire la modification en masse, rien de plus.
+  const touchedFields = bulkTouchedFields(bulkForm)
+  const payload = bulkUpdatePayload(Array.from(selectedIds.value), touchedFields, bulkForm)
 
   const previousSnapshots = selectedTransactionsSnapshot()
-    .map(t => ({ id: t.id, before: transactionPayloadFrom(t) }))
+    .map(t => ({ id: t.id, before: previousTransactionPayload(t) }))
 
   bulkSaving.value = true
   try {
@@ -813,9 +550,11 @@ async function saveBulkEdit() {
     clearSelection()
     await load()
     setLastAction(`Modification de ${pluralize(previousSnapshots.length, 'transaction', 'transactions')}`, async () => {
-      await Promise.all(previousSnapshots.map(({ id, before }) =>
-        TransactionsAPI.bulkUpdate(bulkUpdatePayload([id], touchedFields, before))
-      ))
+      await runOnePerPayee(
+        previousSnapshots,
+        ({ before }) => (touchedFields.payee ? before.payee : null),
+        ({ id, before }) => TransactionsAPI.bulkUpdate(bulkUpdatePayload([id], touchedFields, before))
+      )
       await load()
     })
   } catch (e) {
@@ -843,18 +582,19 @@ function emptyForm() {
 }
 
 /**
- * Filtre les transactions par le texte de recherche : cherche à la fois
- * dans le tiers (payee) et dans le montant (dépense ou revenu), peu importe
- * le format saisi (avec virgule, point, signe, ou juste des chiffres).
- *
- * Cas particulier : si le texte est une expression de comparaison de montant
- * ("> 100", "< 50", "= 42.50"), la recherche bascule sur amountSearchResults,
- * deja filtre cote backend (voir watcher plus bas) plutot que de filtrer en
- * Javascript la liste complete des transactions.
+ * Transactions en attente de la liste courante : celles du compte filtré, ou
+ * de tous les comptes. « Tout valider » et « Supprimer les non validées »
+ * portent sur ce même périmètre, pour que le nombre annoncé soit le bon.
  */
 const pendingCount = computed(() =>
   transactions.value.filter(t => !t.validated).length
 )
+
+/** Précision ajoutée aux confirmations quand la liste est filtrée sur un compte. */
+const pendingScopeLabel = computed(() => {
+  const account = filterAccount.value !== null ? accountsById.value.get(filterAccount.value) : null
+  return account ? ` du compte « ${account.name} »` : ''
+})
 
 const uncategorizedCount = computed(() =>
   transactions.value.filter(needsCategory).length
@@ -909,6 +649,7 @@ const searchIndexById = computed(() => {
       categoryNormalized: normalizeSearch(labels.get(t.categoryId) || ''),
       categoryNameNormalized: normalizeSearch(names.get(t.categoryId) || ''),
       memoNormalized: normalizeSearch(t.memo),
+      bankLabelNormalized: normalizeSearch(t.bankLabel),
       rawAmount: String(t.amount ?? '').toLowerCase(),
       absAmount: String(Math.abs(t.amount ?? 0)),
       // Montant formate ("0,60 €") avec la virgule decimale remplacee par un
@@ -930,16 +671,16 @@ const searchIndexById = computed(() => {
  * searchQuery — meme principe que searchIndexById plus haut).
  */
 const statusAndDateFiltered = computed(() => {
-  const baseTransactions = amountQuery.value
-    ? (amountSearchResults.value ?? [])
-    : transactions.value
-
   let filtered = pendingOnly.value
-    ? baseTransactions.filter(t => !t.validated)
-    : baseTransactions
+    ? transactions.value.filter(t => !t.validated)
+    : transactions.value
 
   if (uncategorizedOnly.value) {
     filtered = filtered.filter(needsCategory)
+  }
+
+  if (drillDown.value) {
+    filtered = filtered.filter(drillDownMatcher(transactions.value, drillDown.value, categoriesById.value))
   }
 
   if (filterMonth.value == null && filterYear.value == null) return filtered
@@ -953,6 +694,11 @@ const statusAndDateFiltered = computed(() => {
 })
 
 /**
+ * Filtre les transactions par le texte de recherche : tiers, catégorie,
+ * mémo et montant, peu importe le format saisi (virgule, point, signe, ou
+ * juste des chiffres). Une comparaison de montant ("> 100", "< 50",
+ * "= 42.50") compare le montant signé (voir matchesAmountQuery).
+ *
  * Plusieurs critères séparés par ";" sont tous exigés à la fois (ET), ex :
  * "Bouygues;29,99" pour retrouver la transaction Bouygues de ce montant
  * précis parmi plusieurs. Un critère pris seul est un "contient" (OR entre
@@ -961,7 +707,8 @@ const statusAndDateFiltered = computed(() => {
  * et matchesSearchTerm dans services/search.js.
  */
 const filteredTransactions = computed(() => {
-  if (amountQuery.value) return statusAndDateFiltered.value
+  const amount = amountQuery.value
+  if (amount) return statusAndDateFiltered.value.filter(t => matchesAmountQuery(t, amount))
 
   const terms = parseSearchTerms(searchQuery.value)
   if (!terms.length) return statusAndDateFiltered.value
@@ -973,6 +720,43 @@ const filteredTransactions = computed(() => {
     return idx && terms.every(criterion => matchesSearchTerm(idx, criterion))
   })
 })
+
+/**
+ * Tri par clic sur les en-têtes Date / Tiers / Dépense / Revenu (voir
+ * services/transactionSort.js). Calculé une fois par changement de filtre
+ * ou de tri ; l'ordre par défaut (date décroissante) ne coûte rien.
+ */
+const sort = ref(DEFAULT_TRANSACTION_SORT)
+const sortedTransactions = computed(() => sortTransactions(filteredTransactions.value, sort.value))
+
+/**
+ * Exporte les transactions affichées (filtres, recherche et tri compris,
+ * toutes pages confondues) au format CSV de HomeBank, réimportable (voir
+ * services/csvExport.js). Le nom du fichier reprend le compte filtré.
+ */
+function exportCsv() {
+  if (!sortedTransactions.value.length) {
+    notify('Aucune transaction à exporter avec les filtres actuels.', 'warning')
+    return
+  }
+  const accountName = filterAccount.value != null ? accountsById.value.get(filterAccount.value)?.name : null
+  const fileName = safeFileName(`transactions ${accountName ?? 'tous comptes'} ${toLocalIsoDate(new Date())}`) + '.csv'
+  const csv = transactionsToCsv(sortedTransactions.value, { categoriesById: categoriesById.value, accountsById: accountsById.value })
+  downloadCsv(fileName, csv)
+  notify(`${pluralize(sortedTransactions.value.length, 'transaction exportée', 'transactions exportées')}.`, 'success')
+}
+
+function toggleSort(key) {
+  sort.value = nextSort(sort.value, key, TRANSACTION_SORT_DIRECTIONS)
+}
+
+function ariaSort(key) {
+  return ariaSortOf(sort.value, key)
+}
+
+function sortIcon(key) {
+  return sortIconOf(sort.value, key)
+}
 
 /**
  * Chargement progressif au scroll cote client (voir services/progressiveList.js) :
@@ -988,7 +772,7 @@ const {
   sentinel: loadMoreSentinel,
   reset: resetVisibleTransactions,
   revealIndex: revealTransactionIndex
-} = useProgressiveList(filteredTransactions, { pageSize: 50 })
+} = useProgressiveList(sortedTransactions, { pageSize: 50 })
 
 /**
  * Intertitres de mois : totaux calculés sur TOUTE la liste filtrée (pas
@@ -997,8 +781,9 @@ const {
  */
 const monthSummaries = computed(() => summarizeByMonth(filteredTransactions.value))
 
+/** Intertitre de mois avant la ligne `index` : seulement en ordre chronologique (sinon les mois s'entremêlent). */
 function monthStartsAt(index) {
-  return startsNewMonth(pagedTransactions.value, index)
+  return isChronologicalSort(sort.value) && startsNewMonth(pagedTransactions.value, index)
 }
 
 function monthSummary(isoDate) {
@@ -1008,25 +793,11 @@ function monthSummary(isoDate) {
 const monthHeading = formatMonthHeading
 
 /**
- * Recherche par montant avec operateur (">", "<", "=") : filtree directement
- * cote backend (voir TransactionController/TransactionService) pour eviter
- * de charger inutilement toutes les transactions cote frontend. Un leger
- * debounce evite un appel reseau a chaque frappe pendant la saisie du nombre.
+ * Recherche par montant avec operateur (">", "<", "=") : filtree localement
+ * sur les transactions deja chargees (cache partage), comme la recherche
+ * texte — resultat immediat, sans appel reseau ni attente a chaque frappe.
  */
 const amountQuery = computed(() => parseAmountQuery(searchQuery.value))
-const amountSearchResults = ref(null)
-const amountSearchLoading = ref(false)
-let amountSearchTimer = null
-// Jeton de la derniere recherche lancee : une reponse plus ancienne arrivee
-// apres coup (requete lente) ne doit jamais ecraser le resultat courant.
-let amountSearchToken = 0
-
-// En quittant la page : annule une recherche pas encore partie et ignore
-// celle deja en vol (pas de notification d'erreur affichee sur une autre page).
-onBeforeUnmount(() => {
-  clearTimeout(amountSearchTimer)
-  amountSearchToken++
-})
 
 /**
  * Etend le lot rendu pour que la transaction cochee `id` (voir
@@ -1038,7 +809,7 @@ onBeforeUnmount(() => {
  * premier lot.
  */
 function scrollToSelectedTransaction(id) {
-  const index = filteredTransactions.value.findIndex(t => t.id === id)
+  const index = sortedTransactions.value.findIndex(t => t.id === id)
   if (!revealTransactionIndex(index)) {
     resetVisibleTransactions()
     return
@@ -1056,7 +827,7 @@ function scrollToSelectedTransaction(id) {
 // elle plutot que de revenir au debut (voir scrollToSelectedTransaction
 // ci-dessus).
 watch(
-  [searchQuery, filterAccount, filterMonth, filterYear, pendingOnly, uncategorizedOnly, amountSearchResults],
+  [searchQuery, filterAccount, filterMonth, filterYear, pendingOnly, uncategorizedOnly, drillDown, sort],
   ([newSearch], [oldSearch]) => {
     const searchJustClosed = !!(oldSearch && oldSearch.trim()) && !(newSearch && newSearch.trim())
     if (searchJustClosed && lastSelectedId.value) {
@@ -1067,67 +838,24 @@ watch(
   }
 )
 
-watch([amountQuery, filterAccount], ([query, accountId]) => {
-  clearTimeout(amountSearchTimer)
-  const token = ++amountSearchToken
-  if (!query) {
-    amountSearchResults.value = null
-    amountSearchLoading.value = false
-    return
-  }
-  amountSearchLoading.value = true
-  amountSearchTimer = setTimeout(async () => {
-    try {
-      const results = await TransactionsAPI.list({
-        accountId: accountId ?? undefined,
-        amountOperator: query.operator,
-        amountValue: query.value
-      })
-      if (token === amountSearchToken) amountSearchResults.value = results
-    } catch (e) {
-      if (token !== amountSearchToken) return
-      amountSearchResults.value = []
-      alertApiError('Erreur lors de la recherche par montant', e)
-    } finally {
-      if (token === amountSearchToken) amountSearchLoading.value = false
-    }
-  }, 250)
-})
-
-/**
- * Sens de la transaction en création (Dépense par défaut, le cas courant) :
- * le montant se tape sans signe et prend celui du sens choisi. Un montant
- * tapé négatif bascule sur Dépense. CategoryAutocomplete ne propose que les
- * catégories de ce sens, comme TransactionRow.vue le fait d'après le signe.
- */
-const FLOW_OPTIONS = [
-  { value: 'EXPENSE', label: 'Dépense' },
-  { value: 'INCOME', label: 'Revenu' }
-]
-const entryFlow = ref('EXPENSE')
-const formAmountType = computed(() => entryFlow.value)
-
-function signedForFlow(amount, flow) {
-  if (!amount) return amount
-  return flow === 'EXPENSE' ? -Math.abs(amount) : Math.abs(amount)
-}
-
-function setEntryFlow(flow) {
-  entryFlow.value = flow
-  form.value.amount = signedForFlow(form.value.amount, flow)
-}
-
-watch(() => form.value.amount, (amount) => {
-  if (amount < 0) entryFlow.value = 'EXPENSE'
-  else if (amount > 0 && entryFlow.value === 'EXPENSE') form.value.amount = -amount
-})
-
 // Index Map (id -> objet) pour accounts/categories, precalcules une seule
 // fois quand ces listes changent (rarement), et passes en prop a chaque
 // TransactionRow : evite un scan lineaire de accounts/categories pour
 // chaque ligne affichee (categoryLabel/accountName vivent desormais dans
 // TransactionRow.vue et consomment ces Map en O(1)).
 const accountsById = computed(() => new Map(accounts.value.map(a => [a.id, a])))
+
+/**
+ * Colonne « Solde » : seulement quand la liste est filtrée sur un compte (un
+ * solde cumulé mélangeant plusieurs comptes n'aurait pas de sens). Calculé
+ * sur tout l'historique du compte, indépendamment de la période, de la
+ * recherche et du tri affichés ; recalculé seulement quand le cache ou le
+ * compte change, jamais à la frappe.
+ */
+const showBalance = computed(() => filterAccount.value != null && accountsById.value.has(filterAccount.value))
+const runningBalances = computed(() =>
+  showBalance.value ? runningBalanceById(dataStore.state.transactions, accountsById.value.get(filterAccount.value)) : null
+)
 const categoriesById = computed(() => new Map(categories.value.map(c => [c.id, c])))
 
 /**
@@ -1137,19 +865,15 @@ const categoriesById = computed(() => new Map(categories.value.map(c => [c.id, c
  */
 const todayIso = toLocalIsoDate()
 
-async function load() {
-  if (filterAccount.value !== null) {
-    filteredByAccount.value = await TransactionsAPI.list({ accountId: filterAccount.value })
-    // Solde(s) affiché(s) dans la sidebar et sur la page Comptes : à
-    // rafraîchir même quand la liste filtrée par compte ne passe pas par le
-    // cache partagé ci-dessus.
-    await dataStore.refreshAccounts()
-  } else {
-    // Revalide le cache partage en arriere-plan (l'affichage courant du
-    // cache reste visible pendant ce temps, aucun blocage / clignotement).
-    // Rafraîchit aussi les soldes des comptes (voir dataStore.js).
-    await dataStore.refreshTransactions()
-  }
+/**
+ * Recharge le cache partagé après une modification (l'affichage courant reste
+ * visible pendant ce temps), soldes des comptes compris (voir dataStore.js).
+ * Le filtre compte s'applique ensuite seul, voir `transactions`. Les tiers
+ * suivent : une saisie peut en créer un, une suppression en retirer un devenu
+ * orphelin, et l'autocomplétion doit le refléter tout de suite.
+ */
+function load() {
+  return Promise.all([dataStore.refreshTransactions(), dataStore.refreshPayees()])
 }
 
 /**
@@ -1188,42 +912,70 @@ const payeeByNormalizedName = computed(() => {
   return map
 })
 
-// L'edition inline applique la meme logique localement via TransactionRow.vue
-// (elle recoit payeeByNormalizedName en prop, editForm n'etant pas accessible
-// depuis ce composant).
-function applyDefaultCategoryFromPayee(payeeName) {
-  const payee = findPayeeByName(payeeByNormalizedName.value, payeeName, form.value.amount)
-  if (payee?.categoryId) form.value.categoryId = payee.categoryId
-}
-
-watch(() => form.value.payee, applyDefaultCategoryFromPayee)
+/**
+ * Compte proposé pour une nouvelle transaction : le compte filtré, quand on
+ * consulte un compte précis (sauf s'il est archivé, donc fermé à la saisie),
+ * sinon le premier compte actif.
+ */
+const defaultEntryAccountId = computed(() => {
+  const accounts = entryAccounts.value
+  return accounts.find(a => a.id === filterAccount.value)?.id ?? accounts[0]?.id ?? null
+})
 
 function openCreate() {
-  form.value = emptyForm()
-  entryFlow.value = 'EXPENSE'
-  if (entryAccounts.value.length) form.value.accountId = entryAccounts.value[0].id
-  showModal.value = true
+  newTransactionDraft.value = { ...emptyForm(), accountId: defaultEntryAccountId.value }
 }
 
-async function save() {
-  if (!form.value.accountId) {
-    notify('Veuillez sélectionner un compte.', 'warning')
+/**
+ * Ouvre la création pré-remplie avec une transaction existante (tiers,
+ * montant, catégorie, mode de paiement, mémo...), datée d'aujourd'hui : pour
+ * une dépense qui revient sans être assez régulière pour une suggestion
+ * périodique. Rien n'est créé avant « Enregistrer ». Le compte d'origine
+ * est repris s'il est encore actif, sinon le compte par défaut.
+ */
+function duplicateTransaction(transaction) {
+  if (transaction.transferTransactionId || transaction.balanceAdjustment) {
+    notify('Un virement ou un ajustement de solde se crée depuis la page Comptes.', 'warning')
     return
   }
-  if (form.value.amount == null) {
-    notify('Veuillez saisir un montant.', 'warning')
-    return
+  const accountIsActive = entryAccounts.value.some(a => a.id === transaction.accountId)
+  newTransactionDraft.value = {
+    ...emptyForm(),
+    accountId: accountIsActive ? transaction.accountId : defaultEntryAccountId.value,
+    payee: transaction.payee || '',
+    amount: transaction.amount,
+    categoryId: transaction.categoryId,
+    paymentMode: transaction.paymentMode || 'NONE',
+    memo: transaction.memo || '',
+    periodicExpense: !!transaction.periodicExpense,
+    exceptional: !!transaction.exceptional
   }
+}
 
-  const payload = transactionPayloadFrom(form.value)
+/** Enregistre le formulaire validé par TransactionCreateModal.vue. */
+async function save(form) {
+  const payload = transactionPayloadFrom(form)
+  // Double saisie probable : confirmation explicite plutôt que refus (deux
+  // achats identiques le même jour restent possibles).
+  const identical = findIdenticalTransaction(payload, dataStore.state.transactions)
+  if (identical) {
+    const label = `${identical.payee || 'sans tiers'}, ${formatAmount(identical.amount)}, ${formatDate(identical.date)}`
+    const confirmed = await askConfirm(`Une transaction identique existe déjà sur ce compte (${label}). L'enregistrer quand même ?`, {
+      title: 'Transaction en double ?',
+      confirmLabel: 'Enregistrer quand même',
+      destructive: false
+    })
+    if (!confirmed) return
+  }
 
   try {
     const created = await TransactionsAPI.create(payload)
     notify('Transaction créée.', 'success')
-    showModal.value = false
+    newTransactionDraft.value = null
+    dataStore.showSavedTransaction(created)
     await load()
     setLastAction('Transaction créée', async () => {
-      await TransactionsAPI.remove(created.id)
+      await TransactionsAPI.undoCreation([created.id])
       await load()
     })
   } catch (e) {
@@ -1253,16 +1005,18 @@ async function confirmEdit(payload) {
   // sans comprendre pourquoi. En laissant l'edition ouverte, TransactionRow
   // (qui garde editForm en etat local tant que isEditing reste vrai) ne
   // perd pas la saisie en cours.
+  let saved
   try {
-    await TransactionsAPI.update(id, payload)
+    saved = await TransactionsAPI.update(id, payload)
   } catch (e) {
     alertApiError('Erreur lors de la modification', e)
     return
   }
   editingId.value = null
+  dataStore.showSavedTransaction(saved)
   await load()
   if (before) {
-    const previousPayload = transactionPayloadFrom(before)
+    const previousPayload = previousTransactionPayload(before)
     setLastAction('Transaction modifiée', async () => {
       await TransactionsAPI.update(id, previousPayload)
       await load()
@@ -1272,15 +1026,15 @@ async function confirmEdit(payload) {
 
 async function remove(transaction) {
   if (!(await askConfirm('Supprimer cette transaction ?'))) return
-  const restoreActions = buildRestoreActions([transaction])
+  const snapshots = snapshotsBeforeDeletion([transaction])
+  const nextFocusId = neighborRowId(pagedTransactions.value, transaction.id)
   try {
     await TransactionsAPI.remove(transaction.id)
+    dataStore.hideDeletedTransactions([transaction.id])
     await load()
+    if (nextFocusId != null) restoreFocusToRow(`tr[data-transaction-id="${nextFocusId}"]`)
     notify('Transaction supprimée.', 'success')
-    setLastAction('Transaction supprimée', async () => {
-      await restoreAll(restoreActions)
-      await load()
-    })
+    offerRestore('Transaction supprimée', snapshots)
   } catch (e) {
     alertApiError('Erreur lors de la suppression de la transaction', e)
   }
@@ -1288,28 +1042,14 @@ async function remove(transaction) {
 
 /* --- Division d'une transaction en deux --- */
 
-const showSplitModal = ref(false)
+/** Transaction en cours de division (saisie : TransactionSplitModal.vue), null modale fermée. */
 const splitTransaction = ref(null)
-const splitForm = ref({ firstAmount: 0, firstCategoryId: null, firstMemo: '', secondCategoryId: null, secondMemo: '' })
 const splitSaving = ref(false)
+/** Erreur renvoyée par le serveur, affichée dans la modale. */
 const splitError = ref('')
-
-/** Montant de la 2e partie, calculé côté client pour l'affichage seul (la valeur qui compte est recalculée côté backend, voir ServiceTransaction#splitTransaction). */
-const secondAmount = computed(() => {
-  if (!splitTransaction.value) return 0
-  return Number(splitTransaction.value.amount) - Number(splitForm.value.firstAmount || 0)
-})
 
 /** Devise du compte de la transaction divisée, pour afficher ses montants dans la bonne monnaie. */
 const splitCurrency = computed(() => accountsById.value.get(splitTransaction.value?.accountId)?.currency)
-
-// Même logique que formAmountType/editAmountType : ne proposer que des
-// catégories du bon sens (dépense/revenu) selon le signe du montant d'origine.
-const splitAmountType = computed(() => {
-  const amount = splitTransaction.value?.amount
-  if (amount == null || amount === 0) return null
-  return amount < 0 ? 'EXPENSE' : 'INCOME'
-})
 
 function openSplit(transaction) {
   // Seul un virement interne (lié à sa jumelle) est indivisible ; un paiement
@@ -1322,46 +1062,29 @@ function openSplit(transaction) {
     notify('Un ajustement de solde ne peut pas être divisé.', 'warning')
     return
   }
-  splitTransaction.value = transaction
-  // Moitié par défaut, arrondie au centime, modifiable avant validation.
-  const half = Math.round((Number(transaction.amount) / 2) * 100) / 100
-  splitForm.value = {
-    firstAmount: half,
-    firstCategoryId: transaction.categoryId ?? null,
-    firstMemo: transaction.memo || '',
-    secondCategoryId: transaction.categoryId ?? null,
-    secondMemo: ''
-  }
   splitError.value = ''
-  showSplitModal.value = true
+  splitTransaction.value = transaction
 }
 
 function closeSplitModal() {
-  showSplitModal.value = false
   splitTransaction.value = null
 }
 
-async function saveSplit() {
+async function saveSplit(parts) {
   splitError.value = ''
-  const total = Number(splitTransaction.value.amount)
-  const first = Number(splitForm.value.firstAmount)
-  const sameSign = first !== 0 && (total >= 0) === (first >= 0)
-  if (!first || !sameSign || Math.abs(first) >= Math.abs(total)) {
-    splitError.value = 'Le montant de la 1ère partie doit être non nul, de même signe que le montant total, et inférieur à lui en valeur absolue.'
-    return
-  }
-
   splitSaving.value = true
+  // Transaction d'origine telle qu'avant la division, pour « Annuler ».
+  const original = splitTransaction.value
+  const originalState = { ...previousTransactionPayload(original), splitFromAmount: original.splitFromAmount ?? null }
   try {
-    await TransactionsAPI.split(splitTransaction.value.id, {
-      firstAmount: first,
-      firstCategoryId: splitForm.value.firstCategoryId,
-      firstMemo: splitForm.value.firstMemo,
-      secondCategoryId: splitForm.value.secondCategoryId,
-      secondMemo: splitForm.value.secondMemo
-    })
+    const [, second] = await TransactionsAPI.split(original.id, parts)
     closeSplitModal()
     await load()
+    // Annuler : supprime la 2e partie et rend à la 1re son état d'origine.
+    setLastAction('Transaction divisée', async () => {
+      await TransactionsAPI.undoSplit(original.id, { secondPartId: second.id, original: originalState })
+      await load()
+    }, { retryable: true })
   } catch (e) {
     splitError.value = apiErrorMessage(e)
   } finally {
@@ -1371,16 +1094,15 @@ async function saveSplit() {
 
 /**
  * Bascule d'un drapeau booleen d'une transaction (une bascule etant sa propre
- * inverse, l'annulation rejoue simplement le meme appel).
+ * inverse, l'annulation rejoue simplement le meme appel). Aucun solde ne
+ * change : seule la transaction renvoyee est appliquee, sans retelecharger
+ * toute la liste a chaque clic.
  */
 async function toggleFlag(apiCall, transaction, label) {
+  const toggle = async () => dataStore.applyTransactionUpdate(await apiCall(transaction.id))
   try {
-    await apiCall(transaction.id)
-    await load()
-    setLastAction(label, async () => {
-      await apiCall(transaction.id)
-      await load()
-    })
+    await toggle()
+    setLastAction(label, toggle)
   } catch (e) {
     alertApiError('Erreur lors de la modification de la transaction', e)
   }
@@ -1413,16 +1135,14 @@ function toggleValidated(transaction) {
  */
 async function validateAll() {
   if (pendingCount.value === 0) return
-  if (!(await askConfirm(`Valider ${pendingCount.value === 1 ? 'la transaction' : `les ${pendingCount.value} transactions`} en attente ?`))) return
+  if (!(await askConfirm(`Valider ${pendingCount.value === 1 ? 'la transaction' : `les ${pendingCount.value} transactions`} en attente${pendingScopeLabel.value} ?`))) return
   validating.value = true
-  // Valide TOUTES les transactions en attente cote backend (pas seulement
-  // celles du compte/filtre courant, voir ServiceTransaction#validateAllPending)
-  // : le snapshot pour l'annulation doit donc venir de la liste globale
-  // (dataStore.state.transactions), pas de `transactions` qui peut etre
-  // restreinte par filterAccount.
-  const pendingIds = dataStore.state.transactions.filter(t => !t.validated).map(t => t.id)
+  // Même périmètre que pendingCount (compte filtré ou tous les comptes, voir
+  // ServiceTransaction#validateAllPending). L'annulation remet ces ids en
+  // attente ; bulkUpdate y joint la jumelle d'un virement sur un autre compte.
+  const pendingIds = transactions.value.filter(t => !t.validated).map(t => t.id)
   try {
-    await TransactionsAPI.validateAll()
+    await TransactionsAPI.validateAll(filterAccount.value ?? undefined)
     await load()
     notify(`${pluralize(pendingIds.length, 'transaction validée', 'transactions validées')}.`, 'success')
     setLastAction(`Validation de ${pluralize(pendingIds.length, 'transaction', 'transactions')}`, async () => {
@@ -1445,28 +1165,27 @@ const deletingPending = ref(false)
 /** Supprime d'un coup toutes les transactions en attente de validation, sans passer par la selection manuelle. */
 async function deletePending() {
   if (pendingCount.value === 0) return
-  if (!(await askConfirm(`Supprimer définitivement ${pendingCount.value === 1 ? 'la transaction non validée' : `les ${pendingCount.value} transactions non validées`} ?`))) return
+  if (!(await askConfirm(`Supprimer ${pendingCount.value === 1 ? 'la transaction non validée' : `les ${pendingCount.value} transactions non validées`}${pendingScopeLabel.value} ?`))) return
   deletingPending.value = true
-  // Supprime TOUTES les transactions en attente cote backend (voir
-  // ServiceTransaction#deleteAllPending, pas filtre par compte) : meme
-  // remarque que validateAll ci-dessus pour le snapshot d'annulation.
-  const pendingTransactions = dataStore.state.transactions.filter(t => !t.validated)
-  const candidateActions = buildRestoreActions(pendingTransactions)
+  // Même périmètre que pendingCount et validateAll ci-dessus (voir
+  // ServiceTransaction#deleteAllPending) ; snapshotsBeforeDeletion retrouve la
+  // jumelle d'un virement, supprimée avec lui, dans la liste globale.
+  const pendingTransactions = transactions.value.filter(t => !t.validated)
+  const candidateSnapshots = snapshotsBeforeDeletion(pendingTransactions)
   try {
-    await TransactionsAPI.removePending()
+    await TransactionsAPI.removePending(filterAccount.value ?? undefined)
     await load()
     notify('Transactions en attente supprimées.', 'success')
     // Un cote de virement en attente dont la jumelle est deja validee est
     // ignore par le backend (voir ServiceTransaction#deleteAllPending) : il
     // est donc toujours present apres le rechargement, et ne doit pas etre
-    // "restaure" (il n'a jamais ete supprime, ca creerait un doublon).
-    const stillPresentIds = new Set(dataStore.state.transactions.map(t => t.id))
-    const restoreActions = candidateActions.filter(a => !a.ids.some(id => stillPresentIds.has(id)))
+    // "restaure" (il n'a jamais ete supprime, ca creerait un doublon). Lu
+    // dans `transactions`, rechargee par load() que le compte soit filtre
+    // ou non.
+    const stillPresentIds = new Set(transactions.value.map(t => t.id))
+    const snapshots = candidateSnapshots.filter(t => !stillPresentIds.has(t.id))
     const actuallyDeletedCount = pendingTransactions.filter(t => !stillPresentIds.has(t.id)).length
-    setLastAction(`Suppression de ${pluralize(actuallyDeletedCount, 'transaction', 'transactions')}`, async () => {
-      await restoreAll(restoreActions)
-      await load()
-    })
+    offerRestore(`Suppression de ${pluralize(actuallyDeletedCount, 'transaction', 'transactions')}`, snapshots)
   } catch (e) {
     alertApiError('Erreur lors de la suppression des transactions en attente', e)
   } finally {
@@ -1479,20 +1198,18 @@ const deletingSelection = ref(false)
 /** Supprime d'un coup toutes les transactions actuellement cochees (voir selectedIds). */
 async function deleteSelected() {
   if (!selectedIds.value.size) return
-  if (!(await askConfirm(`Supprimer définitivement ${selectedIds.value.size === 1 ? 'la transaction sélectionnée' : `les ${selectedIds.value.size} transactions sélectionnées`} ?`))) return
+  if (!(await askConfirm(`Supprimer ${selectedIds.value.size === 1 ? 'la transaction sélectionnée' : `les ${selectedIds.value.size} transactions sélectionnées`} ?`))) return
   deletingSelection.value = true
   const ids = Array.from(selectedIds.value)
   const selectedTransactions = selectedTransactionsSnapshot()
-  const restoreActions = buildRestoreActions(selectedTransactions)
+  const snapshots = snapshotsBeforeDeletion(selectedTransactions)
   try {
     await TransactionsAPI.removeBulk(ids)
     notify(`${pluralize(selectedTransactions.length, 'transaction supprimée', 'transactions supprimées')}.`, 'success')
     clearSelection()
+    dataStore.hideDeletedTransactions(ids)
     await load()
-    setLastAction(`Suppression de ${pluralize(selectedTransactions.length, 'transaction', 'transactions')}`, async () => {
-      await restoreAll(restoreActions)
-      await load()
-    })
+    offerRestore(`Suppression de ${pluralize(selectedTransactions.length, 'transaction', 'transactions')}`, snapshots)
   } catch (e) {
     alertApiError('Erreur lors de la suppression des transactions sélectionnées', e)
   } finally {
@@ -1514,8 +1231,7 @@ onMounted(async () => {
   // Revalidation silencieuse en arriere-plan a chaque visite de la page,
   // au cas ou des comptes/categories/tiers/transactions ont change depuis
   // le prechargement (cree ailleurs, autre onglet...).
-  dataStore.refreshAll()
-  if (filterAccount.value !== null) await load()
+  dataStore.revalidate()
 
   applyRouteQuery(route.query)
 })
@@ -1526,7 +1242,8 @@ onMounted(async () => {
  * - search=<t>  : pré-remplit la recherche ;
  * - pending=1 / uncategorized=1 : active le filtre « À traiter » / « Sans catégorie » ;
  * - account=<id> : filtre sur ce compte (lien « opérations en attente » du rapprochement) ;
- * - new=1       : ouvre la fenêtre de création.
+ * - new=1       : ouvre la fenêtre de création ;
+ * - export=csv  : exporte les transactions affichées (palette « Exporter les transactions en CSV »).
  * Réappliqués à chaque changement de query : la page n'est pas remontée
  * quand on y navigue alors qu'elle est déjà affichée.
  */
@@ -1538,12 +1255,15 @@ function applyRouteQuery(query) {
   }
   if (typeof query.search === 'string') searchQuery.value = query.search
   if (query.uncategorized) uncategorizedOnly.value = true
+  drillDown.value = parseDrillDown(query)
+  if (drillDown.value) {
+    // La période du tableau de bord remplace le filtre mois/année de la page.
+    filterMonth.value = null
+    filterYear.value = null
+  }
   if (query.pending) pendingOnly.value = true
   const accountId = query.account ? Number(query.account) : null
-  if (accountId && accountId !== filterAccount.value) {
-    filterAccount.value = accountId
-    load().catch(e => alertApiError('Erreur lors du chargement des transactions du compte', e))
-  }
+  if (accountId) filterAccount.value = accountId
   if (query.new && entryAccounts.value.length) {
     openCreate()
     // Retire "new" de l'URL : un retour arrière ou un nouveau raccourci
@@ -1552,6 +1272,28 @@ function applyRouteQuery(query) {
     delete rest.new
     router.replace({ query: rest })
   }
+  if (query.export === 'csv') {
+    // Après application des filtres ci-dessus (et calcul de la liste
+    // filtrée) ; retiré de l'URL pour pouvoir relancer la commande.
+    nextTick(exportCsv)
+    const rest = { ...query }
+    delete rest.export
+    router.replace({ query: rest })
+  }
+}
+
+/** Vrai si la liste filtrée contient une transaction lissée sur 12 mois au tableau de bord (total différent du montant cliqué). */
+const drillDownHasSmoothed = computed(() =>
+  !!drillDown.value && hasSmoothedContribution(transactions.value, drillDown.value, categoriesById.value)
+)
+
+/** Retire le filtre du tableau de bord (et « Sans catégorie » qu'il avait activé) : retour à la liste complète. */
+function clearDrillDown() {
+  if (route.query.uncategorized && drillDown.value) uncategorizedOnly.value = false
+  drillDown.value = null
+  const rest = { ...route.query }
+  for (const key of DRILL_DOWN_QUERY_KEYS) delete rest[key]
+  router.replace({ query: rest })
 }
 
 watch(() => route.query, (query) => {
@@ -1569,66 +1311,29 @@ watch(searchQuery, (query) => {
 </script>
 
 <style scoped>
+/* Colonnes étroites de sélection et de statut : la troncature des cellules (…)
+   s'y déclenchait pour un simple espace et affichait un point après la case. */
+.transactions-table thead th:first-child,
+.transactions-table :deep(td:is(.cell-select, .cell-status)) { text-overflow: clip; }
+/* Recherche : poussée à droite de la barre d'outils (largeur gérée plus bas, voir #tx-search). */
+.search-field { margin-left: auto; }
+/* Explication sous le titre des fenêtres de modification groupée et de découpage. */
 /* Fenêtre « Nouvelle transaction » : bascule Dépense / Revenu sur la ligne
    du libellé, pour laisser toute la largeur au champ montant. */
-.amount-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-/* Marges négatives : la bascule (22 px) ne doit pas rendre cette ligne plus
-   haute qu'un libellé simple, sinon le champ Montant se décale de celui de
-   la colonne voisine (Tiers). */
-.flow-toggle {
+/* Filtre reçu du tableau de bord : pastille active avec bouton de retrait. */
+.drill-down-filter { display: flex; flex-direction: column; gap: 6px; }
+.drill-down-chip { gap: 6px; padding-right: 4px; cursor: default; }
+.drill-down-clear {
   display: inline-flex;
-  flex-shrink: 0;
-  margin-block: -2px;
-  padding: 1px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--ink-800);
-}
-.flow-option {
-  padding: 1px 9px;
-  line-height: 16px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 50%;
+  padding: 2px;
   background: transparent;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
+  color: inherit;
   cursor: pointer;
 }
-.flow-option:hover:not(.active) { color: var(--text-primary); }
-.flow-option.expense.active { background: var(--coral-dim); color: var(--coral); }
-.flow-option.income.active { background: var(--mint-dim); color: var(--mint); }
-/*
- * Bandeau d'annulation de la derniere action (voir setLastAction/runLastAction) :
- * position fixe en bas de l'ecran pour rester visible quel que soit le
- * scroll de la page/du tableau, au-dessus des modales (z-index superieur a
- * .modal-overlay, voir style.css) au cas ou une action serait annulee alors
- * qu'une modale est deja ouverte.
- */
-.undo-bar {
-  position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 16px;
-  background: var(--text-primary);
-  color: var(--ink-900);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  z-index: 60;
-}
-.undo-bar .btn.secondary {
-  background: transparent;
-  border: 1px solid color-mix(in srgb, var(--ink-900) 35%, transparent);
-  color: var(--ink-900);
-}
-.undo-bar .btn.secondary:hover {
-  background: color-mix(in srgb, var(--ink-900) 12%, transparent);
-}
+.drill-down-note { font-size: 12px; color: var(--amber); max-width: 320px; }
+.drill-down-clear:hover { background: color-mix(in srgb, var(--brand-text) 20%, transparent); }
 
 /*
  * Volontairement pas d'overflow-x ici : un position:sticky sur le thead
@@ -1671,7 +1376,20 @@ watch(searchQuery, (query) => {
 /* Assez large pour « -100 000,00 € » : jamais de troncature sur un montant. */
 .col-amount { width: 104px; }
 .col-monthly { width: 46px; }
-.col-actions { width: 72px; }
+.col-actions { width: 108px; } /* 3 boutons de 28 px (dupliquer, diviser, supprimer) + écarts et marges */
+/* Portables (1 366 à 1 439 px) : le tableau tient sans barre de défilement
+   horizontale, en prenant un peu sur le tiers. La colonne Solde réclame plus. */
+@media (min-width: 601px) and (max-width: 1439px) {
+  .transactions-table { min-width: 1060px; }
+  .transactions-table.with-balance { min-width: 1110px; }
+  .col-payee { width: 170px; }
+  /* Colonne Catégorie étroite : la sous-catégorie seule reste lisible, le parent est dans l'infobulle. */
+  .transactions-table :deep(td.col-cat .cat-parent) { display: none; }
+}
+@media (min-width: 601px) and (max-width: 1535px) {
+  .transactions-table.with-balance .col-payee { width: 170px; }
+  .transactions-table.with-balance :deep(td.col-cat .cat-parent) { display: none; }
+}
 
 /* Intertitre de mois : reste collé sous l'en-tête du tableau (43 px) pendant
    le défilement, pour toujours savoir quel mois on est en train de lire. */
@@ -1768,204 +1486,10 @@ watch(searchQuery, (query) => {
   line-height: 1.4;
 }
 
-/* Barre d'actions sur la sélection : flottante, centrée en bas de l'écran,
-   sombre dans les deux thèmes (même teinte que la carte « Solde total »). */
-.bulk-bar {
-  position: fixed;
-  left: calc(50% + 126px); /* centrée sur la zone de contenu (sidebar de 252 px) */
-  bottom: 22px;
-  z-index: 55;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  max-width: calc(100vw - 32px);
-  padding: 8px 8px 8px 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 14px;
-  background: var(--hero-bg);
-  color: #FFFFFF;
-  box-shadow: 0 14px 40px rgba(8, 15, 30, 0.35);
-  transform: translateX(-50%);
-}
-.bulk-count { font-size: 13.5px; font-weight: 650; white-space: nowrap; }
-.bulk-total {
-  padding: 3px 9px;
-  border-radius: 7px;
-  background: rgba(255, 255, 255, 0.08);
-  font-size: 13px;
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.bulk-total.positive { color: var(--hero-positive); }
-.bulk-total.negative { color: var(--hero-negative); }
-.bulk-separator { width: 1px; align-self: stretch; margin: 2px 2px; background: rgba(255, 255, 255, 0.14); }
-.bulk-bar .btn {
-  min-height: 34px;
-  padding: 6px 12px;
-  border-color: rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.1);
-  color: #FFFFFF;
-  box-shadow: none;
-  white-space: nowrap;
-}
-.bulk-bar .btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
-.bulk-bar .btn.danger { color: var(--hero-negative); }
-.bulk-bar .btn.danger:hover:not(:disabled) { background: rgba(255, 155, 145, 0.16); }
-.bulk-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.7);
-}
-.bulk-close:hover { background: rgba(255, 255, 255, 0.12); color: #FFFFFF; }
-.bulk-bar-enter-active, .bulk-bar-leave-active { transition: opacity 0.16s ease, transform 0.16s ease; }
-.bulk-bar-enter-from, .bulk-bar-leave-to { opacity: 0; transform: translate(-50%, 10px); }
-@media (prefers-reduced-motion: reduce) {
-  .bulk-bar-enter-active, .bulk-bar-leave-active { transition: none; }
-}
-@media (max-width: 1250px) { .bulk-bar { left: calc(50% + 112px); } } /* sidebar de 224 px */
-@media (max-width: 760px) { .bulk-bar { left: 50%; } }                /* sidebar devenue barre du haut */
-/* Place sous la barre flottante pour ne pas masquer les dernières lignes. */
+/* Place sous la barre de sélection flottante (TransactionSelectionBar.vue) pour ne pas masquer les dernières lignes. */
 .transactions-page:has(.bulk-bar) { padding-bottom: 72px; }
-/* Bandeau « Annuler » affiché au-dessus de la barre de sélection quand les deux coexistent. */
-.undo-bar.above-bulk-bar { bottom: 84px; }
-
-/* Modale un peu plus large que le gabarit standard (520px) : les lignes
-   label + champ + pastille ont besoin de plus de place pour respirer. */
-.bulk-edit-modal {
-  width: 600px;
-}
-
-/*
- * Chaque groupe de champs est une "carte" en creux (fond ink-950, le fond de
- * page, plus sombre que le blanc de la modale) plutot qu'une simple liste
- * separee par des traits : lisibilite et coherence avec le reste de l'appli
- * (cartes du tableau de bord, etc.), voir CLAUDE.md.
- */
-.bulk-section {
-  margin-bottom: 14px;
-  padding: 14px 16px;
-  background: var(--ink-950);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-}
-.bulk-section-title {
-  font-size: 13px;
-  font-weight: 650;
-  color: var(--text-muted);
-  margin-bottom: 10px;
-}
-
-/*
- * Plus de case a cocher : modifier un champ (select ou autocomplete) suffit
- * a le marquer "a appliquer" (voir bulkForm dans le script — *Touched pour
- * Categorie/Tiers, valeur !== null pour les select). bulk-field-active
- * met alors la ligne en evidence (fond blanc + liseré azur + pastille ✓),
- * pour que l'utilisateur voie d'un coup d'œil ce qui sera reellement
- * applique avant de cliquer sur "Appliquer".
- */
-.bulk-field {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
-  margin-bottom: 6px;
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  transition: background 0.12s, border-color 0.12s;
-}
-.bulk-field:last-child {
-  margin-bottom: 0;
-}
-.bulk-field-active {
-  background: var(--ink-900);
-  border-color: var(--azure);
-  box-shadow: var(--shadow-sm);
-}
-.bulk-field-label {
-  flex: 0 0 150px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.bulk-field-active .bulk-field-label {
-  color: var(--azure);
-}
-.bulk-field-control {
-  flex: 1;
-  min-width: 0;
-}
-/* Listes déroulantes alignées sur la largeur des champs texte de la modale. */
-.bulk-field-control select {
-  width: 100%;
-}
-.bulk-field-check {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--azure);
-  color: var(--on-accent);
-}
-.bulk-field-check .icon { width: 12px; height: 12px; stroke-width: 2.6; }
-
-.bulk-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 20px;
-}
-.bulk-footer-actions {
-  display: flex;
-  gap: 10px;
-}
-.bulk-clear-link {
-  border: none;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 4px 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.bulk-clear-link:hover {
-  color: var(--text-primary);
-}
 
 .scroll-status {
-  margin-top: 12px;
-}
-
-/* Montant de la 2e partie (modale de division) : lecture seule, calcule a
-   partir du montant total et de la 1ere partie (voir secondAmount) — meme
-   gabarit qu'un champ input pour rester aligne avec les autres champs du
-   formulaire, mais non editable directement. */
-.split-second-amount {
-  display: flex;
-  align-items: center;
-  height: 38px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--ink-950);
-  font-weight: 700;
-}
-
-.split-error {
-  color: var(--coral);
-  font-size: 13px;
   margin-top: 12px;
 }
 
@@ -2162,12 +1686,57 @@ watch(searchQuery, (query) => {
   .transactions-toolbar .toolbar-actions .btn {
     white-space: normal;
   }
-  .bulk-bar {
-    left: 50%;
-    bottom: 12px;
-    flex-wrap: wrap;
-    justify-content: center;
+}
+
+/* Téléphone : chaque transaction devient une carte de deux lignes, au lieu d'un
+   tableau de 12 colonnes où le montant sortait de l'écran.
+     ligne 1 : sélection | tiers           | montant
+     ligne 2 : statut    | date            | catégorie
+   Compte, mémo, solde, cases périodique/exceptionnelle et actions restent accessibles
+   en touchant la ligne (édition, où toutes les cellules s'empilent). */
+@media (max-width: 600px) {
+  .transactions-page .transactions-table {
+    display: block;
+    min-width: 0; /* annule les 640 px imposés aux tableaux mobiles (style.css) */
   }
-  .bulk-separator { display: none; }
+  .transactions-table colgroup,
+  .transactions-table thead { display: none; }
+  .transactions-table tbody { display: block; }
+  .transactions-table tbody :deep(tr) {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+  }
+  .transactions-table .month-row th { grid-column: 1 / -1; }
+  .transactions-page .transactions-table tbody :deep(td) {
+    border-bottom: 0;
+    padding: 5px 8px;
+  }
+  .transactions-table :deep(tr:not(.row-editing) td:is(.cell-account, .cell-memo, .cell-balance, .cell-periodic, .cell-exceptional, .cell-actions)),
+  .transactions-table :deep(td:is(.cell-expense, .cell-income):empty) { display: none; }
+  .transactions-table :deep(td.cell-select) { grid-area: 1 / 1; padding-bottom: 0; }
+  .transactions-table :deep(td.col-payee) { grid-area: 1 / 2; padding-bottom: 0; font-size: 13.5px; font-weight: 600; }
+  .transactions-table :deep(td:is(.cell-expense, .cell-income)) { grid-area: 1 / 3; padding-bottom: 0; font-size: 13.5px; }
+  .transactions-table :deep(td.cell-status) { grid-area: 2 / 1; padding-top: 2px; }
+  .transactions-table :deep(td.col-date) { grid-area: 2 / 2; padding-top: 2px; color: var(--text-muted); }
+  .transactions-table :deep(td.col-cat) { grid-area: 2 / 3; padding-top: 2px; justify-self: end; max-width: 52vw; }
+  /* Sous-catégorie seule : la catégorie parente (dans l'infobulle) tronquait les deux noms. */
+  .transactions-table :deep(td.col-cat .cat-parent) { display: none; }
+  /* Édition : un champ par ligne, sur toute la largeur. */
+  .transactions-table :deep(tr.row-editing td) { grid-column: 1 / -1; }
+  .transactions-table :deep(tr.row-editing td.cell-select) { display: none; }
+  .transactions-table :deep(tr.row-editing td[data-label]) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-align: left;
+  }
+  .transactions-table :deep(tr.row-editing td[data-label] input) { width: auto; flex: 0 0 auto; margin: 0; }
+  .transactions-table :deep(tr.row-editing td[data-label]::after) {
+    content: attr(data-label);
+    font-size: 13px;
+    color: var(--text-muted);
+  }
 }
 </style>

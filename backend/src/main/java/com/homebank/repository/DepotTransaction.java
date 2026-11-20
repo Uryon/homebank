@@ -21,6 +21,9 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
 
     long countByAccount_Id(Long accountId);
 
+    /** Vrai si le compte porte au moins un cote de virement interne (voir ServiceCompte#update). */
+    boolean existsByAccount_IdAndTransferTransactionIsNotNull(Long accountId);
+
     /** Fetch joins de SELECT_FOR_DISPLAY : voir RequetesTransaction (evite un N+1 par tiers/virement). */
     @Query(SELECT_FOR_DISPLAY + " where t.account.id = :accountId" + NEWEST_FIRST)
     List<Transaction> findByAccount_IdOrderByDateDescIdDesc(@Param("accountId") Long accountId);
@@ -50,6 +53,20 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
                                                     @Param("to") LocalDate to);
 
     /**
+     * Date de la plus ancienne transaction (null s'il n'y en a aucune), hors
+     * ajustements de solde, qui ne sont pas des operations : debut de
+     * l'historique, pour savoir si la comparaison avec l'annee precedente du
+     * tableau d'analyse mensuelle porte sur des donnees reelles (voir
+     * ServiceRapport#monthlyCategoryAnalysis).
+     */
+    @Query("select min(t.date) from Transaction t where t.balanceAdjustment = false")
+    LocalDate findEarliestDate();
+
+    /** Variante de findEarliestDate limitee a un compte (tableau de bord filtre par compte). */
+    @Query("select min(t.date) from Transaction t where t.balanceAdjustment = false and t.account.id = :accountId")
+    LocalDate findEarliestDateByAccountId(@Param("accountId") Long accountId);
+
+    /**
      * Recherche de transactions par montant (operateur > < =), utilisee par
      * la recherche de l'onglet Transactions. Tiers, categorie et virement
      * correspondant deja charges (fetch join), meme raison que
@@ -74,15 +91,13 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
     List<Transaction> findByAccount_IdAndAmountOrderByDateDescIdDesc(@Param("accountId") Long accountId, @Param("amount") BigDecimal amount);
 
     /**
-     * Transactions demandees, avec leur eventuelle jumelle de virement deja
-     * chargee (fetch join) : utilisee partout ou le code verifie ensuite
-     * getTransferTransaction() sur chaque transaction (suppression/modification
-     * en masse, voir ServiceTransaction#unlinkTransferPairs et
-     * #applyBulkPaymentMode) — sans ce fetch join, chaque transaction
-     * declencherait sa propre requete au premier acces (LAZY), un N+1 sur une
-     * selection multiple.
+     * Transactions demandees, avec tiers, categorie et jumelle de virement
+     * deja charges (fetch joins de SELECT_FOR_DISPLAY) : la suppression et la
+     * modification en masse lisent la jumelle et le tiers de chaque transaction
+     * (voir ServiceTransaction#unlinkTransferPairs, #recordDeletion et la
+     * reponse DTO), soit sinon une requete par ligne selectionnee.
      */
-    @Query("select t from Transaction t left join fetch t.transferTransaction where t.id in :ids")
+    @Query(SELECT_FOR_DISPLAY + " where t.id in :ids")
     List<Transaction> findAllByIdWithTransferTransaction(@Param("ids") List<Long> ids);
 
     /**
@@ -145,6 +160,16 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
     List<Transaction> findPendingByAccountIdUpTo(@Param("accountId") Long accountId, @Param("asOf") LocalDate asOf);
 
     /**
+     * Transactions en attente d'un compte, toutes dates confondues, jumelle de
+     * virement chargee (fetch join) : validation ou suppression des
+     * transactions en attente restreinte au compte filtre (voir
+     * ServiceTransaction#validateAllPending / #deleteAllPending).
+     */
+    @Query("select t from Transaction t left join fetch t.transferTransaction"
+            + " where t.account.id = :accountId and t.validated = false")
+    List<Transaction> findPendingByAccountIdWithTransferTransaction(@Param("accountId") Long accountId);
+
+    /**
      * Somme des montants survenus jusqu'a `asOf`, pour tous les comptes en une
      * seule requete (voir ServiceCompte#allBalances) : lignes [accountId, somme].
      * Un compte sans transaction n'a pas de ligne.
@@ -168,6 +193,26 @@ public interface DepotTransaction extends JpaRepository<Transaction, Long> {
      * ServiceTiers#pruneIfOrphan) sans avoir a charger les transactions.
      */
     boolean existsByPayee(Tiers payee);
+
+    /** Parmi ces tiers, ceux qui ont encore au moins une transaction (voir ServiceTiers#deleteOrphans). */
+    @Query("select distinct t.payee.id from Transaction t where t.payee.id in :payeeIds")
+    List<Long> findPayeeIdsInUse(@Param("payeeIds") Collection<Long> payeeIds);
+
+    /**
+     * Virements lies et ajustements de solde portant un tiers, alors qu'ils
+     * affichent normalement un libelle calcule (voir ServiceNettoyageTiers).
+     * Le compte de l'autre cote est charge d'emblee pour composer ce libelle.
+     */
+    @Query("select t from Transaction t join fetch t.payee"
+            + " left join fetch t.transferTransaction other left join fetch other.account"
+            + " where t.balanceAdjustment = true"
+            + " or (t.paymentMode = com.homebank.utils.ModePaiement.TRANSFER and t.transferTransaction is not null)"
+            + " order by t.date desc, t.id desc")
+    List<Transaction> findWithPayeeAndComputedLabel();
+
+    /** Nombre de transactions de chaque tiers : lignes [id du tiers, nombre]. */
+    @Query("select t.payee.id, count(t) from Transaction t where t.payee.id in :payeeIds group by t.payee.id")
+    List<Object[]> countByPayeeIds(@Param("payeeIds") Collection<Long> payeeIds);
 
     /** Nombre de transactions d'un tiers, pour expliquer un refus de suppression (voir ServiceTiers#delete). */
     long countByPayee(Tiers payee);

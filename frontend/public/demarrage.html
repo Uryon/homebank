@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Titre « HomeBank » : le lanceur (HomeBank.vbs) retrouve la fenêtre par ce titre. -->
+  <title>HomeBank</title>
+  <!-- Chemins relatifs : la page est aussi ouverte comme fichier (voir plus bas). -->
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <!--
+    Page d'attente de HomeBank.vbs, en deux temps :
+    1. Ouverte comme FICHIER (file://…/public/demarrage.html?port=…) dès le clic
+       sur le raccourci, sans attendre aucun serveur : la fenêtre n'attend plus
+       la compilation du frontend ni le démarrage de Vite (3 à 9 s sans aucun
+       signe de vie). Elle se recharge depuis Vite dès qu'il répond.
+    2. Servie par Vite, pendant que le serveur (Spring Boot) démarre — voire se
+       compile. Même origine que l'appli : l'API est interrogée via le proxy de
+       Vite, sans souci de CORS.
+    Page autonome (pas de Vue) : elle doit s'afficher même si le reste de
+    l'appli ne compile pas.
+  -->
+  <script>
+    // Même thème que l'appli (voir src/services/theme.js, clé homebank-theme) : clair par défaut.
+    let theme = 'light'
+    try { theme = localStorage.getItem('homebank-theme') || 'light' } catch { /* stockage indisponible : clair */ }
+    if (theme !== 'system') document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light'
+  </script>
+  <style>
+    :root {
+      --bg: #E6EEF9; --surface: #FFFFFF; --text: #0A1B33; --muted: #42577A;
+      --accent: #0B5CD5; --track: #D6E2F2; --warn: #9A5B00;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #071426; --surface: #0D1F3A; --text: #EAF2FF; --muted: #A5B8D6;
+        --accent: #6FD0FA; --track: #1B3254; --warn: #FFC25C;
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #071426; --surface: #0D1F3A; --text: #EAF2FF; --muted: #A5B8D6;
+      --accent: #6FD0FA; --track: #1B3254; --warn: #FFC25C;
+      color-scheme: dark;
+    }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: grid;
+      place-items: center;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.5 Inter, "Segoe UI", system-ui, sans-serif;
+    }
+    .card {
+      width: min(420px, calc(100vw - 32px));
+      box-sizing: border-box;
+      padding: 32px 28px;
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: 0 10px 30px rgba(10, 27, 51, 0.12);
+      text-align: center;
+    }
+    img { width: 44px; height: 44px; }
+    h1 { margin: 12px 0 4px; font-size: 20px; font-weight: 650; }
+    p { margin: 0; color: var(--muted); }
+    .bar {
+      position: relative;
+      height: 4px;
+      margin: 22px 0 14px;
+      border-radius: 4px;
+      overflow: hidden;
+      background: var(--track);
+    }
+    .bar::after {
+      content: '';
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 35%;
+      border-radius: 4px;
+      background: var(--accent);
+      animation: slide 1.4s ease-in-out infinite;
+    }
+    @keyframes slide { from { left: -35%; } to { left: 100%; } }
+    @media (prefers-reduced-motion: reduce) { .bar::after { animation: none; width: 100%; opacity: 0.5; } }
+    .hint { font-size: 13px; }
+    .slow { margin-top: 12px; font-size: 13px; color: var(--warn); }
+    code { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main class="card" aria-live="polite">
+    <img src="favicon.svg" alt="" />
+    <h1>Démarrage de HomeBank…</h1>
+    <p id="status">Lancement du serveur</p>
+    <div class="bar" aria-hidden="true"></div>
+    <p class="hint">Après une mise à jour de l'application, la première ouverture peut prendre jusqu'à une minute.</p>
+    <p id="slow" class="slow" hidden>
+      Le serveur met plus de temps que prévu à répondre. Si rien ne change,
+      consultez <code>logs\backend.log</code> et <code>logs\lanceur.log</code> dans le dossier de HomeBank.
+    </p>
+  </main>
+  <script>
+    // Sondage serré : tant que le serveur ne répond pas, le proxy de Vite
+    // échoue en quelques millisecondes ; à 1 s, l'appli s'ouvrait jusqu'à
+    // une seconde après que le serveur était prêt.
+    const POLL_MS = 150
+    const SLOW_AFTER_MS = 120000
+    const params = new URLSearchParams(location.search)
+    // Heure du clic, transmise d'une étape à l'autre : le compteur ne repart pas de zéro.
+    const startedAt = Number(params.get('depuis')) || Date.now()
+    const status = document.getElementById('status')
+    const openedAsFile = location.protocol === 'file:'
+
+    /**
+     * Étape 1 (fichier) : Vite prêt dès qu'il accepte une connexion. Requête
+     * « no-cors » : réponse illisible depuis un fichier, mais elle n'échoue que
+     * si rien n'écoute sur le port.
+     */
+    async function frontendReady(origin) {
+      try {
+        await fetch(`${origin}/demarrage.html`, { mode: 'no-cors', cache: 'no-store' })
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    /** Étape 2 : serveur prêt dès qu'une vraie réponse de l'API arrive (le proxy de Vite renvoie une erreur tant qu'il ne répond pas). */
+    async function backendReady() {
+      try {
+        const response = await fetch('/api/accounts', { cache: 'no-store' })
+        return response.ok
+      } catch {
+        return false
+      }
+    }
+
+    function showProgress(label) {
+      const elapsed = Date.now() - startedAt
+      status.textContent = `${label} (${Math.round(elapsed / 1000)} s)`
+      document.getElementById('slow').hidden = elapsed < SLOW_AFTER_MS
+    }
+
+    async function pollFrontend() {
+      const origin = `http://127.0.0.1:${Number(params.get('port')) || 5173}`
+      if (await frontendReady(origin)) {
+        location.replace(`${origin}/demarrage.html?depuis=${startedAt}`)
+        return
+      }
+      showProgress('Préparation de l’interface')
+      setTimeout(pollFrontend, POLL_MS)
+    }
+
+    async function pollBackend() {
+      if (await backendReady()) {
+        status.textContent = 'Ouverture…'
+        location.replace('/')
+        return
+      }
+      showProgress('Lancement du serveur')
+      setTimeout(pollBackend, POLL_MS)
+    }
+
+    if (openedAsFile) pollFrontend()
+    else pollBackend()
+  </script>
+</body>
+</html>

@@ -49,17 +49,22 @@
       </div>
     </div>
 
+    <div v-else-if="initialLoad === 'loading'" class="empty-state" role="status">Chargement des prêts…</div>
+    <div v-else-if="initialLoad === 'failed'" class="empty-state" role="alert">
+      <p>Impossible de charger les prêts. Vos données n'ont pas été modifiées.</p>
+      <button class="btn secondary" type="button" @click="loadInitial">Réessayer</button>
+    </div>
     <div v-else class="empty-state">
       Aucun prêt enregistré. Ajoutez votre prêt immobilier (ou autre) pour suivre son remboursement.
     </div>
 
     <!-- Detail du pret selectionne : graphique + echeancier -->
-    <div v-if="selectedLoan" class="card" style="margin-top: 20px;">
-      <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 8px;">
-        <div class="card-title" style="margin-bottom: 0;">
+    <div v-if="selectedLoan" class="card loan-detail-card">
+      <div class="loan-chart-header">
+        <div class="card-title">
           Évolution du capital restant dû — {{ selectedLoan.name }}
         </div>
-        <div style="font-size: 13px;">
+        <div class="loan-owned-today">
           <span class="amount positive">{{ formatAmount(ownedAmount(selectedLoan)) }}</span>
           <span class="text-muted"> vous appartiennent aujourd'hui</span>
         </div>
@@ -67,8 +72,8 @@
       <canvas ref="balanceChart" height="90"></canvas>
     </div>
 
-    <div v-if="selectedLoan" class="card" style="margin-top: 20px;">
-      <div class="card-title" style="margin-bottom: 16px;">Tableau d'amortissement</div>
+    <div v-if="selectedLoan" class="card loan-detail-card">
+      <div class="card-title loan-schedule-title">Tableau d'amortissement</div>
       <div class="table-scroll loan-schedule-scroll" ref="scheduleScroll">
         <table class="plain-table loan-schedule-table">
           <thead>
@@ -109,13 +114,15 @@
       <div v-dialog="() => (showModal = false)" class="modal" role="dialog" aria-modal="true">
         <h2>{{ editing ? 'Modifier le prêt' : 'Nouveau prêt' }}</h2>
         <div class="form-grid">
-          <div class="form-field" style="grid-column: span 2;">
+          <div class="form-field span-2">
             <label for="loan-name">Nom</label>
-            <input id="loan-name" v-model="form.name" placeholder="Ex : Prêt immobilier - Résidence principale" />
+            <input id="loan-name" v-model="form.name" maxlength="255" placeholder="Ex : Prêt immobilier - Résidence principale" v-bind="invalidAttrs('name')" @input="clear('name')" />
+            <FieldError id="loan-name-error" :message="errors.name" />
           </div>
           <div class="form-field">
             <label for="loan-principal">Capital emprunté</label>
-            <AmountInput id="loan-principal" v-model="form.principal" />
+            <AmountInput id="loan-principal" v-model="form.principal" v-bind="invalidAttrs('principal')" @input="clear('principal')" />
+            <FieldError id="loan-principal-error" :message="errors.principal" />
           </div>
           <div class="form-field">
             <label for="loan-rate">Taux annuel (%)</label>
@@ -123,15 +130,17 @@
           </div>
           <div class="form-field">
             <label for="loan-term">Durée (mois)</label>
-            <input id="loan-term" v-model.number="form.termMonths" type="number" min="1" placeholder="Ex : 240 pour 20 ans" />
+            <input id="loan-term" v-model.number="form.termMonths" type="number" min="1" :max="MAX_TERM_MONTHS" placeholder="Ex : 240 pour 20 ans" v-bind="invalidAttrs('termMonths')" @input="clear('termMonths')" />
+            <FieldError id="loan-term-error" :message="errors.termMonths" />
           </div>
           <div class="form-field">
             <label for="loan-start-date">Date de la 1ère mensualité</label>
-            <input id="loan-start-date" v-model="form.startDate" type="date" />
+            <input id="loan-start-date" v-model="form.startDate" type="date" :min="MIN_DATE" :max="MAX_DATE" />
           </div>
           <div class="form-field">
             <label for="loan-monthly-payment">Mensualité (hors assurance)</label>
-            <AmountInput id="loan-monthly-payment" v-model="form.monthlyPayment" />
+            <AmountInput id="loan-monthly-payment" v-model="form.monthlyPayment" v-bind="invalidAttrs('monthlyPayment')" @input="clear('monthlyPayment')" />
+            <FieldError id="loan-monthly-payment-error" :message="errors.monthlyPayment" />
             <div v-if="suggestedMonthlyPayment && suggestedMonthlyPayment !== form.monthlyPayment" class="payment-hint">
               Théorique : <strong>{{ formatAmount(suggestedMonthlyPayment) }}</strong>
               <button type="button" class="payment-hint-btn" @click="form.monthlyPayment = suggestedMonthlyPayment">Utiliser</button>
@@ -141,33 +150,40 @@
             <label for="loan-monthly-insurance">Assurance mensuelle (optionnel)</label>
             <AmountInput id="loan-monthly-insurance" v-model="form.monthlyInsurance" />
           </div>
-          <div class="form-field" style="grid-column: span 2;">
+          <div class="form-field span-2">
             <label for="loan-notes">Notes</label>
-            <input id="loan-notes" v-model="form.notes" placeholder="Note libre" />
+            <input id="loan-notes" v-model="form.notes" maxlength="255" placeholder="Note libre" />
           </div>
         </div>
-        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+        <div class="modal-actions">
           <button class="btn secondary" @click="showModal = false">Annuler</button>
           <button class="btn" @click="save">Enregistrer</button>
         </div>
       </div>
     </div>
+
+    <UndoBar :action="lastAction" :undoing="undoing" @undo="runLastAction" />
   </div>
 </template>
 
 <script setup>
 import { notify, askConfirm } from '../services/feedback'
 import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch } from 'vue'
-import Chart from 'chart.js/auto'
+import { useRouteActions } from '../services/routeActions'
+import Chart from '../services/chart'
 import { LoansAPI } from '../services/api'
-import { formatAmount, formatRate, toLocalIsoDate } from '../services/format'
+import { MAX_DATE, MIN_DATE, formatAmount, formatRate, toLocalIsoDate } from '../services/format'
 import { monthlyPaymentFor } from '../services/loanMath'
 import { alertApiError } from '../services/errors'
 import { areaGradient, axisOptions, readChartColors, tooltipOptions } from '../services/chartTheme'
 import { effectiveTheme } from '../services/theme'
 import AmountInput from '../components/AmountInput.vue'
+import FieldError from '../components/FieldError.vue'
+import { useFieldErrors } from '../services/fieldErrors'
 import Icon from '../components/Icon.vue'
 import Money from '../components/Money.vue'
+import UndoBar from '../components/UndoBar.vue'
+import { useLastAction } from '../services/lastAction'
 
 const loans = ref([])
 const selectedId = ref(null)
@@ -389,14 +405,23 @@ function renderChart() {
   })
 }
 
+const { errors, check, clear, invalidAttrs } = useFieldErrors({
+  name: 'loan-name',
+  principal: 'loan-principal',
+  termMonths: 'loan-term',
+  monthlyPayment: 'loan-monthly-payment'
+})
+
 function openCreate() {
   editing.value = null
   form.value = emptyForm()
+  clear()
   showModal.value = true
 }
 
 function openEdit(loan) {
   editing.value = loan
+  clear()
   form.value = {
     name: loan.name,
     principal: loan.principal,
@@ -410,21 +435,42 @@ function openEdit(loan) {
   showModal.value = true
 }
 
+/** Durée maximale d'un prêt, même limite que le backend (ServicePret#MAX_TERM_MONTHS). */
+const MAX_TERM_MONTHS = 600
+
+function termMonthsError(termMonths) {
+  if (!termMonths) return 'Saisissez la durée en mois.'
+  if (termMonths > MAX_TERM_MONTHS) return `La durée ne peut pas dépasser ${MAX_TERM_MONTHS} mois (50 ans).`
+  return ''
+}
+
 async function save() {
-  if (!form.value.name.trim()) {
-    notify('Le nom du prêt est obligatoire.', 'warning')
-    return
-  }
-  if (!form.value.principal || !form.value.termMonths || !form.value.monthlyPayment) {
-    notify('Capital, durée et mensualité sont obligatoires.', 'warning')
-    return
-  }
+  const f = form.value
+  const valid = check({
+    name: f.name.trim() ? '' : 'Saisissez le nom du prêt.',
+    principal: f.principal ? '' : 'Saisissez le capital emprunté.',
+    termMonths: termMonthsError(f.termMonths),
+    monthlyPayment: f.monthlyPayment ? '' : 'Saisissez la mensualité.'
+  })
+  if (!valid) return
   try {
+    let undo
     if (editing.value) {
-      await LoansAPI.update(editing.value.id, form.value)
+      // Paramètres d'avant la modification, pour le bouton « Annuler ».
+      const { id } = editing.value
+      const previous = loanPayload(editing.value)
+      await LoansAPI.update(id, form.value)
+      undo = { label: 'Prêt modifié', run: () => LoansAPI.update(id, previous) }
     } else {
       const created = await LoansAPI.create(form.value)
       selectedId.value = created.id
+      undo = {
+        label: 'Prêt créé',
+        run: async () => {
+          await LoansAPI.remove(created.id)
+          if (selectedId.value === created.id) selectedId.value = null
+        }
+      }
     }
     showModal.value = false
     notify(editing.value ? 'Prêt modifié.' : 'Prêt créé.', 'success')
@@ -432,9 +478,23 @@ async function save() {
     // Si le pret modifie est celui actuellement affiche, on rafraichit aussi
     // son echeancier (les parametres ont pu changer : taux, mensualite...).
     if (selectedId.value) await loadSchedule(selectedId.value)
+    setLastAction(undo.label, async () => {
+      await undo.run()
+      await loadLoans()
+      if (selectedId.value) await loadSchedule(selectedId.value)
+    })
   } catch (e) {
     alertApiError('Erreur lors de l’enregistrement du prêt', e)
   }
+}
+
+/** Annulation de la dernière création, modification ou suppression de prêt (voir services/lastAction.js). */
+const { lastAction, undoing, setLastAction, runLastAction } = useLastAction()
+
+/** Paramètres saisis d'un prêt (sans les valeurs calculées par le backend), pour le recréer à l'identique. */
+function loanPayload(loan) {
+  const { name, principal, annualRate, termMonths, startDate, monthlyPayment, monthlyInsurance, notes } = loan
+  return { name, principal, annualRate, termMonths, startDate, monthlyPayment, monthlyInsurance, notes }
 }
 
 async function remove(loan) {
@@ -444,6 +504,12 @@ async function remove(loan) {
     notify('Prêt supprimé.', 'success')
     if (selectedId.value === loan.id) selectedId.value = null
     await loadLoans()
+    const payload = loanPayload(loan)
+    setLastAction('Prêt supprimé', async () => {
+      const restored = await LoansAPI.create(payload)
+      await loadLoans()
+      selectedId.value = restored.id
+    })
   } catch (e) {
     alertApiError('Erreur lors de la suppression du prêt', e)
   }
@@ -462,16 +528,44 @@ watch(selectedId, async (id) => {
   }
 })
 
-onMounted(async () => {
+/**
+ * Premier chargement de la page : « loading », « failed » ou « done ».
+ * Sans cet état, « Aucun prêt enregistré » s'affichait pendant le
+ * chargement, et restait affiché après un échec comme si la liste était vide.
+ */
+const initialLoad = ref('loading')
+
+async function loadInitial() {
+  initialLoad.value = 'loading'
   try {
     await loadLoans()
+    initialLoad.value = 'done'
   } catch (e) {
+    initialLoad.value = 'failed'
     alertApiError('Impossible de charger les prêts', e)
   }
-})
+}
+
+onMounted(loadInitial)
+
+// Actions lancées depuis la palette de commandes (Ctrl+K), voir services/routeActions.js.
+useRouteActions({ 'new-loan': openCreate })
 </script>
 
 <style scoped>
+/* Cartes de détail du prêt sélectionné (graphique, échéancier). */
+.loan-detail-card { margin-top: 20px; }
+.loan-chart-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.loan-chart-header .card-title { margin-bottom: 0; }
+.loan-owned-today { font-size: 13px; }
+.loan-schedule-title { margin-bottom: 16px; }
 /* Taux et durée alignés à droite, comme les montants (AmountInput) */
 #loan-rate, #loan-term { text-align: right; font-variant-numeric: tabular-nums; }
 .payment-hint {

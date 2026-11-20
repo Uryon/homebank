@@ -12,7 +12,17 @@ import java.time.LocalDate;
 
 @Entity
 @ToString
-@Table(name = "transactions")
+// PostgreSQL n'indexe pas seul les cles etrangeres : sans ces index, supprimer
+// une transaction relisait toute la table pour verifier qu'aucun virement ne la
+// reference (cout quadratique sur une suppression en masse). Les index sur le
+// compte et la date servent aux listes, soldes et rapports par periode.
+@Table(name = "transactions", indexes = {
+        @Index(name = "idx_transactions_compte_date", columnList = "account_id, date"),
+        @Index(name = "idx_transactions_date", columnList = "date"),
+        @Index(name = "idx_transactions_tiers", columnList = "payee_id"),
+        @Index(name = "idx_transactions_categorie", columnList = "category_id"),
+        @Index(name = "idx_transactions_virement", columnList = "transfer_transaction_id")
+})
 @Getter
 @Setter
 public class Transaction {
@@ -102,7 +112,7 @@ public class Transaction {
 
     /**
      * Coche par l'utilisateur (ou acceptee depuis une suggestion automatique,
-     * voir ServiceTransaction#findPeriodicSuggestions) pour indiquer une
+     * voir ServiceSuggestionPeriodique#findPeriodicSuggestions) pour indiquer une
      * depense/revenu periodique recurrent (loyer, abonnements, assurances,
      * salaire...), utilise pour l'encart "Depenses periodiques" du tableau de
      * bord. Le nom de colonne reste "monthly_expense" en base (ancien nom) :
@@ -135,10 +145,10 @@ public class Transaction {
 
     /**
      * Coche par l'utilisateur depuis l'onglet "Doublons" pour indiquer qu'un
-     * groupe remonte par ServiceTransaction#findDuplicateGroups n'est en
+     * groupe remonte par ServiceDoublon#findDuplicateGroups n'est en
      * realite pas un doublon (ex : deux achats distincts, memes compte/date/
      * montant par coincidence). Exclue ensuite de toute detection de doublon
-     * (voir ServiceTransaction#findDuplicateGroups), qu'elle soit "certaine"
+     * (voir ServiceDoublon#findDuplicateGroups), qu'elle soit "certaine"
      * ou "probable".
      */
     @Column(name = "duplicate_ignored", nullable = false, columnDefinition = "boolean not null default false")
@@ -146,7 +156,7 @@ public class Transaction {
 
     /**
      * Coche par l'utilisateur depuis l'onglet "Périodiques" ("Ignorer" sur
-     * une suggestion, voir ServiceTransaction#findPeriodicSuggestions) pour
+     * une suggestion, voir ServiceSuggestionPeriodique#findPeriodicSuggestions) pour
      * indiquer que cette transaction ne doit plus jamais etre proposee comme
      * periodique. Sans ce champ, "Ignorer" n'etait qu'un filtre local a la
      * session (un simple Set en memoire cote frontend, voir

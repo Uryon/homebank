@@ -104,6 +104,30 @@ class ServiceCompteTest {
     }
 
     @Test
+    void create_refuseUnNomDejaPrisCasseIgnoree() {
+        when(accountRepository.existsByNameIgnoreCase("livret a")).thenReturn(true);
+        CompteDTO payload = CompteDTO.builder().name(" livret a ").currency("EUR").build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Un compte « livret a » existe déjà.");
+        verify(accountRepository, never()).save(any(Compte.class));
+    }
+
+    @Test
+    void update_sansRenommage_neControlePasLHomonymie() {
+        Compte existing = compte(1L, "100.00");
+        existing.setName("Livret A");
+        when(accountRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(accountRepository.save(any(Compte.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.update(1L, CompteDTO.builder().name("LIVRET A").currency("EUR").archived(true).build());
+
+        verify(accountRepository, never()).existsByNameIgnoreCase(any());
+        assertThat(existing.isArchived()).isTrue();
+    }
+
+    @Test
     void create_appliqueLesValeursParDefautEtNormaliseLaDevise() {
         CompteDTO payload = CompteDTO.builder().name("  Livret  ").currency(" usd ").build();
         when(accountRepository.save(any(Compte.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -122,6 +146,34 @@ class ServiceCompteTest {
         assertThat(ServiceCompte.normalizeCurrency("")).isEqualTo("EUR");
         assertThatThrownBy(() -> ServiceCompte.normalizeCurrency("EURO")).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> ServiceCompte.normalizeCurrency("E1R")).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void update_refuseDeChangerLaDeviseDUnCompteLieParVirement() {
+        Compte existing = compte(1L, "100.00");
+        existing.setName("Livret A");
+        existing.setCurrency("EUR");
+        when(accountRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(transactionRepository.existsByAccount_IdAndTransferTransactionIsNotNull(1L)).thenReturn(true);
+        CompteDTO payload = CompteDTO.builder().name("Livret A").currency("USD").build();
+
+        assertThatThrownBy(() -> service.update(1L, payload))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("virements");
+        verify(accountRepository, never()).save(any());
+    }
+
+    @Test
+    void update_memeDevise_neRegardePasLesVirements() {
+        Compte existing = compte(1L, "100.00");
+        existing.setName("Livret A");
+        existing.setCurrency("EUR");
+        when(accountRepository.findById(1L)).thenReturn(Optional.of(existing));
+        when(accountRepository.save(any(Compte.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.update(1L, CompteDTO.builder().name("Livret A").currency("eur").build());
+
+        verify(transactionRepository, never()).existsByAccount_IdAndTransferTransactionIsNotNull(any());
     }
 
     @Test

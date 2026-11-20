@@ -96,6 +96,47 @@ class ServicePretTest {
     }
 
     @Test
+    void create_enregistreLesValeursTellesQueLaBaseLesConserve() {
+        when(loanRepository.save(any(Pret.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Pret saved = service.create(validPayload()
+                .name("  Pret immobilier  ")
+                .principal(new BigDecimal("200000.005"))
+                .annualRate(new BigDecimal("3.2504"))
+                .monthlyPayment(new BigDecimal("1150.555"))
+                .monthlyInsurance(new BigDecimal("12.345"))
+                .build());
+
+        assertThat(saved.getName()).isEqualTo("Pret immobilier");
+        assertThat(saved.getPrincipal()).isEqualByComparingTo("200000.01");
+        assertThat(saved.getAnnualRate()).isEqualByComparingTo("3.250");
+        assertThat(saved.getMonthlyPayment()).isEqualByComparingTo("1150.56");
+        assertThat(saved.getMonthlyInsurance()).isEqualByComparingTo("12.35");
+    }
+
+    @Test
+    void create_refuseUnCapitalArrondiAZero() {
+        PretDTO payload = validPayload().principal(new BigDecimal("0.001")).build();
+
+        assertThatThrownBy(() -> service.create(payload)).isInstanceOf(IllegalArgumentException.class);
+        verify(loanRepository, never()).save(any());
+    }
+
+    @Test
+    void create_expliqueLesValeursHorsLimites() {
+        PretDTO tauxExcessif = validPayload().annualRate(new BigDecimal("1E999999")).build();
+        PretDTO capitalExcessif = validPayload().principal(new BigDecimal("1E30")).build();
+        PretDTO mensualiteExcessive = validPayload().monthlyPayment(new BigDecimal("1E30")).build();
+
+        assertThatThrownBy(() -> service.create(tauxExcessif))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("taux annuel");
+        assertThatThrownBy(() -> service.create(capitalExcessif))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("capital");
+        assertThatThrownBy(() -> service.create(mensualiteExcessive))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("mensualité");
+    }
+
+    @Test
     void create_leveIllegalArgumentException_siPrincipalNulOuNegatifOuNul() {
         PretDTO payload = validPayload().principal(new BigDecimal("-100.00")).build();
 
@@ -114,6 +155,15 @@ class ServicePretTest {
         PretDTO payload = validPayload().termMonths(0).build();
 
         assertThatThrownBy(() -> service.create(payload)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void create_leveIllegalArgumentException_siLaDureeDepasseCinquanteAns() {
+        PretDTO payload = validPayload().termMonths(ServicePret.MAX_TERM_MONTHS + 1).build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("50 ans");
     }
 
     @Test
@@ -212,7 +262,7 @@ class ServicePretTest {
 
         assertThatThrownBy(() -> service.create(payload))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Mensualite necessaire : 1134.");
+                .hasMessageContaining("Mensualité nécessaire : 1 134,");
     }
 
     @Test
@@ -220,6 +270,42 @@ class ServicePretTest {
         PretDTO payload = validPayload().monthlyInsurance(new BigDecimal("-5.00")).build();
 
         assertThatThrownBy(() -> service.create(payload)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** Prêt à taux zéro (PTZ) : accepté, sans intérêts, remboursé pile en fin de durée. */
+    @Test
+    void create_pretATauxZero_accepteEtEcheancierSansInterets() {
+        when(loanRepository.save(any(Pret.class))).thenAnswer(inv -> inv.getArgument(0));
+        PretDTO payload = validPayload()
+                .name("PTZ")
+                .principal(new BigDecimal("12000.00"))
+                .annualRate(BigDecimal.ZERO)
+                .termMonths(120)
+                .monthlyPayment(new BigDecimal("100.00"))
+                .build();
+
+        Pret saved = service.create(payload);
+        List<LigneAmortissementDTO> schedule = service.computeSchedule(saved);
+
+        assertThat(saved.getAnnualRate()).isEqualByComparingTo("0");
+        assertThat(schedule).hasSize(120);
+        assertThat(service.totalInterest(schedule)).isEqualByComparingTo("0");
+        assertThat(schedule.get(119).getRemainingBalance()).isEqualByComparingTo("0");
+        assertThat(schedule).allSatisfy(row -> assertThat(row.getPayment()).isEqualByComparingTo("100.00"));
+    }
+
+    @Test
+    void create_exigeUnNomUnTauxPositifEtUneDateDeDepart() {
+        assertThatThrownBy(() -> service.create(validPayload().name("   ").build()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Le nom du prêt est obligatoire.");
+        assertThatThrownBy(() -> service.create(validPayload().annualRate(new BigDecimal("-1.5")).build()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Le taux annuel ne peut pas être négatif.");
+        assertThatThrownBy(() -> service.create(validPayload().startDate(null).build()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("La date de première mensualité est obligatoire.");
+        verify(loanRepository, never()).save(any());
     }
 
     @Test
@@ -324,5 +410,11 @@ class ServicePretTest {
 
         assertThatThrownBy(() -> service.delete(99L)).isInstanceOf(NoSuchElementException.class);
         verify(loanRepository, never()).delete(any(Pret.class));
+    }
+
+    @Test
+    void euros_formatFrancaisAvecEspaceDesMilliers() {
+        assertThat(ServicePret.euros(new BigDecimal("1134.4"))).isEqualTo("1 134,40 €");
+        assertThat(ServicePret.euros(new BigDecimal("250"))).isEqualTo("250,00 €");
     }
 }

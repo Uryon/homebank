@@ -1,5 +1,7 @@
 import { normalizeSearch } from './search'
-import { flattenCategories } from './categories'
+import { flattenCategories, transactionSearchForCategory } from './categories'
+import { accountOptionLabel } from './accounts'
+import { routeAction } from './routeActions'
 
 /**
  * Logique de la palette de commandes (Ctrl+K), séparée du composant pour
@@ -11,21 +13,28 @@ import { flattenCategories } from './categories'
  */
 
 export const PAGE_COMMANDS = [
-  { id: 'page-dashboard', group: 'Pages', label: 'Tableau de bord', icon: 'dashboard', to: '/' },
-  { id: 'page-transactions', group: 'Pages', label: 'Transactions', icon: 'transactions', to: '/transactions' },
+  { id: 'page-dashboard', group: 'Pages', hint: 'Alt+1', label: 'Tableau de bord', icon: 'dashboard', to: '/' },
+  { id: 'page-transactions', group: 'Pages', hint: 'Alt+2', label: 'Transactions', icon: 'transactions', to: '/transactions' },
   { id: 'page-periodic', group: 'Pages', label: 'Transactions périodiques', icon: 'refresh', to: '/transactions/periodiques', keywords: 'suggestions recurrent' },
   { id: 'page-duplicates', group: 'Pages', label: 'Doublons', icon: 'transactions', to: '/transactions/doublons' },
-  { id: 'page-accounts', group: 'Pages', label: 'Comptes', icon: 'accounts', to: '/accounts' },
-  { id: 'page-categories', group: 'Pages', label: 'Catégories', icon: 'categories', to: '/categories' },
-  { id: 'page-payees', group: 'Pages', label: 'Tiers', icon: 'payees', to: '/payees' },
-  { id: 'page-loans', group: 'Pages', label: 'Prêts', icon: 'loans', to: '/loans', keywords: 'emprunt credit' },
-  { id: 'page-import', group: 'Pages', label: 'Importer un relevé', icon: 'import', to: '/import', keywords: 'csv qif banque' }
+  { id: 'page-accounts', group: 'Pages', hint: 'Alt+3', label: 'Comptes', icon: 'accounts', to: '/accounts' },
+  { id: 'page-categories', group: 'Pages', hint: 'Alt+4', label: 'Catégories', icon: 'categories', to: '/categories' },
+  { id: 'page-payees', group: 'Pages', hint: 'Alt+5', label: 'Tiers', icon: 'payees', to: '/payees' },
+  { id: 'page-loans', group: 'Pages', hint: 'Alt+6', label: 'Prêts', icon: 'loans', to: '/loans', keywords: 'emprunt credit' },
+  { id: 'page-import', group: 'Pages', hint: 'Alt+7', label: 'Importer un relevé', icon: 'import', to: '/import', keywords: 'csv qif banque' }
 ]
 
 export const ACTION_COMMANDS = [
   { id: 'action-new-transaction', group: 'Actions', label: 'Nouvelle transaction', hint: 'N', icon: 'plus', to: { path: '/transactions', query: { new: '1' } }, keywords: 'ajouter creer depense revenu' },
   { id: 'action-uncategorized', group: 'Actions', label: 'Transactions sans catégorie', icon: 'filter', to: { path: '/transactions', query: { uncategorized: '1' } }, keywords: 'categoriser trier' },
   { id: 'action-pending', group: 'Actions', label: 'Transactions à traiter', icon: 'check', to: { path: '/transactions', query: { pending: '1' } }, keywords: 'valider rapprochement non validees import' },
+  { id: 'action-new-account', group: 'Actions', label: 'Nouveau compte', icon: 'accounts', to: routeAction('/accounts', 'new-account'), keywords: 'ajouter creer banque livret' },
+  { id: 'action-transfer', group: 'Actions', label: 'Virement entre comptes', icon: 'transactions', to: routeAction('/accounts', 'transfer'), keywords: 'transfert epargne livret' },
+  { id: 'action-new-category', group: 'Actions', label: 'Nouvelle catégorie', icon: 'categories', to: routeAction('/categories', 'new-category'), keywords: 'ajouter creer' },
+  { id: 'action-new-payee', group: 'Actions', label: 'Nouveau tiers', icon: 'payees', to: routeAction('/payees', 'new-payee'), keywords: 'ajouter creer beneficiaire commercant' },
+  { id: 'action-new-loan', group: 'Actions', label: 'Nouveau prêt', icon: 'loans', to: routeAction('/loans', 'new-loan'), keywords: 'ajouter creer emprunt credit' },
+  { id: 'action-export-csv', group: 'Actions', label: 'Exporter les transactions en CSV', icon: 'transactions', to: { path: '/transactions', query: { export: 'csv' } }, keywords: 'telecharger sauvegarde homebank excel tableur' },
+  { id: 'action-export-pdf', group: 'Actions', label: 'Exporter le tableau de bord en PDF', icon: 'dashboard', to: routeAction('/', 'export-pdf'), keywords: 'imprimer telecharger rapport' },
   { id: 'action-shortcuts', group: 'Actions', label: 'Raccourcis clavier', hint: '?', icon: 'help', action: 'shortcuts', keywords: 'aide clavier touches' },
   { id: 'action-theme-light', group: 'Actions', label: 'Thème clair', icon: 'sun', action: 'theme:light', keywords: 'apparence mode jour' },
   { id: 'action-theme-dark', group: 'Actions', label: 'Thème sombre', icon: 'moon', action: 'theme:dark', keywords: 'apparence mode nuit' },
@@ -49,11 +58,21 @@ export function indexPayees(payees) {
 }
 
 /**
+ * Index des comptes (archivés compris, signalés dans le libellé) : chacun
+ * ouvre la liste des transactions filtrée sur ce compte, comme le nom du
+ * compte cliqué sur la page Comptes.
+ */
+export function indexAccounts(accounts) {
+  return accounts.map(a => ({
+    command: { id: `account-${a.id}`, group: 'Comptes', label: accountOptionLabel(a), icon: 'accounts', to: { path: '/transactions', query: { account: String(a.id) } } },
+    haystack: normalizeSearch(a.name)
+  }))
+}
+
+/**
  * Index des catégories visibles : chacune ouvre ses transactions via la
  * recherche de la page Transactions, qui compare le libellé « Parent : Enfant »
- * de flattenCategories. Une catégorie assignable est cherchée à l'identique
- * (entre guillemets) ; une racine à sous-catégories ne porte elle-même aucune
- * transaction, on cherche donc le préfixe « Racine : » commun à ses enfants.
+ * de flattenCategories (voir transactionSearchForCategory).
  */
 export function indexCategories(categories) {
   const byId = new Map(categories.map(c => [c.id, c]))
@@ -62,7 +81,7 @@ export function indexCategories(categories) {
     .map(entry => {
       const category = byId.get(entry.id)
       const parent = category.parentId ? byId.get(category.parentId) : null
-      const search = entry.selectable ? `"${entry.label}"` : `${entry.label} :`
+      const search = transactionSearchForCategory(entry)
       return {
         command: { id: `category-${entry.id}`, group: 'Catégories', label: entry.label, icon: 'categories', to: { path: '/transactions', query: { search } } },
         haystack: normalizeSearch(parent ? `${parent.name} ${category.name}` : category.name)
@@ -137,10 +156,11 @@ export function searchTransactionsCommand(query) {
 }
 
 /** Résultats complets de la palette, dans l'ordre d'affichage. */
-export function buildResults({ staticIndex, payeeIndex, categoryIndex = [], query }) {
+export function buildResults({ staticIndex, payeeIndex, categoryIndex = [], accountIndex = [], query }) {
   const hasQuery = query.trim().length > 0
   const results = [
     ...filterIndex(staticIndex, query, hasQuery ? 6 : staticIndex.length),
+    ...(hasQuery ? filterIndex(accountIndex, query, 4) : []),
     ...(hasQuery ? filterIndex(categoryIndex, query, 5) : []),
     ...(hasQuery ? filterIndex(payeeIndex, query, 6) : [])
   ]

@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { findPayeeByName, matchesPatternField, splitPatternSegments } from './payee'
+import { findPayeeByName, labelToPatternSegment, matchesPatternField, splitPatternSegments } from './payee'
+
+describe('labelToPatternSegment', () => {
+  it('garde un libellé avec point-virgule en un seul motif', () => {
+    const segment = labelToPatternSegment(' VIR ACME; REF 2025 ')
+
+    expect(segment).toBe('VIR ACME* REF 2025')
+    expect(splitPatternSegments(segment)).toHaveLength(1)
+    expect(matchesPatternField(segment, 'VIR ACME; REF 2025')).toBe(true)
+    expect(matchesPatternField(segment, 'PRLV ASSURANCE REF 2025')).toBe(false)
+  })
+})
 
 describe('splitPatternSegments', () => {
   it('découpe un motif multiple en segments', () => {

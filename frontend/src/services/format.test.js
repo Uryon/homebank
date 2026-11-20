@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatAmount, formatDate, displayMemo, formatRate, toLocalIsoDate, formatFrequency, formatAmountForInput, pluralize } from './format'
+import { formatAmount, formatDate, displayMemo, formatRate, toLocalIsoDate, formatFrequency, formatAmountForInput, pluralize, dateFieldError, amountFieldError } from './format'
 
 describe('toLocalIsoDate', () => {
   it('formate une date locale en AAAA-MM-JJ avec zeros de tete', () => {
@@ -134,5 +134,36 @@ describe('pluralize', () => {
 
   it('accorde au pluriel à partir de 2', () => {
     expect(pluralize(2, 'doublon supprimé', 'doublons supprimés')).toBe('2 doublons supprimés')
+  })
+})
+
+describe('dateFieldError', () => {
+  it('exige une date', () => {
+    expect(dateFieldError('')).toBe('Choisissez une date.')
+    expect(dateFieldError(null)).toBe('Choisissez une date.')
+  })
+
+  it("refuse une année tapée sur deux chiffres (« 26 » lu comme l'an 26)", () => {
+    expect(dateFieldError('0026-11-17')).toBe('Année invalide (26) : saisissez-la sur 4 chiffres.')
+    expect(dateFieldError('2100-01-01')).toContain('Année invalide (2100)')
+  })
+
+  it('accepte une date dans la plage, bornes comprises', () => {
+    expect(dateFieldError('2026-11-17')).toBe('')
+    expect(dateFieldError('1900-01-01')).toBe('')
+    expect(dateFieldError('2099-12-31')).toBe('')
+  })
+})
+
+describe('amountFieldError', () => {
+  it('exige un montant non nul', () => {
+    expect(amountFieldError(null)).toBe('Saisissez un montant.')
+    expect(amountFieldError(0)).toBe('Le montant ne peut pas être nul.')
+    expect(amountFieldError(-12.5)).toBe('')
+  })
+
+  it('laisse à 0 une transaction qui l’était déjà, mais pas une qui ne l’était pas', () => {
+    expect(amountFieldError(0, 0)).toBe('')
+    expect(amountFieldError(0, -8)).toBe('Le montant ne peut pas être nul.')
   })
 })

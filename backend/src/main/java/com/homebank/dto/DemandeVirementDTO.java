@@ -14,4 +14,10 @@ public class DemandeVirementDTO {
     private BigDecimal amount;
     private LocalDate date;
     private String memo;
+    /**
+     * Statut des deux cotes ; absent = valide (virement saisi a la main).
+     * Renseigne a false par l'annulation de la suppression d'un virement en
+     * attente, pour le recreer tel qu'il etait.
+     */
+    private Boolean validated;
 }

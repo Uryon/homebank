@@ -7,6 +7,7 @@ import com.homebank.model.Transaction;
 import com.homebank.model.TransactionSupprimee;
 import com.homebank.repository.DepotTransaction;
 import com.homebank.repository.DepotTransactionSupprimee;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -53,6 +54,8 @@ class ServiceImportTest {
     private ServiceDernierImport dernierImportService;
     @Mock
     private PlatformTransactionManager transactionManager;
+    @Mock
+    private EntityManager entityManager;
 
     private ServiceImport service;
     private final Compte account = new Compte();
@@ -60,7 +63,7 @@ class ServiceImportTest {
     @BeforeEach
     void setUp() {
         service = new ServiceImport(accountService, categoryService, transactionRepository,
-                deletedTransactionRepository, payeeService, dernierImportService, transactionManager);
+                deletedTransactionRepository, payeeService, dernierImportService, transactionManager, entityManager);
         account.setId(1L);
         when(accountService.findById(1L)).thenReturn(account);
     }
@@ -95,6 +98,364 @@ class ServiceImportTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("archivé");
         verify(dernierImportService, never()).enregistrerImport();
+        verify(transactionRepository, never()).save(any());
+    }
+
+    // --- Fichier sans aucune operation ---
+
+    @Test
+    void importCsv_fichierVide_expliquePourquoiRienNAEteImporte() {
+        ServiceImport.ImportResult result = service.importCsv(csvFile(""), 1L);
+
+        assertThat(result.getImported()).isZero();
+        assertThat(result.getErrors()).containsExactly(ServiceImport.NO_OPERATION_FOUND);
+        verify(dernierImportService, never()).enregistrerImport();
+    }
+
+    @Test
+    void importCsv_enTeteSeule_expliquePourquoiRienNAEteImporte() {
+        ServiceImport.ImportResult result = service.importCsv(csvFile("Date;Libelle;Montant(EUROS)\n"), 1L);
+
+        assertThat(result.getErrors()).containsExactly(ServiceImport.NO_OPERATION_FOUND);
+    }
+
+    @Test
+    void importQif_contenuCsv_signaleQueLeFormatNeCorrespondPas() {
+        // Erreur de manipulation : format "QIF" choisi pour un releve CSV, qui
+        // n'a aucune section !Type:Bank et ne produisait donc aucune ligne.
+        String csv = """
+                Date;Libelle;Montant(EUROS)
+                01/03/2024;CARREFOUR;-45,50
+                """;
+
+        ServiceImport.ImportResult result = service.importQif(qifFile(csv), 1L);
+
+        assertThat(result.getErrors()).containsExactly(ServiceImport.NO_OPERATION_FOUND);
+        verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void importCsv_lignesToutesEnErreur_neRajoutePasLeMessageDeFichierSansOperation() {
+        String csv = """
+                Date;Libelle;Montant(EUROS)
+                pas-une-date;CARREFOUR;-45,50
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getSkipped()).isEqualTo(1);
+        assertThat(result.getErrors()).doesNotContain(ServiceImport.NO_OPERATION_FOUND);
+    }
+
+    @Test
+    void importCsv_separateurVirgule_estReconnu() {
+        String csv = """
+                Date,Libelle,Montant
+                01/03/2024,"CARREFOUR, PARIS","-45,50"
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getErrors()).isEmpty();
+        assertThat(result.getImported()).isEqualTo(1);
+        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
+        verify(transactionRepository).save(captor.capture());
+        assertThat(captor.getValue().getAmount()).isEqualByComparingTo("-45.50");
+    }
+
+    @Test
+    void importCsv_colonnesDebitCredit_nePrendJamaisLeSoldePourLeMontant() {
+        String csv = """
+                Date;Date de valeur;Débit;Crédit;Libellé;Solde
+                01/03/2024;01/03/2024;-45,50;;CARREFOUR;1000,00
+                02/03/2024;02/03/2024;;1500,00;SALAIRE;2500,00
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getErrors()).isEmpty();
+        List<Transaction> saved = transactionsEnregistrees(2);
+        assertThat(saved.get(0).getAmount()).isEqualByComparingTo("-45.50");
+        assertThat(saved.get(0).getBankLabel()).isEqualTo("CARREFOUR");
+        assertThat(saved.get(1).getAmount()).isEqualByComparingTo("1500.00");
+        assertThat(saved.get(1).getBankLabel()).isEqualTo("SALAIRE");
+    }
+
+    /** Colonne de libellé au nom inconnu (« Opération ») : la première colonne de texte sert de libellé. */
+    @Test
+    void importCsv_libelleAuNomInconnu_prendLaPremiereColonneDeTexte() {
+        String csv = """
+                Date;Opération;Montant
+                01/03/2024;PRLV EDF;-72,40
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getErrors()).isEmpty();
+        Transaction saved = transactionsEnregistrees(1).get(0);
+        assertThat(saved.getBankLabel()).isEqualTo("PRLV EDF");
+        assertThat(saved.getAmount()).isEqualByComparingTo("-72.40");
+    }
+
+    /** Une seconde colonne de date (« Date de valeur ») n'est jamais prise pour le libellé. */
+    @Test
+    void importCsv_libelleAuNomInconnu_sauteLesColonnesDeDate() {
+        String csv = """
+                Date;Date de valeur;Opération;Montant
+                01/03/2024;02/03/2024;CB BOULANGERIE;-4,80
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getErrors()).isEmpty();
+        Transaction saved = transactionsEnregistrees(1).get(0);
+        assertThat(saved.getBankLabel()).isEqualTo("CB BOULANGERIE");
+        assertThat(saved.getAmount()).isEqualByComparingTo("-4.80");
+        assertThat(saved.getDate()).isEqualTo(LocalDate.of(2024, 3, 1));
+    }
+
+    /** Aucune colonne nommée « Montant » : repli sur la disposition d'un relevé bancaire (date, libellé, montant). */
+    @Test
+    void importCsv_sansColonneDeMontantNommee_replieSurLaDispositionDUnReleve() {
+        String csv = """
+                Date;Libellé;Valeur
+                01/03/2024;CARREFOUR;-12,30
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getErrors()).isEmpty();
+        Transaction saved = transactionsEnregistrees(1).get(0);
+        assertThat(saved.getBankLabel()).isEqualTo("CARREFOUR");
+        assertThat(saved.getAmount()).isEqualByComparingTo("-12.30");
+    }
+
+    @Test
+    void importCsv_debitEcritSansSigne_devientUneDepense() {
+        String csv = """
+                Date;Libellé;Débit euros;Crédit euros;
+                01/03/2024;CARREFOUR;45,50;;
+                02/03/2024;SALAIRE;;1500,00
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getErrors()).isEmpty();
+        List<Transaction> saved = transactionsEnregistrees(2);
+        assertThat(saved.get(0).getAmount()).isEqualByComparingTo("-45.50");
+        assertThat(saved.get(1).getAmount()).isEqualByComparingTo("1500.00");
+    }
+
+    @Test
+    void importCsv_debitEtCreditVides_ligneEnErreur() {
+        String csv = """
+                Date;Libellé;Débit;Crédit
+                01/03/2024;CARREFOUR;;
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getSkipped()).isEqualTo(1);
+        assertThat(result.getErrors()).singleElement().asString().contains("Ligne 2").contains("Débit");
+        verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void importCsv_enTeteDetaillee_apresDesInformationsDeCompteSurTroisColonnes() {
+        String csv = """
+                Compte;FR7612345;EUR
+                Date de l'opération;Libellé;Détail de l'écriture;Montant de l'opération;Devise
+                01/03/2024;CARTE CARREFOUR;Courses du samedi;-45,50;EUR
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getErrors()).isEmpty();
+        Transaction saved = transactionsEnregistrees(1).get(0);
+        assertThat(saved.getAmount()).isEqualByComparingTo("-45.50");
+        assertThat(saved.getBankLabel()).isEqualTo("CARTE CARREFOUR");
+        assertThat(saved.getMemo()).isEqualTo("Courses du samedi");
+    }
+
+    @Test
+    void importCsv_dateDeDebit_nestPasUneColonneDeMontant() {
+        String csv = """
+                Date;Date de débit;Libellé;Montant
+                01/03/2024;05/03/2024;CARREFOUR;-45,50
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getErrors()).isEmpty();
+        assertThat(transactionsEnregistrees(1).get(0).getAmount()).isEqualByComparingTo("-45.50");
+    }
+
+    private List<Transaction> transactionsEnregistrees(int attendues) {
+        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
+        verify(transactionRepository, times(attendues)).save(captor.capture());
+        return captor.getAllValues();
+    }
+
+    @Test
+    void importQif_derniereOperationSansCirconflexe_estImportee() {
+        String qif = """
+                !Type:Bank
+                D01/03/2024
+                T-45,50
+                PCARREFOUR
+                ^
+                D02/03/2024
+                T-12,00
+                PBOULANGERIE
+                """;
+
+        ServiceImport.ImportResult result = service.importQif(qifFile(qif), 1L);
+
+        assertThat(result.getErrors()).isEmpty();
+        assertThat(result.getImported()).isEqualTo(2);
+        assertThat(transactionsEnregistrees(2).get(1).getAmount()).isEqualByComparingTo("-12.00");
+    }
+
+    @Test
+    void importQif_operationNonTermineeAvantUneNouvelleSection_estImportee() {
+        String qif = """
+                !Type:Bank
+                D01/03/2024
+                T-45,50
+                !Type:CCard
+                D02/03/2024
+                T-12,00
+                ^
+                """;
+
+        ServiceImport.ImportResult result = service.importQif(qifFile(qif), 1L);
+
+        assertThat(result.getErrors()).isEmpty();
+        assertThat(result.getImported()).isEqualTo(2);
+    }
+
+    @Test
+    void importQif_derniereOperationIncomplete_estSignalee() {
+        String qif = """
+                !Type:Bank
+                D01/03/2024
+                """;
+
+        ServiceImport.ImportResult result = service.importQif(qifFile(qif), 1L);
+
+        assertThat(result.getSkipped()).isEqualTo(1);
+        assertThat(result.getErrors()).singleElement().asString().contains("date ou montant manquant");
+    }
+
+    @Test
+    void importQif_compteEntreCrochets_neCreePasDeCategorie() {
+        String qif = """
+                !Type:Bank
+                D01/03/2024
+                T-45,50
+                L[Livret A]
+                ^
+                """;
+
+        ServiceImport.ImportResult result = service.importQif(qifFile(qif), 1L);
+
+        assertThat(result.getImported()).isEqualTo(1);
+        verify(categoryService, never()).findOrCreateByName(any(), any());
+        assertThat(transactionsEnregistrees(1).get(0).getCategory()).isNull();
+    }
+
+    @Test
+    void importCsv_chercheChaqueCategorieUneSeuleFois() {
+        when(categoryService.findOrCreateByName(any(), any())).thenReturn(new Categorie());
+        String csv = """
+                Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
+                01/03/2024;;;A;;-1,00;Courses:Bio;
+                02/03/2024;;;B;;-2,00;courses:bio;
+                03/03/2024;;;C;;-3,00;Courses:Bio;
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getImported()).isEqualTo(3);
+        verify(categoryService, times(1)).findOrCreateByName(any(), any());
+    }
+
+    @Test
+    void importCsv_grosFichier_valideParLots() {
+        StringBuilder csv = new StringBuilder("Date;Libelle;Montant\n");
+        for (int i = 0; i < 450; i++) csv.append("01/03/2024;ACHAT ").append(i).append(";-1,00\n");
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv.toString()), 1L);
+
+        assertThat(result.getImported()).isEqualTo(450);
+        verify(transactionManager, times(3)).commit(any());
+    }
+
+    @Test
+    void importCsv_lotEnEchec_neCompteRienEnDoubleEtGardeLesAutresLignes() {
+        when(transactionRepository.save(any())).thenAnswer(inv -> {
+            Transaction t = inv.getArgument(0);
+            if (t.getAmount().compareTo(new BigDecimal("-2.00")) == 0) throw new IllegalStateException("contrainte");
+            t.setId(t.getAmount().abs().longValue());
+            return t;
+        });
+        String csv = """
+                Date;Libelle;Montant
+                01/03/2024;A;-1,00
+                pas-une-date;B;-9,00
+                02/03/2024;C;-2,00
+                03/03/2024;D;-3,00
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getImported()).isEqualTo(2);
+        assertThat(result.getSkipped()).isEqualTo(2);
+        assertThat(result.getImportedIds()).containsExactly(1L, 3L);
+        assertThat(result.getErrors()).hasSize(2);
+        assertThat(result.getErrors().get(0)).startsWith("Ligne 3 : ");
+        assertThat(result.getErrors().get(1)).startsWith("Ligne 4 : ").contains("contrainte");
+    }
+
+    @Test
+    void importCsv_renvoieLesIdsDesTransactionsCreees() {
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> {
+            Transaction t = inv.getArgument(0);
+            t.setId(42L);
+            return t;
+        });
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile("Date;Libelle;Montant\n01/03/2024;CARREFOUR;-45,50\n"), 1L);
+
+        assertThat(result.getImportedIds()).containsExactly(42L);
+    }
+
+    @Test
+    void importCsv_memoTropLong_estTronquePlutotQueRejete() {
+        String csv = "Date;Paymode;Info;Payee;Memo;Amount;Category;Tags\n"
+                + "01/03/2024;;;;" + "m".repeat(300) + ";-45,50;;\n";
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(result.getImported()).isEqualTo(1);
+        ArgumentCaptor<Transaction> captor = ArgumentCaptor.forClass(Transaction.class);
+        verify(transactionRepository).save(captor.capture());
+        assertThat(captor.getValue().getMemo()).hasSize(255);
+    }
+
+    @Test
+    void importCsv_anneeHorsPlage_ligneEnErreurAvecLaDateFautive() {
+        String csv = """
+                Date;Libelle;Montant(EUROS)
+                17/11/0026;CARREFOUR;-45,50
+                """;
+
+        ServiceImport.ImportResult result = service.importCsv(csvFile(csv), 1L);
+
+        assertThat(ServiceImport.parseDate("17/11/26")).isEqualTo(LocalDate.of(2026, 11, 17));
+        assertThat(result.getSkipped()).isEqualTo(1);
+        assertThat(result.getErrors()).singleElement().asString()
+                .contains("17/11/0026").contains("année saisie : 26");
         verify(transactionRepository, never()).save(any());
     }
 
@@ -240,6 +601,52 @@ class ServiceImportTest {
         assertThat(result.getImported()).isEqualTo(2);
         assertThat(result.getDuplicates()).isZero();
         verify(transactionRepository, times(2)).save(any());
+    }
+
+    @Test
+    void importCsv_exportReimporte_reconnaitPartieDiviseeVirementEtAjustement() {
+        Compte compte = new Compte();
+        compte.setId(1L);
+        when(accountService.findById(1L)).thenReturn(compte);
+        Tiers cafe = new Tiers();
+        cafe.setId(5L);
+        cafe.setName("Cafe");
+        cafe.setPattern("Cafe");
+        when(payeeService.findAllForMatching()).thenReturn(new java.util.ArrayList<>(List.of(cafe)));
+        when(payeeService.findExisting(any(), any(), any())).thenAnswer(inv ->
+                "Cafe".equals(inv.getArgument(0)) ? Optional.of(cafe) : Optional.empty());
+
+        Transaction partie = new Transaction();
+        partie.setDate(LocalDate.of(2024, 3, 1));
+        partie.setAmount(new BigDecimal("-4.00"));
+        partie.setSplitFromAmount(new BigDecimal("-10.00"));
+        partie.setPayee(cafe);
+        Compte autre = new Compte();
+        autre.setName("Livret");
+        Transaction jumelle = new Transaction();
+        jumelle.setAccount(autre);
+        Transaction virement = new Transaction();
+        virement.setDate(LocalDate.of(2024, 3, 2));
+        virement.setAmount(new BigDecimal("-7.00"));
+        virement.setPaymentMode(com.homebank.utils.ModePaiement.TRANSFER);
+        virement.setTransferTransaction(jumelle);
+        Transaction ajustement = new Transaction();
+        ajustement.setDate(LocalDate.of(2024, 3, 3));
+        ajustement.setAmount(new BigDecimal("5.00"));
+        ajustement.setBalanceAdjustment(true);
+        when(transactionRepository.findByAccount_IdOrderByDateDescIdDesc(1L)).thenReturn(List.of(partie, virement, ajustement));
+
+        String csv = """
+                date;paymode;info;payee;memo;amount;category;tags
+                01-03-2024;0;;Cafe;;-4.00;;
+                02-03-2024;5;;Virement vers Livret;;-7.00;;
+                03-03-2024;0;;Ajustement de solde;;5.00;;
+                """;
+        ServiceImport.ImportResult result = service.importCsv(
+                new MockMultipartFile("file", "x.csv", "text/csv", csv.getBytes(StandardCharsets.UTF_8)), 1L);
+
+        assertThat(result.getImported()).isZero();
+        assertThat(result.getDuplicates()).isEqualTo(3);
     }
 
     @Test
@@ -406,6 +813,41 @@ class ServiceImportTest {
     }
 
     // --- QIF ---
+
+    @Test
+    void importQif_sectionCarteDeCredit_estImportee() {
+        String qif = """
+                !Type:CCard
+                D01/03/2024
+                T-12,00
+                PCafe
+                ^
+                """;
+
+        ServiceImport.ImportResult result = service.importQif(qifFile(qif), 1L);
+
+        assertThat(result.getErrors()).isEmpty();
+        assertThat(result.getImported()).isEqualTo(1);
+    }
+
+    @Test
+    void importQif_sectionDeCategories_estIgnoree() {
+        String qif = """
+                !Type:Cat
+                NAlimentation
+                E
+                ^
+                !Type:Bank
+                D01/03/2024
+                T-12,00
+                ^
+                """;
+
+        ServiceImport.ImportResult result = service.importQif(qifFile(qif), 1L);
+
+        assertThat(result.getImported()).isEqualTo(1);
+        assertThat(result.getSkipped()).isZero();
+    }
 
     @Test
     void importQif_enregistrementCompletApresTypeBank_creeUneTransaction() {
@@ -675,7 +1117,12 @@ class ServiceImportTest {
             cacheContenaitLeTiersAnnule.add(known.contains(cree));
             return Optional.empty();
         });
-        when(transactionRepository.save(any())).thenThrow(new IllegalStateException("contrainte")).thenReturn(null);
+        // La 1re ligne echoue a chaque tentative : dans son lot, puis rejouee seule.
+        when(transactionRepository.save(any())).thenAnswer(inv -> {
+            Transaction t = inv.getArgument(0);
+            if (t.getAmount().compareTo(new BigDecimal("-3.20")) == 0) throw new IllegalStateException("contrainte");
+            return t;
+        });
 
         String csv = """
                 Date;Paymode;Info;Payee;Memo;Amount;Category;Tags
@@ -687,8 +1134,9 @@ class ServiceImportTest {
 
         assertThat(result.getSkipped()).isEqualTo(1);
         assertThat(result.getImported()).isEqualTo(1);
-        verify(transactionManager).rollback(any());
-        // 2e ligne : le tiers annule avec la 1re n'est plus propose comme deja connu.
-        assertThat(cacheContenaitLeTiersAnnule).containsExactly(false, false);
+        assertThat(result.getErrors()).singleElement().asString().startsWith("Ligne 2 : ");
+        verify(transactionManager, times(2)).rollback(any()); // le lot, puis la ligne fautive
+        // Le tiers annule n'est jamais propose comme deja connu aux lignes suivantes.
+        assertThat(cacheContenaitLeTiersAnnule).containsOnly(false);
     }
 }

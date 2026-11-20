@@ -8,7 +8,6 @@ import com.homebank.dto.MoisAnalyseDTO;
 import com.homebank.dto.PointSoldeDTO;
 import com.homebank.dto.PrevisionSoldeDTO;
 import com.homebank.dto.ResumeMoisAnalyseDTO;
-import com.homebank.dto.ResumePeriodeDTO;
 import com.homebank.dto.SynthesePeriodiqueDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.mapper.MappeurTransaction;
@@ -286,22 +285,54 @@ class ServiceRapportTest {
         assertThat(result).isEmpty();
     }
 
-    // --- summary ---
+    // --- remboursements : deduits des depenses de leur categorie sur le mois ---
 
     @Test
-    void summary_calculeRevenusDepensesEtNetEnExcluantLesVirements() {
+    void expensesByCategory_deduitUnRemboursementDuMemeMoisEtDeLaMemeCategorie() {
         Compte account = compte(1L, "0");
-        Transaction revenu = transaction(1L, account, LocalDate.of(2026, 1, 5), "2000.00", null);
-        Transaction depense = transaction(2L, account, LocalDate.of(2026, 1, 10), "-500.00", null);
-        Transaction virement = transaction(3L, account, LocalDate.of(2026, 1, 12), "-300.00", null);
-        lierAUnAutreCompte(virement);
-        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(revenu, depense, virement));
+        Categorie courses = categorie(1L, "Courses", null, false);
+        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(
+                transaction(1L, account, LocalDate.of(2026, 1, 5), "-100.00", courses),
+                transaction(2L, account, LocalDate.of(2026, 1, 9), "20.00", courses)));
 
-        ResumePeriodeDTO result = service.summary(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
+        List<DepenseParCategorieDTO> result = service.expensesByCategory(
+                LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null);
 
-        assertThat(result.income()).isEqualTo(new BigDecimal("2000.00"));
-        assertThat(result.expenses()).isEqualTo(new BigDecimal("500.00"));
-        assertThat(result.net()).isEqualTo(new BigDecimal("1500.00"));
+        assertThat(result).hasSize(1);
+        assertThat(result.get(0).total()).isEqualByComparingTo("80.00");
+    }
+
+    @Test
+    void expensesByCategory_remboursementDUnAutreMois_neDeduitRien() {
+        Compte account = compte(1L, "0");
+        Categorie courses = categorie(1L, "Courses", null, false);
+        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(
+                transaction(1L, account, LocalDate.of(2026, 1, 5), "-100.00", courses),
+                transaction(2L, account, LocalDate.of(2026, 2, 9), "20.00", courses)));
+
+        List<DepenseParCategorieDTO> result = service.expensesByCategory(
+                LocalDate.of(2026, 1, 1), LocalDate.of(2026, 2, 28), null);
+
+        assertThat(result.get(0).total()).isEqualByComparingTo("100.00");
+    }
+
+    @Test
+    void cellTransactions_detailDUneDepenseNette_inclutLeRemboursement() {
+        Compte account = compte(1L, "0");
+        Categorie courses = categorie(1L, "Courses", null, false);
+        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(
+                transaction(1L, account, LocalDate.of(2026, 1, 5), "-100.00", courses),
+                transaction(2L, account, LocalDate.of(2026, 1, 9), "20.00", courses)));
+
+        List<TransactionDTO> detail = service.cellTransactions(
+                LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null, "expense", 1L, null, false);
+        List<TransactionDTO> revenus = service.cellTransactions(
+                LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 31), null, "income", 1L, null, false);
+
+        assertThat(detail).extracting(TransactionDTO::getAmount)
+                .usingElementComparator(BigDecimal::compareTo)
+                .containsExactlyInAnyOrder(new BigDecimal("-100.00"), new BigDecimal("20.00"));
+        assertThat(revenus).isEmpty();
     }
 
     // --- cellTransactions : le detail doit correspondre exactement aux agregats ---
@@ -309,8 +340,8 @@ class ServiceRapportTest {
     @Test
     void cellTransactions_filtreParFlowIncomeOuExpense() {
         Compte account = compte(1L, "0");
-        Transaction revenu = transaction(1L, account, LocalDate.of(2026, 1, 5), "2000.00", null);
-        Transaction depense = transaction(2L, account, LocalDate.of(2026, 1, 10), "-500.00", null);
+        Transaction revenu = transaction(1L, account, LocalDate.of(2026, 1, 5), "2000.00", categorie(1L, "Salaire", null, false));
+        Transaction depense = transaction(2L, account, LocalDate.of(2026, 1, 10), "-500.00", categorie(2L, "Loyer", null, false));
         when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of(revenu, depense));
 
         List<TransactionDTO> expenses = service.cellTransactions(
@@ -500,6 +531,18 @@ class ServiceRapportTest {
     }
 
     @Test
+    void periodicExpensesSummary_ignoreUnAjustementDeSolde() {
+        Transaction ajustement = new Transaction();
+        ajustement.setId(1L);
+        ajustement.setDate(LocalDate.now().minusDays(1));
+        ajustement.setAmount(new BigDecimal("-50.00"));
+        ajustement.setBalanceAdjustment(true);
+        when(transactionRepository.findByPeriodicExpenseTrueOrderByDateDescIdDesc()).thenReturn(List.of(ajustement));
+
+        assertThat(service.periodicExpensesSummary().expenses().items()).isEmpty();
+    }
+
+    @Test
     void periodicExpensesSummary_deuxTiersHomonymes_gardeUneLigneChacun() {
         LocalDate today = LocalDate.now();
         Tiers ligneMel = new Tiers();
@@ -525,6 +568,36 @@ class ServiceRapportTest {
 
         assertThat(result.expenses().items()).hasSize(2);
         assertThat(result.expenses().total()).isEqualByComparingTo("30.00");
+    }
+
+    @Test
+    void periodicExpensesSummary_echeanceDivisee_compteSesDeuxParties() {
+        LocalDate today = LocalDate.now();
+        Tiers banque = new Tiers();
+        banque.setId(1L);
+        banque.setName("Banque");
+        Transaction capital = new Transaction();
+        capital.setId(2L);
+        capital.setPayee(banque);
+        capital.setDate(today.minusDays(3));
+        capital.setAmount(new BigDecimal("-700.00"));
+        Transaction interets = new Transaction();
+        interets.setId(1L);
+        interets.setPayee(banque);
+        interets.setDate(today.minusDays(3));
+        interets.setAmount(new BigDecimal("-200.00"));
+        Transaction moisPrecedent = new Transaction();
+        moisPrecedent.setId(3L);
+        moisPrecedent.setPayee(banque);
+        moisPrecedent.setDate(today.minusDays(33));
+        moisPrecedent.setAmount(new BigDecimal("-900.00"));
+        when(transactionRepository.findByPeriodicExpenseTrueOrderByDateDescIdDesc())
+                .thenReturn(List.of(capital, interets, moisPrecedent));
+
+        SynthesePeriodiqueDTO result = service.periodicExpensesSummary();
+
+        assertThat(result.expenses().items()).hasSize(1);
+        assertThat(result.expenses().total()).isEqualByComparingTo("900.00");
     }
 
     @Test
@@ -820,9 +893,127 @@ class ServiceRapportTest {
         assertThat(result.incomeTotal().values().values()).allSatisfy(v -> assertThat(v).isEqualByComparingTo(expectedAverage));
     }
 
+    // --- monthlyCategoryAnalysis : comparaison avec l'annee precedente ---
+
+    /**
+     * Fenetre affichee fevr. 2025 - janv. 2026 (referenceMonth janv. 2026) :
+     * la fenetre precedente est fevr. 2024 - janv. 2025, lue dans la meme
+     * requete que la fenetre affichee, et comparee ligne par ligne.
+     */
+    @Test
+    void monthlyCategoryAnalysis_compareChaqueLigneAuxDouzeMoisPrecedents() {
+        Compte account = compte(1L, "0");
+        Categorie alimentation = categorie(1L, "Alimentation", null, false);
+        Categorie salaire = categorie(3L, "Salaire", null, false);
+        stubTransactionsBetween(
+                transaction(1L, account, LocalDate.of(2024, 3, 10), "-30.00", alimentation),
+                transaction(2L, account, LocalDate.of(2025, 1, 20), "-50.00", alimentation),
+                transaction(3L, account, LocalDate.of(2024, 1, 31), "-999.00", alimentation), // avant la fenetre precedente
+                transaction(4L, account, LocalDate.of(2025, 6, 10), "-40.00", alimentation),
+                transaction(5L, account, LocalDate.of(2025, 1, 5), "2000.00", salaire),
+                transaction(6L, account, LocalDate.of(2025, 7, 5), "2500.00", salaire));
+
+        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
+
+        assertThat(result.previousFrom()).isEqualTo(LocalDate.of(2024, 2, 1));
+        assertThat(result.previousTo()).isEqualTo(LocalDate.of(2025, 1, 31));
+        LigneAnalyseDTO ligneAlimentation = ligneNommee(result.expenses(), "Alimentation");
+        assertThat(ligneAlimentation.total()).isEqualByComparingTo("40.00");
+        assertThat(ligneAlimentation.previousTotal()).isEqualByComparingTo("80.00"); // 30 + 50
+        assertThat(ligneNommee(result.income(), "Salaire").previousTotal()).isEqualByComparingTo("2000.00");
+        assertThat(result.expenseTotal().previousTotal()).isEqualByComparingTo("80.00");
+        assertThat(result.incomeTotal().previousTotal()).isEqualByComparingTo("2000.00");
+
+        // Resume de l'annee precedente, mois par mois : meme mois un an plus tot que le dernier affiche.
+        assertThat(result.previousSummary()).hasSize(12);
+        ResumeMoisAnalyseDTO janvier2025 = result.previousSummary().get(11);
+        assertThat(janvier2025.key()).isEqualTo("2025-01-01");
+        assertThat(janvier2025.income()).isEqualByComparingTo("2000.00");
+        assertThat(janvier2025.expenses()).isEqualByComparingTo("50.00");
+        verify(transactionRepository).findByDateBetween(LocalDate.of(2024, 2, 1), LocalDate.of(2026, 1, 31));
+    }
+
+    /** Categorie active l'an dernier seulement : sa ligne reste affichee (a 0) pour que sa disparition se voie. */
+    @Test
+    void monthlyCategoryAnalysis_categorieActiveSeulementLAnneePrecedente_resteAfficheeAZero() {
+        Compte account = compte(1L, "0");
+        Categorie salle = categorie(7L, "Salle de sport", null, false);
+        stubTransactionsBetween(transaction(1L, account, LocalDate.of(2024, 9, 1), "-35.00", salle));
+
+        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
+
+        LigneAnalyseDTO ligne = ligneNommee(result.expenses(), "Salle de sport");
+        assertThat(ligne.total()).isEqualByComparingTo("0");
+        assertThat(ligne.values().values()).allSatisfy(v -> assertThat(v).isEqualByComparingTo("0"));
+        assertThat(ligne.previousTotal()).isEqualByComparingTo("35.00");
+        assertThat(result.expenseTotal().previousTotal()).isEqualByComparingTo("35.00");
+    }
+
+    /**
+     * Depense annuelle lissee (1/12 par mois sur 12 mois des son paiement)
+     * a cheval sur les deux fenetres : chacune compte ses propres mois.
+     */
+    @Test
+    void monthlyCategoryAnalysis_depenseAnnuelleACheval_estRepartieEntreLesDeuxAnnees() {
+        Compte account = compte(1L, "0");
+        Categorie taxe = categorie(8L, "Taxe foncière", null, true);
+        // Payee en aout 2024 : aout 2024 - janv. 2025 (6 mois) dans la fenetre precedente,
+        // fevr. - juil. 2025 (6 mois) dans la fenetre affichee.
+        Transaction annuelle = transaction(1L, account, LocalDate.of(2024, 8, 15), "-1200.00", taxe);
+        stubTransactionsBetween();
+        when(transactionRepository.findByCategory_AnnualizedTrue()).thenReturn(List.of(annuelle));
+
+        AnalyseMensuelleDTO result = service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1));
+
+        LigneAnalyseDTO ligne = ligneNommee(result.expenses(), "Taxe foncière");
+        assertThat(ligne.total()).isEqualByComparingTo("600.00");
+        assertThat(ligne.previousTotal()).isEqualByComparingTo("600.00");
+    }
+
+    /** Debut de l'historique (comparaison partielle ou impossible) : sur tous les comptes, ou sur le compte filtre. */
+    @Test
+    void monthlyCategoryAnalysis_renvoieLeDebutDeLHistorique_duCompteFiltreSIlYEnAUn() {
+        when(transactionRepository.findByDateBetween(any(), any())).thenReturn(List.of());
+        when(transactionRepository.findEarliestDate()).thenReturn(LocalDate.of(2024, 9, 1));
+        when(transactionRepository.findByAccountIdAndDateBetween(any(), any(), any())).thenReturn(List.of());
+        when(transactionRepository.findEarliestDateByAccountId(5L)).thenReturn(LocalDate.of(2025, 3, 1));
+
+        assertThat(service.monthlyCategoryAnalysis(null, LocalDate.of(2026, 1, 1)).historyStart())
+                .isEqualTo(LocalDate.of(2024, 9, 1));
+        assertThat(service.monthlyCategoryAnalysis(5L, LocalDate.of(2026, 1, 1)).historyStart())
+                .isEqualTo(LocalDate.of(2025, 3, 1));
+    }
+
     /** Ligne du tableau d'analyse portant ce nom de categorie (echoue si absente). */
     private static LigneAnalyseDTO ligneNommee(List<LigneAnalyseDTO> rows, String name) {
         return rows.stream().filter(r -> name.equals(r.name())).findFirst().orElseThrow();
+    }
+
+    // --- validation des parametres (400 plutot qu'un resultat vide trompeur) ---
+
+    @Test
+    void expensesByCategory_refuseUnePeriodeInversee() {
+        assertThatThrownBy(() -> service.expensesByCategory(LocalDate.of(2026, 12, 1), LocalDate.of(2026, 1, 1), null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Période invalide");
+        verify(transactionRepository, never()).findByDateBetween(any(), any());
+    }
+
+    @Test
+    void cellTransactions_refuseUnePeriodeInversee() {
+        assertThatThrownBy(() -> service.cellTransactions(LocalDate.of(2026, 12, 1), LocalDate.of(2026, 1, 1),
+                null, "expense", null, null, false))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Période invalide");
+    }
+
+    @Test
+    void monthlySavings_refuseUnNombreDeMoisHorsBornes() {
+        assertThatThrownBy(() -> service.monthlySavings(0, null, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.monthlySavings(-3, null, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.monthlySavings(ServiceRapport.MAX_SAVINGS_MONTHS + 1, null, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("entre 1 et " + ServiceRapport.MAX_SAVINGS_MONTHS);
     }
 
     /** Resume (revenus/depenses/net) du mois de cle monthKey (echoue si absent). */

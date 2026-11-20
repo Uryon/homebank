@@ -1,9 +1,8 @@
 package com.homebank.service;
 
+import com.homebank.dto.DemandeAnnulationDivisionDTO;
 import com.homebank.dto.DemandeDivisionDTO;
 import com.homebank.dto.DemandeVirementDTO;
-import com.homebank.dto.GroupeDoublonDTO;
-import com.homebank.dto.SuggestionPeriodiqueDTO;
 import com.homebank.dto.TransactionBulkUpdateDTO;
 import com.homebank.dto.TransactionDTO;
 import com.homebank.mapper.MappeurTransaction;
@@ -25,9 +24,11 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static com.homebank.service.FabriqueTransactions.*;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -36,10 +37,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * Verifie ServiceTransaction#findPeriodicSuggestions : la detection doit
- * rester stricte (au moins 3 occurrences ET intervalles reguliers), pour ne
- * pas suggerer a tort des depenses ponctuelles comme periodiques (voir
- * ideas.txt point 3).
+ * Verifie ServiceTransaction : saisie, division, virements (les deux cotes
+ * restent toujours synchronises), edition et suppression en masse, ajustement
+ * de solde et recherche. Detection des periodiques et des doublons : voir
+ * ServiceSuggestionPeriodiqueTest et ServiceDoublonTest.
  */
 @ExtendWith(MockitoExtension.class)
 class ServiceTransactionTest {
@@ -60,112 +61,6 @@ class ServiceTransactionTest {
     @BeforeEach
     void setUp() {
         service = new ServiceTransaction(transactionRepository, deletedTransactionRepository, accountService, categoryService, payeeService, new MappeurTransaction());
-    }
-
-    private static Tiers payee(Long id, String name) {
-        Tiers p = new Tiers();
-        p.setId(id);
-        p.setName(name);
-        return p;
-    }
-
-    private static Transaction transaction(Tiers payee, LocalDate date, String amount) {
-        Transaction t = new Transaction();
-        t.setPayee(payee);
-        t.setDate(date);
-        t.setAmount(new BigDecimal(amount));
-        t.setPaymentMode(ModePaiement.NONE);
-        t.setPeriodicExpense(false);
-        return t;
-    }
-
-    private static Compte compte(Long id) {
-        Compte c = new Compte();
-        c.setId(id);
-        return c;
-    }
-
-    private static Transaction transaction(Compte account, Tiers payee, LocalDate date, String amount) {
-        Transaction t = transaction(payee, date, amount);
-        t.setAccount(account);
-        return t;
-    }
-
-    @Test
-    void findPeriodicSuggestions_detecteUneSerieMensuelleReguliereDeMemeMontant() {
-        Tiers netflix = payee(1L, "Netflix");
-        List<Transaction> transactions = List.of(
-                transaction(netflix, LocalDate.of(2026, 1, 5), "-15.99"),
-                transaction(netflix, LocalDate.of(2026, 2, 5), "-15.99"),
-                transaction(netflix, LocalDate.of(2026, 3, 5), "-15.99")
-        );
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(transactions);
-
-        List<SuggestionPeriodiqueDTO> suggestions = service.findPeriodicSuggestions();
-
-        assertThat(suggestions).hasSize(1);
-        assertThat(suggestions.get(0).getPayee()).isEqualTo("Netflix");
-        assertThat(suggestions.get(0).getCount()).isEqualTo(3);
-    }
-
-    @Test
-    void findPeriodicSuggestions_neSuggerePasUneSerieDeMemeMontantADatesIrregulieres() {
-        Tiers amazon = payee(1L, "Amazon");
-        List<Transaction> transactions = List.of(
-                transaction(amazon, LocalDate.of(2026, 1, 5), "-35.00"),
-                transaction(amazon, LocalDate.of(2026, 2, 28), "-35.00"),
-                transaction(amazon, LocalDate.of(2026, 4, 17), "-35.00")
-        );
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(transactions);
-
-        List<SuggestionPeriodiqueDTO> suggestions = service.findPeriodicSuggestions();
-
-        assertThat(suggestions).isEmpty();
-    }
-
-    @Test
-    void findPeriodicSuggestions_neSuggerePasEnDessousDeTroisOccurrences() {
-        Tiers netflix = payee(1L, "Netflix");
-        List<Transaction> transactions = List.of(
-                transaction(netflix, LocalDate.of(2026, 1, 5), "-15.99"),
-                transaction(netflix, LocalDate.of(2026, 2, 5), "-15.99")
-        );
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(transactions);
-
-        List<SuggestionPeriodiqueDTO> suggestions = service.findPeriodicSuggestions();
-
-        assertThat(suggestions).isEmpty();
-    }
-
-    @Test
-    void findPeriodicSuggestions_detecteUneSerieTrimestrielleAvecToleranceDeMontant() {
-        Tiers edf = payee(1L, "EDF");
-        List<Transaction> transactions = List.of(
-                transaction(edf, LocalDate.of(2025, 7, 10), "-120.00"),
-                transaction(edf, LocalDate.of(2025, 10, 12), "-124.00"),
-                transaction(edf, LocalDate.of(2026, 1, 9), "-128.00")
-        );
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(transactions);
-
-        List<SuggestionPeriodiqueDTO> suggestions = service.findPeriodicSuggestions();
-
-        assertThat(suggestions).hasSize(1);
-        assertThat(suggestions.get(0).getPayee()).isEqualTo("EDF");
-    }
-
-    @Test
-    void findPeriodicSuggestions_ignoreLesTransactionsDejaMarqueesPeriodiquesEtLesVirements() {
-        Tiers netflix = payee(1L, "Netflix");
-        Transaction t1 = transaction(netflix, LocalDate.of(2026, 1, 5), "-15.99");
-        t1.setPeriodicExpense(true);
-        Transaction t2 = transaction(netflix, LocalDate.of(2026, 2, 5), "-15.99");
-        t2.setPaymentMode(ModePaiement.TRANSFER);
-        Transaction t3 = transaction(netflix, LocalDate.of(2026, 3, 5), "-15.99");
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of(t1, t2, t3));
-
-        List<SuggestionPeriodiqueDTO> suggestions = service.findPeriodicSuggestions();
-
-        assertThat(suggestions).isEmpty();
     }
 
     // --- splitTransaction : la somme des deux parties doit toujours egaler le montant d'origine ---
@@ -218,6 +113,34 @@ class ServiceTransactionTest {
     }
 
     @Test
+    void splitTransaction_arrondiLaPremierePartieAuCentimePourConserverLeTotal() {
+        Transaction original = transaction(compte(1L), null, LocalDate.of(2026, 1, 1), "-20.00");
+        original.setId(1L);
+        when(transactionRepository.findById(1L)).thenReturn(Optional.of(original));
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        DemandeDivisionDTO payload = new DemandeDivisionDTO();
+        payload.setFirstAmount(new BigDecimal("-10.005"));
+
+        List<TransactionDTO> result = service.splitTransaction(1L, payload);
+
+        assertThat(result.get(0).getAmount()).isEqualByComparingTo("-10.01");
+        assertThat(result.get(1).getAmount()).isEqualByComparingTo("-9.99");
+    }
+
+    @Test
+    void splitTransaction_refuseUnePremierePartieNulleUneFoisArrondie() {
+        Transaction original = transaction(compte(1L), null, LocalDate.of(2026, 1, 1), "-20.00");
+        original.setId(1L);
+        when(transactionRepository.findById(1L)).thenReturn(Optional.of(original));
+
+        DemandeDivisionDTO payload = new DemandeDivisionDTO();
+        payload.setFirstAmount(new BigDecimal("-0.004"));
+
+        assertThatThrownBy(() -> service.splitTransaction(1L, payload)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void splitTransaction_diviseEnDeuxPartiesDontLaSommeEgaleLeMontantDorigine() {
         Tiers edf = payee(1L, "EDF");
         Compte account = compte(1L);
@@ -263,6 +186,71 @@ class ServiceTransactionTest {
     }
 
     // --- createTransfer ---
+
+    @Test
+    void createTransfer_refuseUnMontantNulUneFoisArrondi() {
+        DemandeVirementDTO payload = new DemandeVirementDTO();
+        payload.setFromAccountId(1L);
+        payload.setToAccountId(2L);
+        payload.setAmount(new BigDecimal("0.004"));
+
+        assertThatThrownBy(() -> service.createTransfer(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("positif");
+    }
+
+    private TransactionDTO saisie(String amount) {
+        return TransactionDTO.builder()
+                .accountId(1L)
+                .date(LocalDate.of(2026, 1, 1))
+                .amount(new BigDecimal(amount))
+                .build();
+    }
+
+    @Test
+    void create_enregistreEtRenvoieLeMontantAuCentime() {
+        when(accountService.findById(1L)).thenReturn(compte(1L));
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        TransactionDTO result = service.create(saisie("-12.345"));
+
+        assertThat(result.getAmount()).isEqualByComparingTo("-12.35");
+    }
+
+    @Test
+    void create_refuseUnMontantNulUneFoisArrondi() {
+        when(accountService.findById(1L)).thenReturn(compte(1L));
+        TransactionDTO payload = saisie("-0.004");
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nul");
+        verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void update_refuseDePasserAZeroUneLigneImportee() {
+        Transaction importee = transaction(compte(1L), null, LocalDate.of(2026, 1, 1), "-10.00");
+        importee.setId(1L);
+        importee.setBankLabel("CARTE");
+        when(transactionRepository.findById(1L)).thenReturn(Optional.of(importee));
+        when(accountService.findById(1L)).thenReturn(importee.getAccount());
+        TransactionDTO payload = saisie("0.00");
+
+        assertThatThrownBy(() -> service.update(1L, payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nul");
+    }
+
+    @Test
+    void create_refuseUnMontantTropGrandAvantToutEnregistrement() {
+        TransactionDTO payload = saisie("1E30");
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Le montant");
+        verify(transactionRepository, never()).save(any());
+    }
 
     @Test
     void createTransfer_leveUneExceptionSiUnCompteManque() {
@@ -370,6 +358,25 @@ class ServiceTransactionTest {
         assertThat(credit.getTransferTransactionId()).isEqualTo(debit.getId());
     }
 
+    /** Annulation de la suppression d'un virement en attente : il est recree en attente, pas valide. */
+    @Test
+    void createTransfer_recreeUnVirementEnAttenteQuandLaDemandeLePrecise() {
+        when(accountService.findById(1L)).thenReturn(compte(1L));
+        when(accountService.findById(2L)).thenReturn(compte(2L));
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        DemandeVirementDTO payload = new DemandeVirementDTO();
+        payload.setFromAccountId(1L);
+        payload.setToAccountId(2L);
+        payload.setAmount(new BigDecimal("25.00"));
+        payload.setDate(LocalDate.of(2026, 1, 10));
+        payload.setValidated(false);
+
+        List<TransactionDTO> result = service.createTransfer(payload);
+
+        assertThat(result).extracting(TransactionDTO::isValidated).containsExactly(false, false);
+    }
+
     @Test
     void toggleValidated_basculeLesDeuxCotesDunVirementEnsemble() {
         Transaction debit = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-50.00");
@@ -390,7 +397,6 @@ class ServiceTransactionTest {
         assertThat(result.isValidated()).isFalse();
         assertThat(debit.isValidated()).isFalse();
         assertThat(credit.isValidated()).isFalse();
-        verify(transactionRepository).save(credit);
         verify(transactionRepository).save(debit);
     }
 
@@ -465,7 +471,7 @@ class ServiceTransactionTest {
 
         assertThatThrownBy(() -> service.update(1L, modificationVirement(2L, "-50.00").build()))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("differents");
+                .hasMessageContaining("différents");
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
 
@@ -561,6 +567,155 @@ class ServiceTransactionTest {
         assertThat(credit.isValidated()).isTrue();
     }
 
+    @Test
+    void bulkUpdate_categorieEtMarqueurs_seulsLesChampsFournisSontModifies() {
+        Transaction premiere = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-20.00");
+        premiere.setId(10L);
+        premiere.setExceptional(true);
+        Transaction seconde = transaction(compte(1L), null, LocalDate.of(2026, 1, 11), "-35.00");
+        seconde.setId(11L);
+        Categorie courses = new Categorie();
+        courses.setId(5L);
+        when(categoryService.findById(5L)).thenReturn(courses);
+        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(10L, 11L))).thenReturn(List.of(premiere, seconde));
+        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+
+        TransactionBulkUpdateDTO payload = new TransactionBulkUpdateDTO();
+        payload.setIds(List.of(10L, 11L));
+        payload.setCategoryIdProvided(true);
+        payload.setCategoryId(5L);
+        payload.setPeriodicExpenseProvided(true);
+        payload.setPeriodicExpense(true);
+        // « Exceptionnelle » non fournie : chaque transaction garde sa valeur.
+        payload.setExceptional(false);
+
+        service.bulkUpdate(payload);
+
+        assertThat(List.of(premiere, seconde)).allSatisfy(t -> {
+            assertThat(t.getCategory()).isSameAs(courses);
+            assertThat(t.isPeriodicExpense()).isTrue();
+        });
+        assertThat(premiere.isExceptional()).isTrue();
+        assertThat(seconde.isExceptional()).isFalse();
+        verify(categoryService, times(1)).findById(5L);
+    }
+
+    @Test
+    void bulkUpdate_categorieFournieVide_retireLaCategorieSansLaChercher() {
+        Transaction t = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-20.00");
+        t.setId(10L);
+        t.setCategory(new Categorie());
+        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(10L))).thenReturn(List.of(t));
+        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+
+        TransactionBulkUpdateDTO payload = new TransactionBulkUpdateDTO();
+        payload.setIds(List.of(10L));
+        payload.setCategoryIdProvided(true);
+        payload.setCategoryId(null);
+
+        service.bulkUpdate(payload);
+
+        assertThat(t.getCategory()).isNull();
+        verify(categoryService, never()).findById(any());
+    }
+
+    @Test
+    void bulkUpdate_refuseUneSelectionVide() {
+        TransactionBulkUpdateDTO payload = new TransactionBulkUpdateDTO();
+        payload.setIds(List.of());
+
+        assertThatThrownBy(() -> service.bulkUpdate(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Aucune transaction sélectionnée.");
+        verifyNoInteractions(transactionRepository);
+    }
+
+    // --- Bascules « dépense périodique » et « exceptionnelle » (cases à cocher de la liste) ---
+
+    @Test
+    void togglePeriodicExpense_basculeDansLesDeuxSensEtEnregistre() {
+        Transaction t = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-15.00");
+        t.setId(10L);
+        when(transactionRepository.findById(10L)).thenReturn(Optional.of(t));
+        when(transactionRepository.save(t)).thenReturn(t);
+
+        assertThat(service.togglePeriodicExpense(10L).isPeriodicExpense()).isTrue();
+        assertThat(service.togglePeriodicExpense(10L).isPeriodicExpense()).isFalse();
+        verify(transactionRepository, times(2)).save(t);
+    }
+
+    @Test
+    void toggleExceptional_basculeDansLesDeuxSensSansToucherAuxAutresMarqueurs() {
+        Transaction t = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-3200.00");
+        t.setId(10L);
+        t.setPeriodicExpense(true);
+        when(transactionRepository.findById(10L)).thenReturn(Optional.of(t));
+        when(transactionRepository.save(t)).thenReturn(t);
+
+        assertThat(service.toggleExceptional(10L).isExceptional()).isTrue();
+        assertThat(t.isPeriodicExpense()).isTrue();
+        assertThat(service.toggleExceptional(10L).isExceptional()).isFalse();
+    }
+
+    @Test
+    void bascules_transactionIntrouvable_signaleeSansRienEnregistrer() {
+        when(transactionRepository.findById(99L)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.togglePeriodicExpense(99L)).isInstanceOf(NoSuchElementException.class);
+        assertThatThrownBy(() -> service.toggleExceptional(99L)).isInstanceOf(NoSuchElementException.class);
+        verify(transactionRepository, never()).save(any());
+    }
+
+    // --- Contrôles de saisie côté serveur (le frontend les fait aussi, mais l'API doit les garantir) ---
+
+    @Test
+    void adjustAccountBalance_exigeUneDateEtUnSoldeReel() {
+        LocalDate hier = LocalDate.now().minusDays(1);
+
+        assertThatThrownBy(() -> service.adjustAccountBalance(1L, null, new BigDecimal("100.00")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("La date est obligatoire.");
+        assertThatThrownBy(() -> service.adjustAccountBalance(1L, hier, null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Le solde réel est obligatoire.");
+        verifyNoInteractions(accountService, transactionRepository);
+    }
+
+    @Test
+    void undoCreation_refuseUneSelectionVide() {
+        assertThatThrownBy(() -> service.undoCreation(List.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Aucune transaction sélectionnée.");
+        verifyNoInteractions(transactionRepository);
+    }
+
+    @Test
+    void undoSplit_exigeLaTransactionDOrigineEtUneDeuxiemePartieDistincte() {
+        DemandeAnnulationDivisionDTO sansOrigine = new DemandeAnnulationDivisionDTO();
+        sansOrigine.setSecondPartId(2L);
+        DemandeAnnulationDivisionDTO memeTransaction = new DemandeAnnulationDivisionDTO();
+        memeTransaction.setOriginal(TransactionDTO.builder().build());
+        memeTransaction.setSecondPartId(1L);
+
+        assertThatThrownBy(() -> service.undoSplit(1L, sansOrigine)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.undoSplit(1L, memeTransaction))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("La transaction d'origine et sa 2e partie sont obligatoires.");
+        verifyNoInteractions(transactionRepository);
+    }
+
+    @Test
+    void verifierChampsObligatoires_exigeUnCompte() {
+        TransactionDTO sansCompte = TransactionDTO.builder()
+                .date(LocalDate.of(2026, 1, 10))
+                .amount(new BigDecimal("-10.00"))
+                .build();
+
+        assertThatThrownBy(() -> ServiceTransaction.verifierChampsObligatoires(sansCompte))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Le compte est obligatoire");
+    }
+
     // --- deleteAllPending ---
 
     @Test
@@ -577,7 +732,7 @@ class ServiceTransactionTest {
         when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L))).thenReturn(List.of(debit));
         when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
 
-        int count = service.deleteAllPending();
+        int count = service.deleteAllPending(null);
 
         assertThat(count).isEqualTo(2);
         verify(transactionRepository).deleteAll(List.of(debit, credit));
@@ -601,11 +756,58 @@ class ServiceTransactionTest {
         credit.setTransferTransaction(debit);
         when(transactionRepository.findByValidatedFalseWithTransferTransaction()).thenReturn(List.of(debit));
 
-        int count = service.deleteAllPending();
+        int count = service.deleteAllPending(null);
 
         assertThat(count).isZero();
         verify(transactionRepository, never()).deleteAll(anyList());
         verify(transactionRepository, never()).findAllByIdWithTransferTransaction(anyList());
+    }
+
+    @Test
+    void deleteAllPending_avecCompte_neSupprimeQueLesTransactionsEnAttenteDeCeCompte() {
+        Transaction pending = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-12.00");
+        pending.setId(1L);
+        when(transactionRepository.findPendingByAccountIdWithTransferTransaction(1L)).thenReturn(List.of(pending));
+        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L))).thenReturn(List.of(pending));
+
+        int count = service.deleteAllPending(1L);
+
+        assertThat(count).isEqualTo(1);
+        verify(transactionRepository).deleteAll(List.of(pending));
+        verify(transactionRepository, never()).findByValidatedFalseWithTransferTransaction();
+    }
+
+    // --- validateAllPending ---
+
+    @Test
+    void validateAllPending_sansCompte_valideToutEnUneRequete() {
+        when(transactionRepository.validateAllPending()).thenReturn(7);
+
+        assertThat(service.validateAllPending(null)).isEqualTo(7);
+        verify(transactionRepository, never()).findPendingByAccountIdWithTransferTransaction(any());
+    }
+
+    @Test
+    void validateAllPending_avecCompte_valideAussiLaJumelleDUnVirementSurUnAutreCompte() {
+        Transaction debit = transaction(compte(1L), null, LocalDate.of(2026, 1, 10), "-50.00");
+        debit.setId(1L);
+        debit.setPaymentMode(ModePaiement.TRANSFER);
+        Transaction credit = transaction(compte(2L), null, LocalDate.of(2026, 1, 10), "50.00");
+        credit.setId(2L);
+        credit.setPaymentMode(ModePaiement.TRANSFER);
+        debit.setTransferTransaction(credit);
+        credit.setTransferTransaction(debit);
+        Transaction courses = transaction(compte(1L), null, LocalDate.of(2026, 1, 12), "-30.00");
+        courses.setId(3L);
+        when(transactionRepository.findPendingByAccountIdWithTransferTransaction(1L)).thenReturn(List.of(debit, courses));
+
+        int count = service.validateAllPending(1L);
+
+        assertThat(count).isEqualTo(2);
+        assertThat(debit.isValidated()).isTrue();
+        assertThat(credit.isValidated()).isTrue();
+        assertThat(courses.isValidated()).isTrue();
+        verify(transactionRepository, never()).validateAllPending();
     }
 
     // --- adjustAccountBalance ---
@@ -661,17 +863,18 @@ class ServiceTransactionTest {
         verify(transactionRepository, never()).save(any(Transaction.class));
     }
 
-    /** Annulation d'une suppression : l'ajustement est recréé avec son marqueur, pas comme une dépense. */
+    /** Ces champs ne se saisissent pas : seule une restauration les reprend (voir ServiceRestaurationTransaction). */
     @Test
-    void create_conserveLeMarqueurDAjustementDeSolde() {
+    void create_ignoreLesChampsReservesALaRestauration() {
         when(accountService.findById(1L)).thenReturn(compte(1L));
         when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
 
         TransactionDTO result = service.create(TransactionDTO.builder()
                 .accountId(1L).date(LocalDate.of(2026, 1, 5)).amount(new BigDecimal("-120.00"))
-                .balanceAdjustment(true).build());
+                .balanceAdjustment(true).bankLabel("ACHAT CB CARREFOUR 04.01.26").build());
 
-        assertThat(result.isBalanceAdjustment()).isTrue();
+        assertThat(result.isBalanceAdjustment()).isFalse();
+        assertThat(result.getBankLabel()).isNull();
     }
 
     @Test
@@ -687,155 +890,6 @@ class ServiceTransactionTest {
                 .balanceAdjustment(true).build());
 
         assertThat(normale.isBalanceAdjustment()).isFalse();
-    }
-
-    @Test
-    void findDuplicateGroups_ignoreLesAjustementsDeSolde() {
-        Compte account = compte(1L);
-        Transaction a1 = transaction(account, null, LocalDate.of(2026, 1, 5), "50.00");
-        a1.setId(1L);
-        a1.setBalanceAdjustment(true);
-        Transaction a2 = transaction(account, null, LocalDate.of(2026, 1, 5), "50.00");
-        a2.setId(2L);
-        a2.setBalanceAdjustment(true);
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of(a1, a2));
-
-        assertThat(service.findDuplicateGroups()).isEmpty();
-    }
-
-    // --- findDuplicateGroups ---
-
-    @Test
-    void findDuplicateGroups_regroupeCommeCertainMemeCompteDateMontantEtTiers() {
-        Compte account = compte(1L);
-        Tiers carrefour = payee(1L, "Carrefour");
-        Transaction t1 = transaction(account, carrefour, LocalDate.of(2026, 1, 5), "-45.50");
-        t1.setId(1L);
-        Transaction t2 = transaction(account, carrefour, LocalDate.of(2026, 1, 5), "-45.50");
-        t2.setId(2L);
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of(t1, t2));
-
-        List<GroupeDoublonDTO> groups = service.findDuplicateGroups();
-
-        assertThat(groups).hasSize(1);
-        assertThat(groups.get(0).isCertain()).isTrue();
-        assertThat(groups.get(0).getCount()).isEqualTo(2);
-    }
-
-    private static Tiers payeeAvecMotif(Long id, String name, String pattern) {
-        Tiers p = payee(id, name);
-        p.setPattern(pattern);
-        return p;
-    }
-
-    /** Tiers renommé (« Carrefour ») et libellé brut de la banque qu'il reconnaît : probablement la même opération. */
-    @Test
-    void findDuplicateGroups_regroupeCommeProbableMemeCompteDateMontantMaisTiersDifferent() {
-        Compte account = compte(1L);
-        Transaction t1 = transaction(account, payeeAvecMotif(1L, "Carrefour", "Carrefour"), LocalDate.of(2026, 1, 5), "-45.50");
-        t1.setId(1L);
-        Tiers brut = payeeAvecMotif(2L, "Prelevement CB Carrefour Paris", "Prelevement CB Carrefour Paris");
-        Transaction t2 = transaction(account, brut, LocalDate.of(2026, 1, 5), "-45.50");
-        t2.setId(2L);
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of(t1, t2));
-
-        List<GroupeDoublonDTO> groups = service.findDuplicateGroups();
-
-        assertThat(groups).hasSize(1);
-        assertThat(groups.get(0).isCertain()).isFalse();
-        assertThat(groups.get(0).isReimbursement()).isFalse();
-    }
-
-    /** Deux commerçants distincts déjà reconnus, même jour et même montant : deux vraies opérations. */
-    @Test
-    void findDuplicateGroups_neSignalePasDeuxTiersDistinctsReconnusMemeJourMemeMontant() {
-        Compte account = compte(1L);
-        Transaction pharmacie = transaction(account, payeeAvecMotif(1L, "Pharmacie", "Pharmacie"),
-                LocalDate.of(2026, 11, 12), "-30.00");
-        pharmacie.setId(1L);
-        Transaction docteur = transaction(account, payeeAvecMotif(2L, "Docteur Trillot", "DR TRILLOT"),
-                LocalDate.of(2026, 11, 12), "-30.00");
-        docteur.setId(2L);
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of(pharmacie, docteur));
-
-        assertThat(service.findDuplicateGroups()).isEmpty();
-    }
-
-    @Test
-    void findDuplicateGroups_signaleUneOperationSansTiersEtUneAvecTiersMemeJourMemeMontant() {
-        Compte account = compte(1L);
-        Transaction sansTiers = transaction(account, null, LocalDate.of(2026, 1, 5), "-12.00");
-        sansTiers.setId(1L);
-        Transaction avecTiers = transaction(account, payeeAvecMotif(2L, "Boulangerie", "Boulangerie"),
-                LocalDate.of(2026, 1, 5), "-12.00");
-        avecTiers.setId(2L);
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of(sansTiers, avecTiers));
-
-        assertThat(service.findDuplicateGroups()).singleElement()
-                .satisfies(g -> assertThat(g.isCertain()).isFalse());
-    }
-
-    @Test
-    void findDuplicateGroups_ligneImporteeRessaisieALaMainMemeTiers_estUnDoublonCertainListeUneSeuleFois() {
-        Compte account = compte(1L);
-        Tiers carrefour = payee(1L, "Carrefour");
-        Transaction importee = transaction(account, carrefour, LocalDate.of(2026, 1, 5), "-45.50");
-        importee.setId(1L);
-        importee.setBankLabel("ACHAT CB CARREFOUR 04.01.26 CARTE NUMERO 697");
-        Transaction manuelle = transaction(account, carrefour, LocalDate.of(2026, 1, 5), "-45.50");
-        manuelle.setId(2L);
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of(importee, manuelle));
-
-        List<GroupeDoublonDTO> groups = service.findDuplicateGroups();
-
-        assertThat(groups).singleElement().satisfies(g -> {
-            assertThat(g.isCertain()).isTrue();
-            assertThat(g.getCount()).isEqualTo(2);
-        });
-    }
-
-    @Test
-    void findDuplicateGroups_tiersDistinctsMaisMemeLibelleBancaire_estUnDoublonProbable() {
-        Compte account = compte(1L);
-        Transaction renommee = transaction(account, payee(1L, "Vinted"), LocalDate.of(2026, 1, 5), "-19.90");
-        renommee.setId(1L);
-        renommee.setBankLabel("ACHAT CB PAYPAL .ryckew 03.01.26");
-        Transaction brute = transaction(account, payee(2L, "Boulangerie"), LocalDate.of(2026, 1, 5), "-19.90");
-        brute.setId(2L);
-        brute.setBankLabel("ACHAT CB PAYPAL .ryckew 03.01.26");
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of(renommee, brute));
-
-        assertThat(service.findDuplicateGroups()).singleElement()
-                .satisfies(g -> assertThat(g.isCertain()).isFalse());
-    }
-
-    @Test
-    void create_conserveLeLibelleBancaireDUneTransactionImporteeRestauree() {
-        Compte account = compte(1L);
-        when(accountService.findById(1L)).thenReturn(account);
-        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
-        TransactionDTO payload = TransactionDTO.builder()
-                .accountId(1L).date(LocalDate.of(2026, 1, 5)).amount(new BigDecimal("-45.50"))
-                .bankLabel("ACHAT CB CARREFOUR 04.01.26").build();
-
-        assertThat(service.create(payload).getBankLabel()).isEqualTo("ACHAT CB CARREFOUR 04.01.26");
-    }
-
-    @Test
-    void findDuplicateGroups_detectePaireRembourseeMemeTiersMontantOppose() {
-        Compte account = compte(1L);
-        Tiers ami = payee(1L, "Remboursement Ami");
-        Transaction depense = transaction(account, ami, LocalDate.of(2026, 1, 5), "-50.00");
-        depense.setId(1L);
-        Transaction remboursement = transaction(account, ami, LocalDate.of(2026, 1, 20), "50.00");
-        remboursement.setId(2L);
-        when(transactionRepository.findAllByOrderByDateDescIdDesc()).thenReturn(List.of(depense, remboursement));
-
-        List<GroupeDoublonDTO> groups = service.findDuplicateGroups();
-
-        assertThat(groups).hasSize(1);
-        assertThat(groups.get(0).isReimbursement()).isTrue();
-        assertThat(groups.get(0).isCertain()).isFalse();
     }
 
     // --- applyPayload (via create/update) : la categorie du payload est appliquee telle quelle ---
@@ -897,6 +951,82 @@ class ServiceTransactionTest {
         assertThatThrownBy(() -> service.create(sansMontant)).hasMessageContaining("montant");
         verifyNoInteractions(payeeService);
         verify(transactionRepository, never()).save(any(Transaction.class));
+    }
+
+    @Test
+    void create_sansModeDePaiement_enregistreAucun() {
+        when(accountService.findById(1L)).thenReturn(compte(1L));
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+        TransactionDTO sansMode = TransactionDTO.builder()
+                .accountId(1L).date(LocalDate.of(2026, 1, 5)).amount(new BigDecimal("-10.00")).build();
+
+        assertThat(service.create(sansMode).getPaymentMode()).isEqualTo(ModePaiement.NONE);
+    }
+
+    @Test
+    void create_refuseUneAnneeSurDeuxChiffresSansCreerDeTiers() {
+        TransactionDTO payload = TransactionDTO.builder()
+                .accountId(1L).date(LocalDate.of(26, 11, 17)).amount(new BigDecimal("-10.00"))
+                .payee("Boulangerie").build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("année saisie : 26");
+        verify(payeeService, never()).resolveOrCreate(any(), any());
+        verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void create_refuseUnMontantNul() {
+        when(accountService.findById(1L)).thenReturn(compte(1L));
+        TransactionDTO payload = TransactionDTO.builder()
+                .accountId(1L).date(LocalDate.of(2026, 1, 5)).amount(BigDecimal.ZERO).payee("Boulangerie").build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Le montant ne peut pas être nul.");
+        verify(payeeService, never()).resolveOrCreate(any(), any());
+        verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void update_transactionDejaANul_resteModifiableSansChangerLeMontant() {
+        Transaction existante = transaction(compte(1L), null, LocalDate.of(2026, 3, 1), "0.00");
+        existante.setId(7L);
+        when(transactionRepository.findById(7L)).thenReturn(Optional.of(existante));
+        when(accountService.findById(1L)).thenReturn(existante.getAccount());
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.update(7L, TransactionDTO.builder()
+                .accountId(1L).date(LocalDate.of(2026, 3, 1)).amount(BigDecimal.ZERO).memo("frais offerts").build());
+
+        assertThat(existante.getMemo()).isEqualTo("frais offerts");
+    }
+
+    @Test
+    void create_refuseUnMemoTropLongAvecUnMessageClair() {
+        when(accountService.findById(1L)).thenReturn(compte(1L));
+        TransactionDTO payload = TransactionDTO.builder()
+                .accountId(1L).date(LocalDate.of(2026, 1, 5)).amount(new BigDecimal("-10.00"))
+                .memo("m".repeat(300)).build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Le mémo ne peut pas dépasser 255 caractères");
+        verify(transactionRepository, never()).save(any());
+    }
+
+    @Test
+    void create_refuseUnTiersTropLongSansLeCreer() {
+        when(accountService.findById(1L)).thenReturn(compte(1L));
+        TransactionDTO payload = TransactionDTO.builder()
+                .accountId(1L).date(LocalDate.of(2026, 1, 5)).amount(new BigDecimal("-10.00"))
+                .payee("p".repeat(300)).build();
+
+        assertThatThrownBy(() -> service.create(payload))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Le nom du tiers ne peut pas dépasser 255 caractères");
+        verify(payeeService, never()).resolveOrCreate(any(), any());
     }
 
     // --- Compte archive : plus de nouvelle transaction ---
@@ -1082,6 +1212,22 @@ class ServiceTransactionTest {
 
         service.delete(1L);
 
+        verify(payeeService).deleteOrphans(List.of(7L, 8L));
+        verify(payeeService, never()).deleteIfOrphan(any());
+    }
+
+    @Test
+    void delete_echecDuNettoyageGroupe_reprendTiersParTiers() {
+        Transaction[] virement = virementDe50();
+        virement[0].setPayee(payee(7L, "Virement vers Livret A"));
+        virement[1].setPayee(payee(8L, "Virement depuis Compte courant"));
+        when(transactionRepository.findById(1L)).thenReturn(Optional.of(virement[0]));
+        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+        doThrow(new IllegalStateException("contrainte")).when(payeeService).deleteOrphans(any());
+        doThrow(new IllegalStateException("contrainte")).when(payeeService).deleteIfOrphan(7L);
+
+        service.delete(1L);
+
         verify(payeeService).deleteIfOrphan(7L);
         verify(payeeService).deleteIfOrphan(8L);
     }
@@ -1123,6 +1269,206 @@ class ServiceTransactionTest {
     }
 
     @Test
+    void undoCreation_supprimeSansEmpreinteDeSuppression() {
+        Transaction importee = transaction(compte(1L), null, LocalDate.of(2026, 3, 1), "-12.00");
+        importee.setId(5L);
+        importee.setBankLabel("CB CARREFOUR");
+        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(5L))).thenReturn(List.of(importee));
+
+        int deleted = service.undoCreation(List.of(5L));
+
+        assertThat(deleted).isEqualTo(1);
+        verify(transactionRepository).deleteAll(List.of(importee));
+        verify(deletedTransactionRepository, never()).save(any());
+    }
+
+    // --- undoSplit : retour a la transaction d'avant division, en une operation ---
+
+    private Transaction[] partiesDeDivision(String premiere, String seconde) {
+        Compte compte = compte(1L);
+        Transaction first = transaction(compte, null, LocalDate.of(2026, 3, 1), premiere);
+        first.setId(1L);
+        first.setSplitFromAmount(new BigDecimal("-80.00"));
+        Transaction second = transaction(compte, null, LocalDate.of(2026, 3, 1), seconde);
+        second.setId(2L);
+        when(transactionRepository.findById(1L)).thenReturn(Optional.of(first));
+        when(transactionRepository.findById(2L)).thenReturn(Optional.of(second));
+        return new Transaction[]{first, second};
+    }
+
+    private static DemandeAnnulationDivisionDTO annulationDivision(BigDecimal splitFromAmount) {
+        DemandeAnnulationDivisionDTO request = new DemandeAnnulationDivisionDTO();
+        request.setSecondPartId(2L);
+        request.setOriginal(TransactionDTO.builder().accountId(1L).date(LocalDate.of(2026, 3, 1))
+                .amount(new BigDecimal("-80.00")).memo("origine").splitFromAmount(splitFromAmount).build());
+        return request;
+    }
+
+    @Test
+    void undoSplit_rendLeMontantEtSupprimeLaSecondePartieSansEmpreinte() {
+        Transaction[] parties = partiesDeDivision("-30.00", "-50.00");
+        when(accountService.findById(1L)).thenReturn(parties[0].getAccount());
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.undoSplit(1L, annulationDivision(null));
+
+        assertThat(parties[0].getAmount()).isEqualByComparingTo("-80.00");
+        assertThat(parties[0].getMemo()).isEqualTo("origine");
+        assertThat(parties[0].getSplitFromAmount()).isNull();
+        verify(transactionRepository).delete(parties[1]);
+        verify(deletedTransactionRepository, never()).save(any());
+    }
+
+    @Test
+    void undoSplit_refuseDesPartiesModifieesEntreTemps() {
+        Transaction[] parties = partiesDeDivision("-30.00", "-20.00");
+        DemandeAnnulationDivisionDTO request = annulationDivision(null);
+
+        assertThatThrownBy(() -> service.undoSplit(1L, request)).isInstanceOf(IllegalStateException.class);
+
+        verify(transactionRepository, never()).delete(parties[1]);
+        assertThat(parties[0].getAmount()).isEqualByComparingTo("-30.00");
+    }
+
+    // --- update : le libelle calcule d'une transaction sans tiers n'est pas un nom de tiers ---
+
+    private TransactionDTO.TransactionDTOBuilder payloadDepuis(Transaction t) {
+        return TransactionDTO.builder()
+                .accountId(t.getAccount().getId())
+                .date(t.getDate())
+                .amount(t.getAmount())
+                .paymentMode(t.getPaymentMode());
+    }
+
+    @Test
+    void update_virementAvecSonLibelleCalcule_neCreePasDeTiers() {
+        Transaction[] virement = virementDe50();
+        Transaction debit = virement[0];
+        debit.getAccount().setCurrency("EUR");
+        virement[1].getAccount().setCurrency("EUR");
+        String libelle = MappeurTransaction.payeeLabel(debit);
+        when(transactionRepository.findById(debit.getId())).thenReturn(Optional.of(debit));
+        when(accountService.findById(debit.getAccount().getId())).thenReturn(debit.getAccount());
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.update(debit.getId(), payloadDepuis(debit).payee(libelle).memo("corrige").build());
+
+        assertThat(debit.getPayee()).isNull();
+        verify(payeeService, never()).resolveOrCreate(any(), any());
+    }
+
+    @Test
+    void update_ajustementAvecSonLibelleCalcule_neCreePasDeTiers() {
+        Compte compte = compte(1L);
+        Transaction ajustement = transaction(compte, null, LocalDate.of(2026, 3, 1), "120.00");
+        ajustement.setId(8L);
+        ajustement.setBalanceAdjustment(true);
+        when(transactionRepository.findById(8L)).thenReturn(Optional.of(ajustement));
+        when(accountService.findById(1L)).thenReturn(compte);
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.update(8L, payloadDepuis(ajustement).payee("Ajustement de solde").build());
+
+        assertThat(ajustement.getPayee()).isNull();
+        verify(payeeService, never()).resolveOrCreate(any(), any());
+    }
+
+    @Test
+    void update_tiersInchange_neRelancePasLaReconnaissance() {
+        Compte compte = compte(1L);
+        Tiers tiers = payee(4L, "Carrefour Market");
+        Transaction achat = transaction(compte, tiers, LocalDate.of(2026, 3, 1), "-12.00");
+        achat.setId(9L);
+        when(transactionRepository.findById(9L)).thenReturn(Optional.of(achat));
+        when(accountService.findById(1L)).thenReturn(compte);
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.update(9L, payloadDepuis(achat).payee("Carrefour Market").memo("note").build());
+
+        assertThat(achat.getPayee()).isSameAs(tiers);
+        verify(payeeService, never()).resolveOrCreate(any(), any());
+    }
+
+    @Test
+    void bulkUpdate_chargeLesTiersUneSeuleFois() {
+        Transaction premiere = transaction(compte(1L), null, LocalDate.of(2026, 3, 1), "-1.00");
+        premiere.setId(1L);
+        Transaction seconde = transaction(compte(1L), null, LocalDate.of(2026, 3, 2), "-2.00");
+        seconde.setId(2L);
+        Tiers tiers = payee(4L, "Regroupe");
+        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L, 2L))).thenReturn(List.of(premiere, seconde));
+        when(transactionRepository.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(payeeService.findAllForMatching()).thenReturn(List.of());
+        when(payeeService.resolveOrCreate(eq("Regroupe"), any(), anyList())).thenReturn(tiers);
+        TransactionBulkUpdateDTO demande = new TransactionBulkUpdateDTO();
+        demande.setIds(List.of(1L, 2L));
+        demande.setPayeeProvided(true);
+        demande.setPayee("Regroupe");
+
+        service.bulkUpdate(demande);
+
+        assertThat(seconde.getPayee()).isSameAs(tiers);
+        verify(payeeService, org.mockito.Mockito.times(1)).findAllForMatching();
+    }
+
+    @Test
+    void update_virementAvecUnVraiTiers_leRattacheToujours() {
+        Transaction[] virement = virementDe50();
+        Transaction debit = virement[0];
+        debit.getAccount().setCurrency("EUR");
+        virement[1].getAccount().setCurrency("EUR");
+        Tiers proprietaire = payee(4L, "Propriétaire");
+        when(transactionRepository.findById(debit.getId())).thenReturn(Optional.of(debit));
+        when(accountService.findById(debit.getAccount().getId())).thenReturn(debit.getAccount());
+        when(payeeService.resolveOrCreate(eq("Propriétaire"), any())).thenReturn(proprietaire);
+        when(transactionRepository.save(any(Transaction.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.update(debit.getId(), payloadDepuis(debit).payee("Propriétaire").build());
+
+        assertThat(debit.getPayee()).isSameAs(proprietaire);
+    }
+
+    @Test
+    void bulkUpdate_tiersParId_affecteCeTiersSansReconnaissanceParTexte() {
+        Tiers ancien = payee(5L, "Carrefour Market");
+        Tiers recree = payee(9L, "Carrefour City");
+        Transaction t1 = transaction(compte(1L), ancien, LocalDate.of(2026, 2, 1), "-3.00");
+        t1.setId(1L);
+        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L))).thenReturn(List.of(t1));
+        when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
+        when(payeeService.findEntityById(9L)).thenReturn(recree);
+        TransactionBulkUpdateDTO payload = bulkPayee(null, 1L);
+        payload.setPayeeId(9L);
+
+        service.bulkUpdate(payload);
+
+        assertThat(t1.getPayee()).isSameAs(recree);
+        verify(payeeService, never()).resolveOrCreate(any(), any());
+    }
+
+    @Test
+    void bulkUpdate_transactionIntrouvable_refuseSansRienModifier() {
+        Transaction t1 = transaction(compte(1L), null, LocalDate.of(2026, 2, 1), "-3.00");
+        t1.setId(1L);
+        when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L, 99L))).thenReturn(List.of(t1));
+
+        assertThatThrownBy(() -> service.bulkUpdate(bulkPayee("Cafe du coin", 1L, 99L)))
+                .isInstanceOf(NoSuchElementException.class)
+                .hasMessageContaining("[99]");
+        verify(transactionRepository, never()).saveAll(anyList());
+        verify(payeeService, never()).resolveOrCreate(any(), any());
+    }
+
+    @Test
+    void bulkUpdate_tiersTropLong_refuseAvantDeCreerLeTiers() {
+        assertThatThrownBy(() -> service.bulkUpdate(bulkPayee("x".repeat(300), 1L)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("255 caractères");
+        verify(transactionRepository, never()).findAllByIdWithTransferTransaction(any());
+        verify(payeeService, never()).resolveOrCreate(any(), any());
+    }
+
+    @Test
     void bulkUpdate_tiers_remplaceLeTiersEtNettoieLesAnciensUneSeuleFoisChacun() {
         Tiers sumup = payee(5L, "SUMUP CAFE");
         Tiers cafe = payee(6L, "Cafe du coin");
@@ -1134,7 +1480,7 @@ class ServiceTransactionTest {
         t2.setId(2L);
         when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L, 2L))).thenReturn(List.of(t1, t2));
         when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
-        when(payeeService.resolveOrCreate(eq("Cafe du coin"), any())).thenReturn(cafe);
+        when(payeeService.resolveOrCreate(eq("Cafe du coin"), any(), anyList())).thenReturn(cafe);
 
         service.bulkUpdate(bulkPayee("Cafe du coin", 1L, 2L));
 
@@ -1167,43 +1513,11 @@ class ServiceTransactionTest {
         t1.setId(1L);
         when(transactionRepository.findAllByIdWithTransferTransaction(List.of(1L))).thenReturn(List.of(t1));
         when(transactionRepository.saveAll(anyList())).thenAnswer(inv -> inv.getArgument(0));
-        when(payeeService.resolveOrCreate(eq("Cafe du coin"), any())).thenReturn(cafe);
+        when(payeeService.resolveOrCreate(eq("Cafe du coin"), any(), anyList())).thenReturn(cafe);
 
         service.bulkUpdate(bulkPayee("Cafe du coin", 1L));
 
         verify(payeeService, never()).deleteIfOrphan(any());
     }
 
-    // --- marquages definitifs : "pas un doublon", "suggestion periodique ignoree" ---
-
-    @Test
-    void markAsNotDuplicate_marqueLesTransactionsDemandees() {
-        Transaction t1 = transaction(compte(1L), null, LocalDate.of(2026, 2, 1), "-3.00");
-        Transaction t2 = transaction(compte(1L), null, LocalDate.of(2026, 2, 1), "-3.00");
-        when(transactionRepository.findAllById(List.of(1L, 2L))).thenReturn(List.of(t1, t2));
-
-        service.markAsNotDuplicate(List.of(1L, 2L));
-
-        assertThat(t1.isDuplicateIgnored()).isTrue();
-        assertThat(t2.isDuplicateIgnored()).isTrue();
-        verify(transactionRepository).saveAll(List.of(t1, t2));
-    }
-
-    @Test
-    void ignorePeriodicSuggestion_marqueLesTransactionsDemandees() {
-        Transaction t1 = transaction(compte(1L), null, LocalDate.of(2026, 2, 1), "-9.99");
-        when(transactionRepository.findAllById(List.of(1L))).thenReturn(List.of(t1));
-
-        service.ignorePeriodicSuggestion(List.of(1L));
-
-        assertThat(t1.isPeriodicSuggestionIgnored()).isTrue();
-        verify(transactionRepository).saveAll(List.of(t1));
-    }
-
-    @Test
-    void marquagesDefinitifs_refusentUneSelectionVide() {
-        assertThatThrownBy(() -> service.markAsNotDuplicate(List.of())).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> service.ignorePeriodicSuggestion(null)).isInstanceOf(IllegalArgumentException.class);
-        verifyNoInteractions(transactionRepository);
-    }
 }

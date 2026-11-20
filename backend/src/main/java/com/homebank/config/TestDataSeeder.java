@@ -86,6 +86,8 @@ public class TestDataSeeder implements CommandLineRunner {
         // Categorie masquee (voir Categorie#hidden) : exclue des autocompletes
         // mais conservee pour l'historique, ex-poste d'un abonnement resilie.
         Categorie ancienAbonnement = hiddenChildCategory("Ancien abonnement résilié", loisirs);
+        // Utilisee seulement l'an dernier (voir seedYearAgoHistory) : ligne « tombee a zero ».
+        Categorie cinema = childCategory("Cinéma", loisirs);
 
         Categorie transport = rootCategory("Transport", Categorie.TypeCategorie.EXPENSE);
         Categorie sante = rootCategory("Santé", Categorie.TypeCategorie.EXPENSE);
@@ -150,6 +152,9 @@ public class TestDataSeeder implements CommandLineRunner {
                         "Station essence", null, transport, ModePaiement.CARD, false, false);
             }
         }
+
+        seedYearAgoHistory(today, new YearAgoAccounts(courant, carte),
+                new YearAgoCategories(salaire, loyer, supermarche, restaurant, abonnements, energie, cinema));
 
         // Petit virement interne courant -> epargne, le mois dernier
         LocalDate transferDate = today.minusMonths(1).withDayOfMonth(15);
@@ -225,6 +230,46 @@ public class TestDataSeeder implements CommandLineRunner {
         log.info("Données de démonstration chargées : {} comptes, {} catégories, {} tiers, {} transactions, {} prêt(s).",
                 accountRepository.count(), categoryRepository.count(), payeeRepository.count(),
                 transactionRepository.count(), loanRepository.count());
+    }
+
+    private record YearAgoAccounts(Compte courant, Compte carte) {
+    }
+
+    private record YearAgoCategories(Categorie salaire, Categorie loyer, Categorie supermarche, Categorie restaurant,
+                                     Categorie abonnements, Categorie energie, Categorie cinema) {
+    }
+
+    /**
+     * Memes mois un an plus tot que les mois de demonstration deja termines
+     * (le mois en cours est hors de la fenetre d'analyse, qui s'arrete au
+     * dernier mois complet : le decalage de 12 mois commence donc a 13), pour que les
+     * colonnes « 12 mois préc. » / « Évol. » du tableau de bord et la ligne
+     * « vs <mois> » des cartes aient quelque chose a comparer. Montants choisis
+     * pour illustrer chaque cas : hausse (salaire, loyer, courses), baisse
+     * (restaurant, energie), ecart faible affiche en couleur neutre (Netflix,
+     * moins de 10 € sur un an), categorie nouvelle (Transport, Santé : rien
+     * l'an dernier) et categorie tombee a zero (Cinéma : rien cette annee).
+     */
+    private void seedYearAgoHistory(LocalDate today, YearAgoAccounts accounts, YearAgoCategories categories) {
+        for (int monthsAgo = 16; monthsAgo >= 13; monthsAgo--) {
+            LocalDate monthStart = today.withDayOfMonth(1).minusMonths(monthsAgo);
+            transaction(new TransactionCore(accounts.courant(), monthStart.withDayOfMonth(28), new BigDecimal("2300.00")),
+                    "Employeur", "Virement salaire", categories.salaire(), ModePaiement.STANDING_ORDER, true, false);
+            transaction(new TransactionCore(accounts.courant(), monthStart.plusDays(2), new BigDecimal("-820.00")),
+                    "Bailleur", "Loyer mensuel", categories.loyer(), ModePaiement.DIRECT_DEBIT, true, true);
+            transaction(new TransactionCore(accounts.courant(), monthStart.plusDays(6), new BigDecimal("-58.20")),
+                    CARREFOUR, COURSES_DE_LA_SEMAINE, categories.supermarche(), ModePaiement.CARD, true, false);
+            transaction(new TransactionCore(accounts.courant(), monthStart.plusDays(20), new BigDecimal("-99.20")),
+                    CARREFOUR, COURSES_DE_LA_SEMAINE, categories.supermarche(), ModePaiement.CARD, true, false);
+            transaction(new TransactionCore(accounts.courant(), monthStart.plusDays(9), new BigDecimal("-62.00")),
+                    "Le Bistrot", "Déjeuner", categories.restaurant(), ModePaiement.CARD, true, false);
+            transaction(new TransactionCore(accounts.carte(), monthStart.plusDays(1), new BigDecimal("-13.49")),
+                    NETFLIX, "Abonnement", categories.abonnements(), ModePaiement.DIRECT_DEBIT, true, true);
+            transaction(new TransactionCore(accounts.courant(), monthStart.plusDays(10), new BigDecimal("-91.30")),
+                    "Fournisseur énergie", "Facture électricité/gaz", categories.energie(), ModePaiement.DIRECT_DEBIT, true, true);
+            transaction(new TransactionCore(accounts.carte(), monthStart.plusDays(17), new BigDecimal("-11.50")),
+                    "Cinéma Le Rex", "Séance", categories.cinema(), ModePaiement.CARD, true, false);
+        }
     }
 
     private Compte account(String name, TypeCompte type, BigDecimal initialBalance) {

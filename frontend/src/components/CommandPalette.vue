@@ -62,7 +62,7 @@ import { useRouter } from 'vue-router'
 import Icon from './Icon.vue'
 import { dataStore } from '../services/dataStore'
 import { themePreference } from '../services/theme'
-import { ACTION_COMMANDS, PAGE_COMMANDS, buildResults, highlightSegments, indexCategories, indexCommands, indexPayees } from '../services/commandPalette'
+import { ACTION_COMMANDS, PAGE_COMMANDS, buildResults, highlightSegments, indexAccounts, indexCategories, indexCommands, indexPayees } from '../services/commandPalette'
 
 const props = defineProps({
   open: { type: Boolean, required: true }
@@ -79,8 +79,9 @@ let focusBeforeOpen = null
 const staticIndex = indexCommands([...PAGE_COMMANDS, ...ACTION_COMMANDS])
 const payeeIndex = computed(() => indexPayees(dataStore.state.payees))
 const categoryIndex = computed(() => indexCategories(dataStore.state.categories))
+const accountIndex = computed(() => indexAccounts(dataStore.state.accounts))
 
-const results = computed(() => buildResults({ staticIndex, payeeIndex: payeeIndex.value, categoryIndex: categoryIndex.value, query: query.value }))
+const results = computed(() => buildResults({ staticIndex, payeeIndex: payeeIndex.value, categoryIndex: categoryIndex.value, accountIndex: accountIndex.value, query: query.value }))
 // Mots saisis surlignés dans chaque libellé (une vingtaine de résultats au plus).
 const labelSegments = computed(() => results.value.map(item => highlightSegments(item.label, query.value)))
 const activeOptionId = computed(() => (results.value.length ? `palette-option-${activeIndex.value}` : undefined))

@@ -1,9 +1,8 @@
 package com.homebank.service;
 
-import com.homebank.dto.GroupeDoublonDTO;
-import com.homebank.dto.SuggestionPeriodiqueDTO;
 import com.homebank.dto.TransactionBulkUpdateDTO;
 import com.homebank.dto.TransactionDTO;
+import com.homebank.dto.DemandeAnnulationDivisionDTO;
 import com.homebank.dto.DemandeDivisionDTO;
 import com.homebank.dto.DemandeVirementDTO;
 import com.homebank.mapper.MappeurTransaction;
@@ -14,7 +13,10 @@ import com.homebank.model.Transaction;
 import com.homebank.model.TransactionSupprimee;
 import com.homebank.repository.DepotTransaction;
 import com.homebank.repository.DepotTransactionSupprimee;
+import com.homebank.utils.LongueurTexte;
 import com.homebank.utils.ModePaiement;
+import com.homebank.utils.Montant;
+import com.homebank.utils.Periode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -23,21 +25,18 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Service
 public class ServiceTransaction {
@@ -100,9 +99,7 @@ public class ServiceTransaction {
         if ((from == null) != (to == null)) {
             throw new IllegalArgumentException("Une période attend à la fois une date de début et une date de fin.");
         }
-        if (from != null && from.isAfter(to)) {
-            throw new IllegalArgumentException("Période invalide : la date de début est postérieure à la date de fin.");
-        }
+        Periode.verifierOrdre(from, to);
         return from != null;
     }
 
@@ -156,7 +153,7 @@ public class ServiceTransaction {
             case "=" -> accountId != null
                     ? transactionRepository.findByAccount_IdAndAmountOrderByDateDescIdDesc(accountId, amount)
                     : transactionRepository.findByAmountOrderByDateDescIdDesc(amount);
-            default -> throw new IllegalArgumentException("Operateur de montant invalide : " + operator);
+            default -> throw new IllegalArgumentException("Opérateur de montant invalide : " + operator);
         };
         return results.stream().map(transactionMapper::toDTO).toList();
     }
@@ -176,14 +173,8 @@ public class ServiceTransaction {
     public TransactionDTO create(TransactionDTO payload) {
         Transaction transaction = new Transaction();
         applyPayload(transaction, payload);
-        // Fixe a la creation seulement (jamais par update) : permet a
-        // l'annulation d'une suppression de recreer un ajustement de solde
-        // tel quel, au lieu d'une transaction ordinaire comptee comme une
-        // depense ou un revenu.
-        transaction.setBalanceAdjustment(payload.isBalanceAdjustment());
-        // Idem pour le libelle bancaire d'une transaction importee restauree.
-        transaction.setBankLabel(blankToNull(payload.getBankLabel()));
         Transaction saved = transactionRepository.save(transaction);
+        log.info("Transaction creee : {} (compte {})", saved.getId(), saved.getAccount().getId());
         return transactionMapper.toDTO(saved);
     }
 
@@ -201,6 +192,7 @@ public class ServiceTransaction {
             syncTransferTwin(existing, twin);
         }
         Transaction saved = transactionRepository.save(existing);
+        log.info("Transaction modifiee : {}{}", id, twin != null ? " (et la jumelle du virement)" : "");
 
         if (previousPayee != null && !previousPayee.equals(saved.getPayee())) {
             prunePayeesAfterCommit(List.of(previousPayee));
@@ -223,7 +215,7 @@ public class ServiceTransaction {
             throw new IllegalArgumentException("Le montant d'un virement ne peut pas être nul.");
         }
         if (edited.getAccount().getId().equals(twin.getAccount().getId())) {
-            throw new IllegalArgumentException("Le compte source et le compte destination doivent etre differents");
+            throw new IllegalArgumentException("Le compte source et le compte destination doivent être différents.");
         }
         ensureSameCurrency(edited.getAccount(), twin.getAccount());
 
@@ -264,25 +256,27 @@ public class ServiceTransaction {
         Transaction original = findEntityById(id);
 
         if (original.isInternalTransfer()) {
-            throw new IllegalArgumentException("Un virement ne peut pas etre divise");
+            throw new IllegalArgumentException("Un virement ne peut pas être divisé.");
         }
         // Ni depense ni revenu : rien a repartir, et la 2e partie, creee sans
         // le marqueur, aurait compte a tort comme une depense/un revenu.
         if (original.isBalanceAdjustment()) {
-            throw new IllegalArgumentException("Un ajustement de solde ne peut pas etre divise");
+            throw new IllegalArgumentException("Un ajustement de solde ne peut pas être divisé.");
         }
 
         BigDecimal totalAmount = original.getAmount();
-        BigDecimal firstAmount = payload.getFirstAmount();
+        // Arrondi AVANT le calcul de la 2e partie : la base arrondit chaque
+        // montant, et 10,005 + 9,995 y devenait 10,01 + 10,00 pour 20,00 d'origine.
+        BigDecimal firstAmount = Montant.auCentime(payload.getFirstAmount(), "Le montant de la 1re partie");
         if (firstAmount == null || firstAmount.signum() == 0) {
-            throw new IllegalArgumentException("Le montant de la 1ere partie est obligatoire et ne peut pas etre nul");
+            throw new IllegalArgumentException("Le montant de la 1re partie est obligatoire et ne peut pas être nul.");
         }
         if (firstAmount.signum() != totalAmount.signum()) {
-            throw new IllegalArgumentException("Le montant de la 1ere partie doit avoir le meme signe que le montant d'origine");
+            throw new IllegalArgumentException("Le montant de la 1re partie doit avoir le même signe que le montant d'origine.");
         }
         if (firstAmount.abs().compareTo(totalAmount.abs()) >= 0) {
             throw new IllegalArgumentException(
-                    "Le montant de la 1ere partie doit etre strictement inferieur, en valeur absolue, au montant d'origine");
+                    "Le montant de la 1re partie doit être strictement inférieur, en valeur absolue, au montant d'origine.");
         }
         BigDecimal secondAmount = totalAmount.subtract(firstAmount);
 
@@ -321,6 +315,38 @@ public class ServiceTransaction {
     }
 
     /**
+     * Annule une division en une seule operation : en deux appels separes, un
+     * echec entre les deux laissait la 1re partie seule, et le solde du compte
+     * amputé de la 2e. Refuse si les parties ne totalisent plus le montant
+     * d'origine (modifiees entre-temps). Pas d'empreinte de suppression : la
+     * 2e partie n'a jamais figure sur un releve.
+     */
+    @Transactional
+    public TransactionDTO undoSplit(Long id, DemandeAnnulationDivisionDTO request) {
+        TransactionDTO previous = request.getOriginal();
+        Long secondPartId = request.getSecondPartId();
+        if (previous == null || secondPartId == null || secondPartId.equals(id)) {
+            throw new IllegalArgumentException("La transaction d'origine et sa 2e partie sont obligatoires.");
+        }
+        BigDecimal originalAmount = verifierChampsObligatoires(previous);
+        Transaction first = findEntityById(id);
+        Transaction second = findEntityById(secondPartId);
+        boolean sameAccount = first.getAccount().getId().equals(second.getAccount().getId());
+        if (!sameAccount || first.getAmount().add(second.getAmount()).compareTo(originalAmount) != 0) {
+            throw new IllegalStateException("Cette division ne peut plus être annulée : ses parties ont été modifiées.");
+        }
+
+        transactionRepository.delete(second);
+        applyPayload(first, previous);
+        first.setSplitFromAmount(Montant.auCentime(previous.getSplitFromAmount(), "Le montant d'origine"));
+        Transaction saved = transactionRepository.save(first);
+        log.info("Division annulee : transaction {} (2e partie {} supprimee)", id, secondPartId);
+
+        prunePayeesAfterCommit(Collections.singletonList(second.getPayee()));
+        return transactionMapper.toDTO(saved);
+    }
+
+    /**
      * Modifie en une fois un ou plusieurs champs (categorie, tiers, mode de
      * paiement, depense periodique, annualisation, caractere exceptionnel,
      * statut de validation) sur toutes les
@@ -335,17 +361,32 @@ public class ServiceTransaction {
     public List<TransactionDTO> bulkUpdate(TransactionBulkUpdateDTO payload) {
         List<Long> ids = payload.getIds();
         if (ids == null || ids.isEmpty()) {
-            throw new IllegalArgumentException("Aucune transaction selectionnee");
+            throw new IllegalArgumentException("Aucune transaction sélectionnée.");
         }
 
+        // Meme regle qu'a la modification d'une seule transaction (voir
+        // applyPayload) : refuse plutot que tronque en silence par la
+        // creation du tiers.
+        if (payload.isPayeeProvided() && payload.getPayee() != null) {
+            LongueurTexte.verifier(payload.getPayee().trim(), "Le nom du tiers");
+        }
         Categorie category = payload.isCategoryIdProvided() && payload.getCategoryId() != null
                 ? categoryService.findById(payload.getCategoryId())
                 : null;
+        Tiers payeeById = payload.isPayeeProvided() && payload.getPayeeId() != null
+                ? payeeService.findEntityById(payload.getPayeeId())
+                : null;
 
         List<Transaction> transactions = transactionRepository.findAllByIdWithTransferTransaction(ids);
+        ensureAllFound(ids, transactions);
+        // Charges une seule fois : relire tous les tiers pour chaque ligne
+        // rendait l'operation de plus en plus lente avec la selection.
+        boolean resolvesPayeeText = payload.isPayeeProvided() && payeeById == null
+                && payload.getPayee() != null && !payload.getPayee().isBlank();
+        List<Tiers> knownPayees = resolvesPayeeText ? new ArrayList<>(payeeService.findAllForMatching()) : List.of();
         List<Tiers> orphanCandidates = new ArrayList<>();
         for (Transaction t : transactions) {
-            applyBulkFields(t, payload, category, orphanCandidates);
+            applyBulkFields(t, payload, category, payeeById, knownPayees, orphanCandidates);
         }
 
         List<Transaction> saved = transactionRepository.saveAll(transactions);
@@ -356,14 +397,30 @@ public class ServiceTransaction {
         return saved.stream().map(transactionMapper::toDTO).toList();
     }
 
+    /**
+     * Une selection contenant une transaction deja supprimee (autre onglet,
+     * import...) etait appliquee aux seules transactions trouvees, sans le
+     * signaler : l'ecran affichait ensuite un nombre de modifications faux.
+     */
+    private static void ensureAllFound(List<Long> ids, List<Transaction> found) {
+        Set<Long> foundIds = found.stream().map(Transaction::getId).collect(Collectors.toSet());
+        List<Long> missing = ids.stream().filter(id -> !foundIds.contains(id)).distinct().toList();
+        if (!missing.isEmpty()) {
+            throw new NoSuchElementException("Transaction(s) introuvable(s) : " + missing
+                    + ". Rechargez la page : elles ont peut-être été supprimées entre-temps.");
+        }
+    }
+
     /** Applique a une transaction les seuls champs marques "...Provided" dans payload (voir bulkUpdate). */
-    private void applyBulkFields(Transaction t, TransactionBulkUpdateDTO payload, Categorie category, List<Tiers> orphanCandidates) {
+    private void applyBulkFields(Transaction t, TransactionBulkUpdateDTO payload, Categorie category, Tiers payeeById,
+                                 List<Tiers> knownPayees, List<Tiers> orphanCandidates) {
         if (payload.isCategoryIdProvided()) {
             t.setCategory(category);
         }
 
         if (payload.isPayeeProvided()) {
-            applyBulkPayee(t, payload.getPayee(), orphanCandidates);
+            Tiers resolved = payeeById != null ? payeeById : resolveBulkPayee(t, payload.getPayee(), knownPayees);
+            replacePayee(t, resolved, orphanCandidates);
         }
 
         if (payload.isPaymentModeProvided()) {
@@ -384,10 +441,10 @@ public class ServiceTransaction {
     }
 
     /**
-     * Statut de validation applique aussi a la jumelle d'un virement (meme
-     * regle que toggleValidated) : les deux cotes d'une meme operation sont
-     * toujours rapproches ensemble. Jumelle chargee par fetch join (voir
-     * findAllByIdWithTransferTransaction), enregistree par la transaction JPA.
+     * Statut de validation applique aussi a la jumelle d'un virement
+     * (bulkUpdate, toggleValidated) : les deux cotes d'une meme operation sont
+     * toujours rapproches ensemble. La jumelle, entite geree, est enregistree
+     * par la transaction JPA de l'appelant (qui doit donc etre @Transactional).
      */
     private static void setValidatedWithTransferTwin(Transaction t, boolean validated) {
         t.setValidated(validated);
@@ -407,15 +464,19 @@ public class ServiceTransaction {
             log.info("Changement de mode de paiement ignore pour la transaction {} : cote d'un virement interne", t.getId());
             return;
         }
-        t.setPaymentMode(requested);
+        t.setPaymentMode(paymentModeOrNone(requested));
     }
 
-    /** Resout/cree le nouveau tiers depuis le texte fourni et l'affecte a la transaction ; releve l'ancien tiers s'il change (voir prunePayeesAfterCommit). */
-    private void applyBulkPayee(Transaction t, String payeeText, List<Tiers> orphanCandidates) {
-        Tiers previousPayee = t.getPayee();
-        Tiers resolvedPayee = (payeeText != null && !payeeText.isBlank())
-                ? payeeService.resolveOrCreate(payeeText, t.getAmount())
+    /** Resout/cree le tiers depuis le texte fourni (null si vide). */
+    private Tiers resolveBulkPayee(Transaction t, String payeeText, List<Tiers> knownPayees) {
+        return (payeeText != null && !payeeText.isBlank())
+                ? payeeService.resolveOrCreate(payeeText, t.getAmount(), knownPayees)
                 : null;
+    }
+
+    /** Affecte le tiers a la transaction ; releve l'ancien tiers s'il change (voir prunePayeesAfterCommit). */
+    private static void replacePayee(Transaction t, Tiers resolvedPayee, List<Tiers> orphanCandidates) {
+        Tiers previousPayee = t.getPayee();
         t.setPayee(resolvedPayee);
         if (previousPayee != null && !previousPayee.equals(resolvedPayee)) {
             orphanCandidates.add(previousPayee);
@@ -452,14 +513,28 @@ public class ServiceTransaction {
         });
     }
 
-    /** Un tiers a la fois, chacun dans sa propre transaction : l'echec de l'un n'empeche pas le nettoyage des autres. */
+    /**
+     * Tous les tiers d'un coup ; si cela echoue, un a la fois, chacun dans sa
+     * propre transaction : l'echec de l'un n'empeche pas le nettoyage des autres.
+     */
     private void prunePayees(List<Long> payeeIds) {
+        if (payeeIds.size() > 1 && prunePayeesTogether(payeeIds)) return;
         for (Long payeeId : payeeIds) {
             try {
                 payeeService.deleteIfOrphan(payeeId);
             } catch (RuntimeException e) {
                 log.warn("Echec du nettoyage du tiers {} devenu orphelin : {}", payeeId, e.getMessage(), e);
             }
+        }
+    }
+
+    private boolean prunePayeesTogether(List<Long> payeeIds) {
+        try {
+            payeeService.deleteOrphans(payeeIds);
+            return true;
+        } catch (RuntimeException e) {
+            log.warn("Nettoyage groupe de {} tiers en echec, reprise un par un : {}", payeeIds.size(), e.getMessage());
+            return false;
         }
     }
 
@@ -482,6 +557,7 @@ public class ServiceTransaction {
 
         transactions.forEach(this::recordDeletion);
         transactionRepository.deleteAll(transactions);
+        log.info("Transaction supprimee : {}{}", id, transactions.size() > 1 ? " (avec la jumelle du virement)" : "");
 
         // Tiers de CHAQUE transaction supprimee (jumelle comprise), comme
         // deleteTransactions : sinon le tiers propre a l'autre cote d'un
@@ -516,10 +592,15 @@ public class ServiceTransaction {
      * ici une transaction validee que l'utilisateur n'a pourtant jamais
      * demande a supprimer (seul "en attente" a ete demande) — a supprimer
      * manuellement si c'est bien l'intention.
+     * <p>
+     * Avec accountId, seules les transactions en attente de ce compte sont
+     * concernees (liste filtree par compte cote frontend : le nombre annonce
+     * dans la confirmation doit etre celui reellement supprime) ; la jumelle
+     * en attente d'un virement, sur un autre compte, part avec elle.
      */
     @Transactional
-    public int deleteAllPending() {
-        List<Transaction> pending = transactionRepository.findByValidatedFalseWithTransferTransaction();
+    public int deleteAllPending(Long accountId) {
+        List<Transaction> pending = findPendingWithTransferTransaction(accountId);
         List<Long> pendingIds = new ArrayList<>();
         int skipped = 0;
         for (Transaction t : pending) {
@@ -531,9 +612,16 @@ public class ServiceTransaction {
             pendingIds.add(t.getId());
         }
         if (skipped > 0) {
-            log.warn("{} transaction(s) de virement en attente ignorees par le nettoyage global : leur jumelle est deja validee (suppression manuelle si besoin)", skipped);
+            log.warn("{} transaction(s) de virement en attente ignorees par le nettoyage : leur jumelle est deja validee (suppression manuelle si besoin)", skipped);
         }
         return pendingIds.isEmpty() ? 0 : deleteTransactions(pendingIds, false);
+    }
+
+    /** Transactions en attente de tous les comptes (accountId null) ou d'un seul, jumelle de virement chargee. */
+    private List<Transaction> findPendingWithTransferTransaction(Long accountId) {
+        return accountId == null
+                ? transactionRepository.findByValidatedFalseWithTransferTransaction()
+                : transactionRepository.findPendingByAccountIdWithTransferTransaction(accountId);
     }
 
     /**
@@ -565,7 +653,22 @@ public class ServiceTransaction {
     }
 
     /**
-     * Suppression en masse factorisee entre deleteBulk et deleteAllPending
+     * Annule une creation (saisie, virement, ajustement, 2e partie d'une
+     * division) ou un import (voir ServiceImport.ImportResult#importedIds) :
+     * supprime les transactions SANS empreinte de suppression. Ce n'est pas
+     * un refus de ces operations : la ligne correspondante d'un releve doit
+     * rester importable. Les tiers crees avec elles et devenus orphelins
+     * partent aussi ; les categories creees par un import restent.
+     */
+    @Transactional
+    public int undoCreation(List<Long> ids) {
+        int deleted = deleteTransactions(ids, false);
+        log.info("Creation annulee : {} transaction(s) supprimee(s)", deleted);
+        return deleted;
+    }
+
+    /**
+     * Suppression en masse factorisee entre deleteBulk, deleteAllPending et undoCreation
      * (voir leur javadoc pour la difference de comportement sur recordTombstone).
      * Comme delete(Long) : la transaction jumelle d'un virement selectionne
      * est toujours emportee avec lui, meme si elle n'a pas ete selectionnee
@@ -574,7 +677,7 @@ public class ServiceTransaction {
      */
     private int deleteTransactions(List<Long> ids, boolean recordTombstone) {
         if (ids == null || ids.isEmpty()) {
-            throw new IllegalArgumentException("Aucune transaction selectionnee");
+            throw new IllegalArgumentException("Aucune transaction sélectionnée.");
         }
 
         Map<Long, Transaction> byId = new LinkedHashMap<>();
@@ -602,7 +705,7 @@ public class ServiceTransaction {
      * et evite de la reimporter si le releve bancaire source la contient
      * encore lors d'un futur import — sans quoi une transaction supprimee
      * manuellement (ex : paire "depense remboursee", voir
-     * findReimbursementGroups) reapparaissait au prochain import.
+     * ServiceDoublon#findReimbursementGroups) reapparaissait au prochain import.
      */
     private void recordDeletion(Transaction t) {
         TransactionSupprimee tombstone = new TransactionSupprimee();
@@ -614,10 +717,26 @@ public class ServiceTransaction {
         deletedTransactionRepository.save(tombstone);
     }
 
-    /** Passe toutes les transactions en attente au statut "validee". Renvoie le nombre concerne. */
+    /**
+     * Passe au statut "validee" les transactions en attente de tous les
+     * comptes (accountId null : simple UPDATE en masse), ou du seul compte
+     * filtre. Dans ce cas, chaque transaction est validee avec sa jumelle de
+     * virement (voir setValidatedWithTransferTwin), meme si celle-ci est sur
+     * un autre compte : un UPDATE restreint au compte laisserait l'autre cote
+     * en attente. Renvoie le nombre de transactions validees (jumelles
+     * d'un autre compte non comptees).
+     */
     @Transactional
-    public int validateAllPending() {
-        return transactionRepository.validateAllPending();
+    public int validateAllPending(Long accountId) {
+        if (accountId == null) {
+            int validated = transactionRepository.validateAllPending();
+            log.info("Validation de {} transaction(s) en attente, tous comptes", validated);
+            return validated;
+        }
+        List<Transaction> pending = transactionRepository.findPendingByAccountIdWithTransferTransaction(accountId);
+        pending.forEach(t -> setValidatedWithTransferTwin(t, true));
+        log.info("Validation de {} transaction(s) en attente du compte {}", pending.size(), accountId);
+        return pending.size();
     }
 
     /**
@@ -629,15 +748,8 @@ public class ServiceTransaction {
     @Transactional
     public TransactionDTO toggleValidated(Long id) {
         Transaction t = findEntityById(id);
-        boolean validated = !t.isValidated();
-        t.setValidated(validated);
-
-        Transaction pair = t.getTransferTransaction();
-        if (pair != null) {
-            pair.setValidated(validated);
-            transactionRepository.save(pair);
-        }
-
+        setValidatedWithTransferTwin(t, !t.isValidated());
+        log.info("Transaction {} {}", id, t.isValidated() ? "validee" : "remise en attente");
         return transactionMapper.toDTO(transactionRepository.save(t));
     }
 
@@ -645,6 +757,7 @@ public class ServiceTransaction {
     public TransactionDTO togglePeriodicExpense(Long id) {
         Transaction t = findEntityById(id);
         t.setPeriodicExpense(!t.isPeriodicExpense());
+        log.info("Transaction {} {} comme depense periodique", id, t.isPeriodicExpense() ? "marquee" : "retiree");
         return transactionMapper.toDTO(transactionRepository.save(t));
     }
 
@@ -652,396 +765,8 @@ public class ServiceTransaction {
     public TransactionDTO toggleExceptional(Long id) {
         Transaction t = findEntityById(id);
         t.setExceptional(!t.isExceptional());
+        log.info("Transaction {} {} comme exceptionnelle", id, t.isExceptional() ? "marquee" : "retiree");
         return transactionMapper.toDTO(transactionRepository.save(t));
-    }
-
-    /**
-     * Nombre minimum d'occurrences (meme tiers, montant proche) pour qu'un
-     * groupe soit suggere comme periodique : en dessous, le rapprochement est
-     * trop peu fiable (pourrait n'etre qu'une coincidence).
-     */
-    private static final int PERIODIC_MIN_OCCURRENCES = 3;
-
-    /** Tolerance sur le montant a l'interieur d'un groupe (ex : facture d'energie qui varie legerement). */
-    private static final BigDecimal PERIODIC_AMOUNT_TOLERANCE = new BigDecimal("1.10");
-
-    /**
-     * Frequences reconnues pour la regularite des intervalles entre
-     * occurrences : {cible en jours, tolerance en jours}. Une serie n'est
-     * retenue que si TOUS ses intervalles tombent dans la tolerance d'une
-     * seule et meme frequence (le prelevement reel peut varier de quelques
-     * jours autour de la date "ideale" : weekend, jour ferie, mois plus
-     * court...). Mensuel/trimestriel/annuel sont les frequences demandees ;
-     * une serie a intervalles quelconques (ex : plusieurs achats du meme
-     * montant a des dates sans rapport) ne matche aucune d'elles et est donc
-     * ecartee.
-     */
-    private static final int[][] PERIODIC_FREQUENCIES_DAYS = {
-            {30, 7},    // mensuel
-            {91, 10},   // trimestriel
-            {365, 20},  // annuel
-    };
-
-    /**
-     * Nombre maximum d'occurrences consecutives manquees tolerees dans un
-     * intervalle (ex : mois sans prelevement, paiement en retard groupe avec
-     * le suivant). Au-dela, un ecart aussi grand a plus de chances d'etre une
-     * coincidence qu'une vraie periodicite avec trou.
-     */
-    private static final int PERIODIC_MAX_MISSED_OCCURRENCES = 3;
-
-    /**
-     * Suggere des groupes de transactions qui semblent periodiques : meme
-     * tiers, montant proche (tolerance +/-10%), au moins
-     * PERIODIC_MIN_OCCURRENCES occurrences, ET dates reparties a intervalle
-     * regulier (mensuel/trimestriel/annuel a tolerance pres) — sans quoi une
-     * simple coincidence de montant (ex : plusieurs achats ponctuels du meme
-     * montant) serait a tort suggeree comme periodique. Ignore les
-     * transactions deja marquees periodiques (deja acceptees), les
-     * transactions dont la suggestion a ete refusee par l'utilisateur (voir
-     * Transaction#periodicSuggestionIgnored / ignorePeriodicSuggestion
-     * ci-dessous) et les virements internes (jamais une depense/revenu
-     * periodique au sens metier).
-     */
-    public List<SuggestionPeriodiqueDTO> findPeriodicSuggestions() {
-        List<Transaction> candidates = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
-                .filter(t -> !t.isPeriodicExpense())
-                .filter(t -> !t.isPeriodicSuggestionIgnored())
-                .filter(t -> !t.isInternalTransfer() && !t.isBalanceAdjustment())
-                .filter(t -> t.getPayee() != null)
-                .toList();
-
-        Map<Long, List<Transaction>> byPayee = candidates.stream()
-                .collect(Collectors.groupingBy(t -> t.getPayee().getId()));
-
-        List<SuggestionPeriodiqueDTO> suggestions = new ArrayList<>();
-        for (List<Transaction> group : byPayee.values()) {
-            if (group.size() < PERIODIC_MIN_OCCURRENCES) continue;
-            for (List<Transaction> amountGroup : groupByToleranteAmount(group)) {
-                if (amountGroup.size() >= PERIODIC_MIN_OCCURRENCES && hasRegularInterval(amountGroup)) {
-                    suggestions.add(buildPeriodicSuggestion(amountGroup));
-                }
-            }
-        }
-
-        suggestions.sort((a, b) -> Integer.compare(b.getCount(), a.getCount()));
-        return suggestions;
-    }
-
-    /**
-     * Vrai si les dates du groupe (deja rapproche par tiers + montant) se
-     * repetent selon un intervalle globalement regulier : il existe une
-     * frequence (voir PERIODIC_FREQUENCIES_DAYS) dont TOUS les intervalles
-     * consecutifs (dates triees) sont proches d'un multiple entier de sa
-     * cible, a sa tolerance pres (voir {@link #matchesFrequencyWithGaps}).
-     */
-    private boolean hasRegularInterval(List<Transaction> transactions) {
-        List<LocalDate> dates = transactions.stream()
-                .map(Transaction::getDate)
-                .sorted()
-                .toList();
-
-        List<Long> intervals = new ArrayList<>();
-        for (int i = 1; i < dates.size(); i++) {
-            intervals.add(ChronoUnit.DAYS.between(dates.get(i - 1), dates.get(i)));
-        }
-
-        for (int[] frequency : PERIODIC_FREQUENCIES_DAYS) {
-            int target = frequency[0];
-            int tolerance = frequency[1];
-            if (intervals.stream().allMatch(days -> matchesFrequencyWithGaps(days, target, tolerance))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Vrai si l'intervalle (en jours) correspond a la frequence cible, ou a
-     * un multiple entier proche de celle-ci — une ou plusieurs occurrences
-     * manquees (mois sans prelevement, paiement en retard qui se retrouve
-     * groupe avec le suivant...). Plafonne a PERIODIC_MAX_MISSED_OCCURRENCES
-     * occurrences manquees pour eviter de faire matcher un ecart demesure par
-     * pure coincidence.
-     */
-    private boolean matchesFrequencyWithGaps(long days, int target, int tolerance) {
-        long occurrences = Math.clamp(Math.round((double) days / target), 1, PERIODIC_MAX_MISSED_OCCURRENCES + 1L);
-        return Math.abs(days - occurrences * target) <= tolerance;
-    }
-
-    /**
-     * Regroupe des transactions d'un meme tiers par montant proche : trie par
-     * montant absolu croissant, puis constitue des groupes successifs tant
-     * que chaque nouveau montant reste dans la tolerance de la moyenne du
-     * groupe courant. La moyenne (plutot qu'un minimum fige au premier
-     * element du cluster) suit le groupe au fur et a mesure des ajouts : elle
-     * absorbe aussi bien une derive progressive (facture d'energie qui
-     * augmente legerement mois apres mois) qu'une fluctuation dans les deux
-     * sens autour d'une valeur centrale (revenu variable, ex : commissions).
-     */
-    private List<List<Transaction>> groupByToleranteAmount(List<Transaction> transactions) {
-        List<Transaction> sorted = transactions.stream()
-                .sorted(Comparator.comparing(t -> t.getAmount().abs()))
-                .toList();
-
-        List<List<Transaction>> clusters = new ArrayList<>();
-        List<Transaction> current = new ArrayList<>();
-        BigDecimal clusterSum = BigDecimal.ZERO;
-
-        for (Transaction t : sorted) {
-            BigDecimal abs = t.getAmount().abs();
-            if (current.isEmpty()) {
-                current.add(t);
-                clusterSum = abs;
-                continue;
-            }
-            BigDecimal clusterAvg = clusterSum.divide(BigDecimal.valueOf(current.size()), 10, RoundingMode.HALF_UP);
-            if (abs.compareTo(clusterAvg.multiply(PERIODIC_AMOUNT_TOLERANCE)) <= 0) {
-                current.add(t);
-                clusterSum = clusterSum.add(abs);
-            } else {
-                clusters.add(current);
-                current = new ArrayList<>();
-                current.add(t);
-                clusterSum = abs;
-            }
-        }
-        if (!current.isEmpty()) clusters.add(current);
-        return clusters;
-    }
-
-    private SuggestionPeriodiqueDTO buildPeriodicSuggestion(List<Transaction> transactions) {
-        List<Transaction> sorted = transactions.stream()
-                .sorted(Comparator.comparing(Transaction::getDate))
-                .toList();
-
-        long totalDays = 0;
-        for (int i = 1; i < sorted.size(); i++) {
-            totalDays += ChronoUnit.DAYS.between(sorted.get(i - 1).getDate(), sorted.get(i).getDate());
-        }
-        int averageIntervalDays = sorted.size() > 1
-                ? (int) Math.round((double) totalDays / (sorted.size() - 1))
-                : 0;
-
-        BigDecimal averageAmount = sorted.stream()
-                .map(Transaction::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add)
-                .divide(BigDecimal.valueOf(sorted.size()), 2, RoundingMode.HALF_UP);
-
-        return SuggestionPeriodiqueDTO.builder()
-                .payee(sorted.get(sorted.size() - 1).getPayee().getName())
-                .count(sorted.size())
-                .averageAmount(averageAmount)
-                .averageIntervalDays(averageIntervalDays)
-                .transactions(sorted.stream().map(transactionMapper::toDTO).toList())
-                .build();
-    }
-
-    /**
-     * Marque les transactions passees comme "non periodiques" pour de bon
-     * (voir Transaction#periodicSuggestionIgnored) : elles seront exclues de
-     * findPeriodicSuggestions, pour que refuser une suggestion depuis
-     * l'onglet "Periodiques" soit definitif et ne revienne plus a chaque
-     * visite.
-     */
-    @Transactional
-    public void ignorePeriodicSuggestion(List<Long> ids) {
-        if (ids == null || ids.isEmpty()) {
-            throw new IllegalArgumentException("Aucune transaction selectionnee");
-        }
-        List<Transaction> transactions = transactionRepository.findAllById(ids);
-        transactions.forEach(t -> t.setPeriodicSuggestionIgnored(true));
-        transactionRepository.saveAll(transactions);
-        log.info("Marquage de {} transaction(s) comme suggestion periodique ignoree", transactions.size());
-    }
-
-    /**
-     * Regroupe les transactions deja en base qui semblent doublonnees, en
-     * deux categories (voir GroupeDoublonDTO#certain) :
-     * - "certains" : meme definition que la detection a l'import (voir
-     *   ServiceImport#isAlreadyKnown) — meme compte, meme date + montant +
-     *   tiers canonique (insensible a la casse). Occurrences interchangeables.
-     * - "probables" : meme compte + date + montant, mais tiers different —
-     *   ratees par la detection ci-dessus car elle exige le meme tiers. Cas
-     *   frequent d'un meme releve importe deux fois a des moments differents :
-     *   la premiere fois categorisee et le tiers renomme a la main, la
-     *   seconde fois avec le libelle brut de la banque jamais nettoye (ex :
-     *   "Transfer : Prêt immobilier" vs "PRELEVEMENT DE ECHEANCE PRET REF :
-     *   ..." le meme jour pour le meme montant). Un groupe deja compte parmi
-     *   les "certains" (tiers identiques) n'est jamais liste une deuxieme
-     *   fois ici. Pour l'onglet "Doublons" de la page Transactions, qui
-     *   permet de nettoyer les doublons importes par erreur.
-     */
-    public List<GroupeDoublonDTO> findDuplicateGroups() {
-        List<Transaction> all = transactionRepository.findAllByOrderByDateDescIdDesc().stream()
-                .filter(t -> !t.isDuplicateIgnored() && !t.isBalanceAdjustment())
-                .toList();
-
-        Map<String, List<Transaction>> certainGroups = all.stream()
-                .collect(Collectors.groupingBy(this::duplicateGroupKey, LinkedHashMap::new, Collectors.toList()));
-
-        Stream<GroupeDoublonDTO> certain = certainGroups.values().stream()
-                .filter(group -> group.size() > 1)
-                .map(group -> buildDuplicateGroup(group, true, false));
-
-        Map<String, List<Transaction>> looseGroups = all.stream()
-                .collect(Collectors.groupingBy(this::looseDuplicateGroupKey, LinkedHashMap::new, Collectors.toList()));
-
-        Stream<GroupeDoublonDTO> probable = looseGroups.values().stream()
-                .filter(group -> group.size() > 1)
-                // Meme tiers partout : deja liste parmi les "certains" (meme cle).
-                .filter(group -> !samePayeeForAll(group) && payeesMayBeSameMerchant(group))
-                .map(group -> buildDuplicateGroup(group, false, false));
-
-        Stream<GroupeDoublonDTO> reimbursements = findReimbursementGroups(all).stream();
-
-        return Stream.concat(Stream.concat(certain, probable), reimbursements)
-                .sorted(Comparator.comparing((GroupeDoublonDTO g) -> g.getTransactions().get(0).getDate()).reversed())
-                .toList();
-    }
-
-    /**
-     * Detecte les groupes "remboursement" : PAIRES d'une depense et d'un
-     * remboursement de meme montant (valeur absolue) par le meme tiers, a une
-     * date quelconque, meme compte ou non. A la difference des doublons
-     * "certains"/"probables" ci-dessus (qui exigent un montant identique,
-     * signe compris, et ne peuvent donc jamais matcher ce cas), il ne s'agit
-     * pas d'un import en double a supprimer : juste un reperage pour que
-     * l'utilisateur voie d'un coup d'œil qu'une depense a deja ete remboursee.
-     * Ignore les virements internes (jamais un remboursement au sens metier,
-     * et de toute facon sans tiers).
-     * <p>
-     * S'il y a plusieurs depenses du meme montant mais un seul remboursement
-     * (ex : 5 pleins d'essence a -50€ chez le meme tiers, un seul rembourse),
-     * une seule paire est formee, avec la depense la plus RECENTE parmi
-     * celles pas deja appariees (la plus probable d'etre celle concernee par
-     * le remboursement) : les autres depenses du meme montant ne sont pas
-     * proposees. S'il y a plusieurs remboursements, chacun forme sa propre
-     * paire avec la depense la plus recente restante, en repetant l'operation
-     * (2e remboursement <-> 2e depense la plus recente, etc.).
-     */
-    private List<GroupeDoublonDTO> findReimbursementGroups(List<Transaction> all) {
-        Map<Long, List<Transaction>> byPayee = all.stream()
-                .filter(t -> t.getPayee() != null)
-                .filter(t -> !t.isInternalTransfer() && !t.isBalanceAdjustment())
-                .collect(Collectors.groupingBy(t -> t.getPayee().getId()));
-
-        Comparator<Transaction> mostRecentFirst =
-                Comparator.comparing(Transaction::getDate).thenComparing(Transaction::getId).reversed();
-
-        List<GroupeDoublonDTO> groups = new ArrayList<>();
-        for (List<Transaction> payeeTransactions : byPayee.values()) {
-            Map<BigDecimal, List<Transaction>> byAbsAmount = payeeTransactions.stream()
-                    .collect(Collectors.groupingBy(t -> t.getAmount().abs().setScale(2, RoundingMode.HALF_UP)));
-
-            for (List<Transaction> sameAbsAmount : byAbsAmount.values()) {
-                List<Transaction> expenses = sameAbsAmount.stream()
-                        .filter(t -> t.getAmount().signum() < 0)
-                        .sorted(mostRecentFirst)
-                        .toList();
-                List<Transaction> reimbursements = sameAbsAmount.stream()
-                        .filter(t -> t.getAmount().signum() > 0)
-                        .sorted(mostRecentFirst)
-                        .toList();
-
-                int pairCount = Math.min(expenses.size(), reimbursements.size());
-                for (int i = 0; i < pairCount; i++) {
-                    groups.add(buildDuplicateGroup(List.of(expenses.get(i), reimbursements.get(i)), false, true));
-                }
-            }
-        }
-        return groups;
-    }
-
-    /**
-     * Cle de regroupement d'une transaction pour la detection de doublons
-     * "certains" : compte + date + montant + tiers canonique (voir CleDoublon).
-     */
-    private String duplicateGroupKey(Transaction t) {
-        String canonicalPayee = t.getPayee() != null ? t.getPayee().getName() : null;
-        CleDoublon key = CleDoublon.of(t.getDate(), t.getAmount(), canonicalPayee);
-        return "key:" + t.getAccount().getId() + "|" + key;
-    }
-
-    /**
-     * Cle de regroupement "large" pour la detection des doublons probables :
-     * compte + date + montant seulement, sans le tiers (voir
-     * findDuplicateGroups).
-     */
-    private String looseDuplicateGroupKey(Transaction t) {
-        return t.getAccount().getId() + "|" + t.getDate() + "|" + t.getAmount().setScale(2, RoundingMode.HALF_UP);
-    }
-
-    private String canonicalPayee(Transaction t) {
-        String name = t.getPayee() != null ? t.getPayee().getName() : null;
-        return name != null ? name.trim().toLowerCase(Locale.ROOT) : "";
-    }
-
-    private boolean samePayeeForAll(List<Transaction> group) {
-        String first = canonicalPayee(group.get(0));
-        return group.stream().allMatch(t -> canonicalPayee(t).equals(first));
-    }
-
-    /**
-     * Groupe "large" (meme compte, date, montant) aux tiers differents : n'est
-     * un doublon probable que si deux de ses transactions peuvent designer le
-     * meme commercant — l'une sans tiers, ou le motif de reconnaissance de
-     * l'un des tiers retrouvant le nom de l'autre (cas vise : la meme
-     * operation importee deux fois, une fois sous un tiers renomme, une fois
-     * sous le libelle brut de la banque). Deux tiers distincts deja reconnus
-     * (ex : « Pharmacie » et « Docteur Trillot », 30 € le meme jour) sont deux
-     * vraies operations : les proposer en doublon a conduit a en supprimer une
-     * a tort, que l'import refusait ensuite de reintegrer.
-     */
-    private static boolean payeesMayBeSameMerchant(List<Transaction> group) {
-        for (int i = 0; i < group.size(); i++) {
-            for (int j = i + 1; j < group.size(); j++) {
-                if (sameBankLabel(group.get(i), group.get(j))
-                        || mayBeSameMerchant(group.get(i).getPayee(), group.get(j).getPayee())) return true;
-            }
-        }
-        return false;
-    }
-
-    /** Meme libelle de releve (voir Transaction#bankLabel) : meme operation bancaire, quels que soient les tiers affectes depuis. */
-    private static boolean sameBankLabel(Transaction first, Transaction second) {
-        return first.getBankLabel() != null && first.getBankLabel().equalsIgnoreCase(second.getBankLabel());
-    }
-
-    private static boolean mayBeSameMerchant(Tiers first, Tiers second) {
-        if (first == null || second == null) return true;
-        return ServiceTiers.matchesPatternField(first.getPattern(), second.getName())
-                || ServiceTiers.matchesPatternField(second.getPattern(), first.getName());
-    }
-
-    /**
-     * Marque les transactions passees comme n'etant pas des doublons : elles
-     * seront exclues de findDuplicateGroups (voir Transaction#duplicateIgnored),
-     * ce qui fait disparaitre de l'onglet "Doublons" tout groupe dont l'une des
-     * occurrences ne compte plus (un groupe necessite au moins 2 occurrences
-     * restantes pour etre affiche).
-     */
-    @Transactional
-    public void markAsNotDuplicate(List<Long> ids) {
-        if (ids == null || ids.isEmpty()) {
-            throw new IllegalArgumentException("Aucune transaction selectionnee");
-        }
-        List<Transaction> transactions = transactionRepository.findAllById(ids);
-        transactions.forEach(t -> t.setDuplicateIgnored(true));
-        transactionRepository.saveAll(transactions);
-        log.info("Marquage de {} transaction(s) comme non doublon", transactions.size());
-    }
-
-    private GroupeDoublonDTO buildDuplicateGroup(List<Transaction> transactions, boolean certain, boolean reimbursement) {
-        List<Transaction> sorted = transactions.stream()
-                .sorted(Comparator.comparing(Transaction::getId))
-                .toList();
-        return GroupeDoublonDTO.builder()
-                .count(sorted.size())
-                .transactions(sorted.stream().map(transactionMapper::toDTO).toList())
-                .certain(certain)
-                .reimbursement(reimbursement)
-                .build();
     }
 
     /**
@@ -1061,7 +786,9 @@ public class ServiceTransaction {
         if (date.isAfter(LocalDate.now(ZoneId.systemDefault()))) {
             throw new IllegalArgumentException("La date ne peut pas être dans le futur.");
         }
-        if (actualBalance == null) {
+        Periode.verifierAnnee(date, "La date");
+        BigDecimal actual = Montant.auCentime(actualBalance, "Le solde réel");
+        if (actual == null) {
             throw new IllegalArgumentException("Le solde réel est obligatoire.");
         }
         Compte account = accountService.findById(accountId);
@@ -1069,7 +796,7 @@ public class ServiceTransaction {
 
         BigDecimal computedBalance = account.getInitialBalance()
                 .add(transactionRepository.sumAmountByAccountIdAsOf(accountId, date));
-        BigDecimal gap = actualBalance.subtract(computedBalance);
+        BigDecimal gap = actual.subtract(computedBalance);
         if (gap.signum() == 0) {
             throw new IllegalArgumentException("Le solde est déjà de " + computedBalance + " à cette date : aucun ajustement nécessaire.");
         }
@@ -1082,7 +809,7 @@ public class ServiceTransaction {
         adjustment.setValidated(true);
         adjustment.setBalanceAdjustment(true);
         Transaction saved = transactionRepository.save(adjustment);
-        log.info("Ajustement du solde du compte {} au {} : {} (solde réel {})", accountId, date, gap, actualBalance);
+        log.info("Ajustement du solde du compte {} au {} : {} (solde réel {})", accountId, date, gap, actual);
         return transactionMapper.toDTO(saved);
     }
 
@@ -1096,13 +823,14 @@ public class ServiceTransaction {
     @Transactional
     public List<TransactionDTO> createTransfer(DemandeVirementDTO request) {
         if (request.getFromAccountId() == null || request.getToAccountId() == null) {
-            throw new IllegalArgumentException("Les deux comptes sont obligatoires");
+            throw new IllegalArgumentException("Les deux comptes sont obligatoires.");
         }
         if (request.getFromAccountId().equals(request.getToAccountId())) {
-            throw new IllegalArgumentException("Le compte source et le compte destination doivent etre differents");
+            throw new IllegalArgumentException("Le compte source et le compte destination doivent être différents.");
         }
-        if (request.getAmount() == null || request.getAmount().signum() <= 0) {
-            throw new IllegalArgumentException("Le montant du virement doit etre positif");
+        BigDecimal amount = Montant.auCentime(request.getAmount(), "Le montant du virement");
+        if (amount == null || amount.signum() <= 0) {
+            throw new IllegalArgumentException("Le montant du virement doit être positif.");
         }
 
         Compte from = accountService.findById(request.getFromAccountId());
@@ -1111,50 +839,90 @@ public class ServiceTransaction {
         ServiceCompte.ensureNotArchived(to);
         ensureSameCurrency(from, to);
         LocalDate date = request.getDate() != null ? request.getDate() : LocalDate.now(ZoneId.systemDefault());
-        BigDecimal amount = request.getAmount().abs();
+        Periode.verifierAnnee(date, "La date du virement");
+        boolean validated = !Boolean.FALSE.equals(request.getValidated());
 
         Transaction debit = new Transaction();
         debit.setAccount(from);
         debit.setDate(date);
         debit.setAmount(amount.negate());
-        debit.setMemo(request.getMemo());
+        String memo = sanitizeMemo(request.getMemo());
+        debit.setMemo(memo);
         debit.setPaymentMode(ModePaiement.TRANSFER);
-        debit.setValidated(true);
+        debit.setValidated(validated);
 
         Transaction credit = new Transaction();
         credit.setAccount(to);
         credit.setDate(date);
         credit.setAmount(amount);
-        credit.setMemo(request.getMemo());
+        credit.setMemo(memo);
         credit.setPaymentMode(ModePaiement.TRANSFER);
-        credit.setValidated(true);
+        credit.setValidated(validated);
 
         Transaction savedDebit = transactionRepository.save(debit);
         credit.setTransferTransaction(savedDebit);
         Transaction savedCredit = transactionRepository.save(credit);
         savedDebit.setTransferTransaction(savedCredit);
         Transaction finalDebit = transactionRepository.save(savedDebit);
+        log.info("Virement cree du compte {} vers le compte {} : transactions {} et {}",
+                from.getId(), to.getId(), finalDebit.getId(), savedCredit.getId());
 
         return List.of(transactionMapper.toDTO(finalDebit), transactionMapper.toDTO(savedCredit));
     }
 
-    private void applyPayload(Transaction transaction, TransactionDTO payload) {
-
-        if (payload.getAccountId() == null) {
-            throw new IllegalArgumentException(
-                    "Le compte est obligatoire"
-            );
+    /**
+     * Un montant nul a la saisie est presque toujours une faute de frappe
+     * (champ vide valide trop vite) : la transaction ne changeait aucun solde
+     * et restait affichee comme une operation reelle. Une transaction deja a
+     * 0 (ex : ligne importee d'un releve) reste modifiable sans changer son
+     * montant, pour pouvoir la categoriser ou la supprimer.
+     */
+    private static void ensureNonZeroAmount(Transaction transaction, BigDecimal amount) {
+        boolean alreadyZero = transaction.getAmount() != null && transaction.getAmount().signum() == 0;
+        if (amount.signum() == 0 && !alreadyZero) {
+            throw new IllegalArgumentException("Le montant ne peut pas être nul.");
         }
-        // Verifies avant toute resolution/creation de tiers (qui utilise le
-        // montant) : sans quoi l'erreur ne remontait qu'a l'insertion SQL.
+    }
+
+    /**
+     * Compte, date et montant sont exiges avant toute resolution/creation de
+     * tiers (qui utilise le montant) : sans quoi l'erreur ne remontait qu'a
+     * l'insertion SQL. Renvoie le montant arrondi au centime.
+     */
+    static BigDecimal verifierChampsObligatoires(TransactionDTO payload) {
+        if (payload.getAccountId() == null) {
+            throw new IllegalArgumentException("Le compte est obligatoire");
+        }
         if (payload.getDate() == null) {
             throw new IllegalArgumentException("La date est obligatoire");
         }
-        if (payload.getAmount() == null) {
+        Periode.verifierAnnee(payload.getDate(), "La date");
+        BigDecimal amount = Montant.auCentime(payload.getAmount(), "Le montant");
+        if (amount == null) {
             throw new IllegalArgumentException("Le montant est obligatoire");
         }
+        return amount;
+    }
+
+    /**
+     * Libelle calcule qu'affiche une transaction sans tiers (« Virement vers
+     * X », « Ajustement de solde », voir MappeurTransaction#payeeLabel), null
+     * sinon. Le formulaire d'edition le renvoie dans le champ tiers : sans ce
+     * repere, il etait pris pour un nom et creait un faux tiers.
+     */
+    private static String computedPayeeLabel(Transaction transaction) {
+        return transaction.getId() != null && transaction.getPayee() == null
+                ? MappeurTransaction.payeeLabel(transaction)
+                : null;
+    }
+
+    private void applyPayload(Transaction transaction, TransactionDTO payload) {
+        BigDecimal amount = verifierChampsObligatoires(payload);
+        // Lu avant les modifications : le libelle depend du signe du montant.
+        String computedLabel = computedPayeeLabel(transaction);
 
         Compte account = accountService.findById(payload.getAccountId());
+        ensureNonZeroAmount(transaction, amount);
         // Modifier une transaction deja presente sur un compte archive reste
         // permis ; seule l'arrivee d'une transaction (creation, ou
         // deplacement depuis un autre compte) y est refusee.
@@ -1166,20 +934,21 @@ public class ServiceTransaction {
         transaction.setAccount(account);
 
         transaction.setDate(payload.getDate());
-        transaction.setAmount(payload.getAmount());
+        transaction.setAmount(amount);
 
         // Le tiers saisi/modifie passe par la meme reconnaissance/creation
         // automatique que l'import (voir ServiceTiers#resolveOrCreate), afin
         // que l'onglet "Tiers" reste toujours a jour avec les tiers realement
         // utilises sur les transactions, meme lors d'une saisie manuelle.
         String payeeText = payload.getPayee();
-        Tiers resolvedPayee = (payeeText != null && !payeeText.isBlank())
-                ? payeeService.resolveOrCreate(payeeText, payload.getAmount())
-                : null;
-        transaction.setPayee(resolvedPayee);
+        if (payeeText != null) {
+            LongueurTexte.verifier(payeeText.trim(), "Le nom du tiers");
+        }
+        boolean realPayeeText = payeeText != null && !payeeText.isBlank() && !payeeText.equals(computedLabel);
+        transaction.setPayee(realPayeeText ? resolveEnteredPayee(transaction, payeeText, amount) : null);
 
         transaction.setMemo(sanitizeMemo(payload.getMemo()));
-        transaction.setPaymentMode(payload.getPaymentMode());
+        transaction.setPaymentMode(paymentModeOrNone(payload.getPaymentMode()));
         transaction.setPeriodicExpense(payload.isPeriodicExpense());
         transaction.setExceptional(payload.isExceptional());
         // Une transaction saisie/modifiee manuellement est consideree comme validee ;
@@ -1203,8 +972,26 @@ public class ServiceTransaction {
                 : null);
     }
 
-    private static String blankToNull(String text) {
-        return text == null || text.isBlank() ? null : text.trim();
+    /**
+     * Un tiers inchange reste celui de la transaction : le formulaire renvoie
+     * toujours son nom, et le reconnaitre a nouveau pouvait, pour un simple
+     * changement de memo, basculer vers un homonyme ou vers un autre tiers.
+     * Un tiers lie a un autre montant est en revanche re-evalue.
+     */
+    private Tiers resolveEnteredPayee(Transaction transaction, String payeeText, BigDecimal amount) {
+        Tiers current = transaction.getPayee();
+        boolean unchanged = current != null && payeeText.trim().equals(current.getName())
+                && (current.getAmount() == null || current.getAmount().compareTo(amount.abs()) == 0);
+        return unchanged ? current : payeeService.resolveOrCreate(payeeText, amount);
+    }
+
+    /**
+     * Mode de paiement absent = « Aucun », comme dans les formulaires : la
+     * colonne est obligatoire, et un mode manquant finissait en 409 generique
+     * (contrainte NOT NULL) au lieu d'etre enregistre.
+     */
+    static ModePaiement paymentModeOrNone(ModePaiement mode) {
+        return mode != null ? mode : ModePaiement.NONE;
     }
 
     /** Remplace un memo litteralement "(NULL)"/"NULL" ou vide par null. */
@@ -1214,6 +1001,7 @@ public class ServiceTransaction {
         if (trimmed.isEmpty() || trimmed.equalsIgnoreCase("(NULL)") || trimmed.equalsIgnoreCase("NULL")) {
             return null;
         }
+        LongueurTexte.verifier(trimmed, "Le mémo");
         return trimmed;
     }
 }

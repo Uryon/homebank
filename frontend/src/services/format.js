@@ -61,6 +61,33 @@ export function toLocalIsoDate(date = new Date()) {
   return `${date.getFullYear()}-${month}-${day}`
 }
 
+/** Bornes des champs date (attributs min/max), identiques à Periode#verifierAnnee côté backend. */
+export const MIN_DATE = '1900-01-01'
+export const MAX_DATE = '2099-12-31'
+
+/**
+ * Message d'erreur d'un champ date obligatoire : vide, ou année hors de
+ * [1900, 2099] — typiquement « 17/11/26 » tapé dans le champ, que Chrome lit
+ * comme l'an 26.
+ */
+export function dateFieldError(iso) {
+  if (!iso) return 'Choisissez une date.'
+  return iso < MIN_DATE || iso > MAX_DATE ? `Année invalide (${Number(iso.slice(0, 4))}) : saisissez-la sur 4 chiffres.` : ''
+}
+
+/**
+ * Message d'erreur du champ Montant, vide si valide : obligatoire et non nul
+ * (même règle que ServiceTransaction#ensureNonZeroAmount). `previousAmount` :
+ * montant actuel d'une transaction modifiée, qui peut rester à 0 si elle
+ * l'était déjà (ligne importée d'un relevé).
+ */
+export function amountFieldError(amount, previousAmount = null) {
+  if (amount == null || amount === '') return 'Saisissez un montant.'
+  const wasAlreadyZero = previousAmount != null && Number(previousAmount) === 0
+  if (Number(amount) === 0 && !wasAlreadyZero) return 'Le montant ne peut pas être nul.'
+  return ''
+}
+
 export function formatDate(iso) {
   if (!iso) return ''
   const [y, m, d] = iso.split('-')

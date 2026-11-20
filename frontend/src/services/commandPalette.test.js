@@ -5,6 +5,7 @@ import {
   buildResults,
   highlightSegments,
   filterIndex,
+  indexAccounts,
   indexCategories,
   indexCommands,
   indexPayees,
@@ -52,6 +53,24 @@ describe('commandPalette', () => {
     expect(searchTransactionsCommand('   ')).toBeNull()
   })
 
+  describe('comptes', () => {
+    const accountIndex = indexAccounts([
+      { id: 7, name: 'Livret A' },
+      { id: 8, name: 'Ancien joint', archived: true }
+    ])
+
+    it('un compte ouvre ses transactions, archivé signalé dans le libellé', () => {
+      const [livret] = filterIndex(accountIndex, 'livret', 5)
+      expect(livret.to).toEqual({ path: '/transactions', query: { account: '7' } })
+      expect(filterIndex(accountIndex, 'joint', 5)[0].label).toBe('Ancien joint (archivé)')
+    })
+
+    it('ne liste les comptes qu’après saisie', () => {
+      expect(buildResults({ staticIndex, payeeIndex, accountIndex, query: '' }).some(r => r.group === 'Comptes')).toBe(false)
+      expect(buildResults({ staticIndex, payeeIndex, accountIndex, query: 'livret' }).some(r => r.id === 'account-7')).toBe(true)
+    })
+  })
+
   describe('catégories', () => {
     const categoryIndex = indexCategories([
       { id: 1, name: 'Alimentation', icon: '🍽', parentId: null },
@@ -67,9 +86,9 @@ describe('commandPalette', () => {
       expect(filterIndex(categoryIndex, 'divers', 5)[0].to.query.search).toBe('"Divers"')
     })
 
-    it('une racine à sous-catégories cherche le préfixe commun à ses enfants', () => {
+    it('une racine à sous-catégories cherche son libellé exact (qui retrouve aussi ses enfants)', () => {
       const [alimentation] = filterIndex(categoryIndex, 'alim', 1)
-      expect(alimentation.to.query.search).toBe('🍽 Alimentation :')
+      expect(alimentation.to.query.search).toBe('"🍽 Alimentation"')
     })
 
     it('trouve une sous-catégorie par le nom de son parent, ignore les catégories masquées', () => {
@@ -107,5 +126,16 @@ describe('highlightSegments', () => {
     const label = 'Rechercher « été » dans les transactions'
     expect(highlightSegments(label, 'ete').map(s => s.text).join('')).toBe(label)
     expect(marked(highlightSegments(label, 'ete'))).toEqual(['été'])
+  })
+
+  it('propose les créations et l’export, ouverts sur leur page via ?action=', () => {
+    const virement = filterIndex(staticIndex, 'virement', 5)[0]
+    expect(virement.to).toEqual({ path: '/accounts', query: { action: 'transfer' } })
+    expect(filterIndex(staticIndex, 'exporter pdf', 5)[0].to).toEqual({ path: '/', query: { action: 'export-pdf' } })
+  })
+
+  it('indique le raccourci Alt+n des pages du menu, dans l’ordre du menu', () => {
+    const hints = PAGE_COMMANDS.filter(c => c.hint).map(c => c.hint)
+    expect(hints).toEqual(['Alt+1', 'Alt+2', 'Alt+3', 'Alt+4', 'Alt+5', 'Alt+6', 'Alt+7'])
   })
 })

@@ -8,7 +8,7 @@
     </div>
 
     <div class="empty-state">
-      <p>Le lien est peut-être ancien ou mal recopié. Tes données ne sont pas concernées.</p>
+      <p>Le lien est peut-être ancien ou mal recopié. Vos données ne sont pas concernées.</p>
       <RouterLink to="/" class="btn">Revenir au tableau de bord</RouterLink>
     </div>
   </div>

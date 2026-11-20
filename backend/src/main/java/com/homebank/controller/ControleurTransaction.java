@@ -4,8 +4,12 @@ import com.homebank.dto.GroupeDoublonDTO;
 import com.homebank.dto.SuggestionPeriodiqueDTO;
 import com.homebank.dto.TransactionBulkUpdateDTO;
 import com.homebank.dto.TransactionDTO;
+import com.homebank.dto.DemandeAnnulationDivisionDTO;
 import com.homebank.dto.DemandeDivisionDTO;
 import com.homebank.dto.DemandeVirementDTO;
+import com.homebank.service.ServiceDoublon;
+import com.homebank.service.ServiceRestaurationTransaction;
+import com.homebank.service.ServiceSuggestionPeriodique;
 import com.homebank.service.ServiceTransaction;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -21,9 +25,18 @@ import java.util.Map;
 public class ControleurTransaction {
 
     private final ServiceTransaction transactionService;
+    private final ServiceSuggestionPeriodique periodicSuggestionService;
+    private final ServiceDoublon duplicateService;
+    private final ServiceRestaurationTransaction restorationService;
 
-    public ControleurTransaction(ServiceTransaction transactionService) {
+    public ControleurTransaction(ServiceTransaction transactionService,
+                                 ServiceSuggestionPeriodique periodicSuggestionService,
+                                 ServiceDoublon duplicateService,
+                                 ServiceRestaurationTransaction restorationService) {
         this.transactionService = transactionService;
+        this.periodicSuggestionService = periodicSuggestionService;
+        this.duplicateService = duplicateService;
+        this.restorationService = restorationService;
     }
 
     @GetMapping
@@ -37,11 +50,12 @@ public class ControleurTransaction {
     }
 
     /**
-     * Passe toutes les transactions en attente au statut "validee".
+     * Passe les transactions en attente au statut "validee" : toutes, ou
+     * celles du seul compte accountId (liste filtree par compte).
      */
     @PostMapping("/validate-all")
-    public Map<String, Integer> validateAll() {
-        return Map.of("validated", transactionService.validateAllPending());
+    public Map<String, Integer> validateAll(@RequestParam(required = false) Long accountId) {
+        return Map.of("validated", transactionService.validateAllPending(accountId));
     }
 
     @PostMapping("/{id}/toggle-validated")
@@ -62,41 +76,55 @@ public class ControleurTransaction {
     /**
      * Suggestions de transactions qui semblent periodiques (meme tiers,
      * montant proche, plusieurs occurrences), pas encore marquees comme
-     * telles. Voir ServiceTransaction#findPeriodicSuggestions.
+     * telles. Voir ServiceSuggestionPeriodique#findPeriodicSuggestions.
      */
     @GetMapping("/periodic-suggestions")
     public List<SuggestionPeriodiqueDTO> periodicSuggestions() {
-        return transactionService.findPeriodicSuggestions();
+        return periodicSuggestionService.findPeriodicSuggestions();
     }
 
     /**
      * Ignore durablement une suggestion de transactions periodiques, pour
      * qu'elle ne revienne plus a chaque visite de l'onglet "Periodiques"
-     * (voir ServiceTransaction#ignorePeriodicSuggestion).
+     * (voir ServiceSuggestionPeriodique#ignorePeriodicSuggestion).
      */
     @PostMapping("/ignore-periodic-suggestion")
     public ResponseEntity<Void> ignorePeriodicSuggestion(@RequestBody List<Long> ids) {
-        transactionService.ignorePeriodicSuggestion(ids);
+        periodicSuggestionService.ignorePeriodicSuggestion(ids);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Annule ignorePeriodicSuggestion (voir ServiceSuggestionPeriodique#unignorePeriodicSuggestion). */
+    @PostMapping("/unignore-periodic-suggestion")
+    public ResponseEntity<Void> unignorePeriodicSuggestion(@RequestBody List<Long> ids) {
+        periodicSuggestionService.unignorePeriodicSuggestion(ids);
         return ResponseEntity.noContent().build();
     }
 
     /**
      * Groupes de transactions deja en base qui semblent doublonnees (voir
-     * ServiceTransaction#findDuplicateGroups), pour l'onglet "Doublons".
+     * ServiceDoublon#findDuplicateGroups), pour l'onglet "Doublons".
      */
     @GetMapping("/duplicates")
     public List<GroupeDoublonDTO> duplicates() {
-        return transactionService.findDuplicateGroups();
+        return duplicateService.findDuplicateGroups();
     }
 
     /**
      * Marque une ou plusieurs transactions comme n'etant pas des doublons,
      * pour les exclure de l'onglet "Doublons" (voir
-     * ServiceTransaction#markAsNotDuplicate).
+     * ServiceDoublon#markAsNotDuplicate).
      */
     @PostMapping("/mark-not-duplicate")
     public ResponseEntity<Void> markNotDuplicate(@RequestBody List<Long> ids) {
-        transactionService.markAsNotDuplicate(ids);
+        duplicateService.markAsNotDuplicate(ids);
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Annule markNotDuplicate (voir ServiceDoublon#unmarkAsNotDuplicate). */
+    @PostMapping("/unmark-not-duplicate")
+    public ResponseEntity<Void> unmarkNotDuplicate(@RequestBody List<Long> ids) {
+        duplicateService.unmarkAsNotDuplicate(ids);
         return ResponseEntity.noContent().build();
     }
 
@@ -126,6 +154,12 @@ public class ControleurTransaction {
         return transactionService.splitTransaction(id, payload);
     }
 
+    /** Annule une division (voir ServiceTransaction#undoSplit). */
+    @PostMapping("/{id}/undo-split")
+    public TransactionDTO undoSplit(@PathVariable Long id, @RequestBody DemandeAnnulationDivisionDTO request) {
+        return transactionService.undoSplit(id, request);
+    }
+
     /**
      * Modifie en une fois un ou plusieurs champs sur toutes les transactions
      * dont l'id figure dans le payload (selection multiple de l'onglet
@@ -142,6 +176,18 @@ public class ControleurTransaction {
         return ResponseEntity.noContent().build();
     }
 
+    /** Annule une creation ou un import : suppression sans empreinte (voir ServiceTransaction#undoCreation). */
+    @PostMapping("/undo-creation")
+    public Map<String, Integer> undoCreation(@RequestBody List<Long> ids) {
+        return Map.of("deleted", transactionService.undoCreation(ids));
+    }
+
+    /** Annule une suppression (voir ServiceRestaurationTransaction#restore). */
+    @PostMapping("/restore")
+    public List<TransactionDTO> restore(@RequestBody List<TransactionDTO> snapshots) {
+        return restorationService.restore(snapshots);
+    }
+
     /**
      * Supprime plusieurs transactions a la fois (ids fournis par la selection
      * multiple de l'onglet Transactions).
@@ -152,10 +198,11 @@ public class ControleurTransaction {
     }
 
     /**
-     * Supprime toutes les transactions en attente (non validees).
+     * Supprime les transactions en attente (non validees) : toutes, ou celles
+     * du seul compte accountId (liste filtree par compte).
      */
     @DeleteMapping("/pending")
-    public Map<String, Integer> deletePending() {
-        return Map.of("deleted", transactionService.deleteAllPending());
+    public Map<String, Integer> deletePending(@RequestParam(required = false) Long accountId) {
+        return Map.of("deleted", transactionService.deleteAllPending(accountId));
     }
 }

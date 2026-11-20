@@ -30,7 +30,7 @@
             <label class="format-option" :class="{ selected: format === 'csv' }">
               <input type="radio" name="import-format" value="csv" v-model="format" @change="resetSelectedFile" />
               <strong>CSV</strong>
-              <span>Format HomeBank</span>
+              <span>HomeBank ou relevé bancaire</span>
             </label>
             <label class="format-option" :class="{ selected: format === 'qif' }">
               <input type="radio" name="import-format" value="qif" v-model="format" @change="resetSelectedFile" />
@@ -75,10 +75,19 @@
         <ul>
           <li>Les transactions déjà présentes sont détectées et ignorées : vous pouvez réimporter un relevé sans crainte.</li>
           <li>Les lignes en erreur sont listées avec leur détail après l'import.</li>
-          <li v-if="format === 'csv'">
-            Colonnes attendues, séparées par des points-virgules :
-            <code>date;<wbr>paymode;<wbr>info;<wbr>payee;<wbr>memo;<wbr>amount;<wbr>category;<wbr>tags</code>
-          </li>
+          <template v-if="format === 'csv'">
+            <li>
+              Format HomeBank, celui de l'export CSV de la page Transactions :
+              <code>date;<wbr>paymode;<wbr>info;<wbr>payee;<wbr>memo;<wbr>amount;<wbr>category;<wbr>tags</code>
+            </li>
+            <li>
+              Relevé téléchargé depuis votre banque, colonnes reconnues par leur nom
+              (lignes d'informations du compte ignorées) :
+              <code>Date;<wbr>Libellé;<wbr>Montant</code> ou
+              <code>Date;<wbr>Libellé;<wbr>Débit;<wbr>Crédit</code>
+            </li>
+            <li>Séparateur détecté automatiquement : point-virgule, virgule ou tabulation.</li>
+          </template>
         </ul>
       </aside>
     </div>
@@ -101,12 +110,22 @@
       </div>
       <!-- Suite logique d'un import : passer en revue ce qui vient d'arriver. -->
       <div v-if="result.imported > 0" class="result-next">
-        <RouterLink class="btn" :to="{ path: '/transactions', query: { pending: '1' } }">
+        <RouterLink class="btn" :to="{ path: '/transactions', query: { pending: '1', account: String(importedAccountId) } }">
           Voir les transactions à traiter
         </RouterLink>
         <RouterLink v-if="uncategorizedCount" class="btn secondary" :to="{ path: '/transactions', query: { uncategorized: '1' } }">
           Catégoriser ({{ uncategorizedCount }})
         </RouterLink>
+        <button
+          v-if="result.importedIds?.length"
+          type="button"
+          class="btn secondary result-undo"
+          :disabled="undoingImport"
+          title="Supprime les transactions créées par cet import (ex : mauvais compte choisi) ; le relevé pourra être réimporté"
+          @click="undoImport"
+        >
+          {{ undoingImport ? 'Annulation…' : 'Annuler cet import' }}
+        </button>
       </div>
       <!-- Lignes du relevé non reprises car supprimées à la main lors d'un import
            précédent : à ressaisir si la suppression était une erreur. -->
@@ -139,9 +158,9 @@
 </template>
 
 <script setup>
-import { notify } from '../services/feedback'
+import { askConfirm, notify } from '../services/feedback'
 import { computed, onMounted, ref } from 'vue'
-import { ImportAPI } from '../services/api'
+import { ImportAPI, TransactionsAPI } from '../services/api'
 import { dataStore } from '../services/dataStore'
 import { needsCategory } from '../services/categories'
 import { activeAccounts } from '../services/accounts'
@@ -162,6 +181,8 @@ const format = ref('csv')
 const file = ref(null)
 const loading = ref(false)
 const result = ref(null)
+/** Compte du dernier import : « Voir les transactions à traiter » s'ouvre filtré dessus (le choix du compte peut changer ensuite). */
+const importedAccountId = ref(null)
 const tileLabels = computed(() => resultTileLabels(result.value))
 const dragging = ref(false)
 
@@ -229,6 +250,36 @@ function resetSelectedFile() {
   if (input) input.value = ''
 }
 
+const undoingImport = ref(false)
+
+/**
+ * Supprime les transactions créées par le dernier import, sans empreinte de
+ * suppression (voir ServiceTransaction#undoCreation) : le relevé peut ensuite
+ * être réimporté, par exemple sur le bon compte. Les catégories créées par
+ * l'import restent.
+ */
+async function undoImport() {
+  const ids = result.value?.importedIds ?? []
+  if (!ids.length) return
+  const what = ids.length === 1 ? 'la transaction créée' : `les ${ids.length} transactions créées`
+  const confirmed = await askConfirm(`Supprimer ${what} par cet import ? Le relevé pourra être réimporté.`, {
+    confirmLabel: 'Annuler l’import',
+    cancelLabel: 'Garder l’import'
+  })
+  if (!confirmed) return
+  undoingImport.value = true
+  try {
+    const { deleted } = await TransactionsAPI.undoCreation(ids)
+    result.value = null
+    await dataStore.refreshAll()
+    notify(`Import annulé : ${pluralize(deleted, 'transaction supprimée', 'transactions supprimées')}.`, 'success')
+  } catch (e) {
+    alertApiError("Erreur lors de l'annulation de l'import", e)
+  } finally {
+    undoingImport.value = false
+  }
+}
+
 async function doImport() {
   loading.value = true
   result.value = null
@@ -237,9 +288,10 @@ async function doImport() {
     result.value = format.value === 'csv'
         ? await ImportAPI.csv(file.value, accountId.value)
         : await ImportAPI.qif(file.value, accountId.value)
-    // Les transactions importées changent le solde du compte : rafraîchit le
-    // cache partagé (sidebar, page Comptes, page Transactions...).
-    await dataStore.refreshTransactions()
+    importedAccountId.value = accountId.value
+    // L'import change les soldes et peut créer des tiers et des catégories :
+    // rafraîchit tout le cache partagé (sidebar, pages Comptes, Transactions...).
+    await dataStore.refreshAll()
     await loadLastImport()
     const outcome = importOutcome(result.value)
     notify(outcome.message, outcome.type, outcome.type === 'success' ? undefined : 6000)
@@ -355,5 +407,7 @@ onMounted(async () => {
 .result-deleted-payee { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-errors-more { margin-top: 10px; }
 .result-next { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+/* Action d'annulation à l'écart des suites logiques de l'import. */
+.result-undo { margin-left: auto; }
 .result-errors ul { margin: 8px 0 0; padding-left: 18px; color: var(--text-muted); font-size: 13px; max-height: 200px; overflow-y: auto; }
 </style>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { SHORTCUT_GROUPS, displayKey, isApplePlatform } from './shortcuts'
+import { SHORTCUT_GROUPS, displayKey, isApplePlatform, monthStepFromKey, pageShortcutIndex } from './shortcuts'
 
 describe('shortcuts', () => {
   it('chaque groupe a un titre et des raccourcis complets', () => {
@@ -30,5 +30,28 @@ describe('shortcuts', () => {
     expect(isApplePlatform('MacIntel')).toBe(true)
     expect(isApplePlatform('iPhone')).toBe(true)
     expect(isApplePlatform('Win32')).toBe(false)
+  })
+
+  it("Alt+chiffre donne l'index de la page, quelle que soit la disposition du clavier", () => {
+    expect(pageShortcutIndex({ altKey: true, code: 'Digit1', key: '&' }, 7)).toBe(0)
+    expect(pageShortcutIndex({ altKey: true, code: 'Numpad7' }, 7)).toBe(6)
+  })
+
+  it('ignore les chiffres sans Alt, avec un autre modificateur ou au-delà du nombre de pages', () => {
+    expect(pageShortcutIndex({ altKey: false, code: 'Digit1' }, 7)).toBeNull()
+    expect(pageShortcutIndex({ altKey: true, ctrlKey: true, code: 'Digit1' }, 7)).toBeNull()
+    expect(pageShortcutIndex({ altKey: true, shiftKey: true, code: 'Digit1' }, 7)).toBeNull()
+    expect(pageShortcutIndex({ altKey: true, code: 'Digit8' }, 7)).toBeNull()
+    expect(pageShortcutIndex({ altKey: true, code: 'KeyA' }, 7)).toBeNull()
+  })
+
+  it('← / → changent de mois hors des éléments qui utilisent déjà les flèches', () => {
+    const page = { closest: () => null }
+    const cell = { closest: selector => (selector.includes('table') ? {} : null) }
+    expect(monthStepFromKey({ key: 'ArrowLeft', target: page })).toBe(-1)
+    expect(monthStepFromKey({ key: 'ArrowRight', target: page })).toBe(1)
+    expect(monthStepFromKey({ key: 'ArrowRight', target: cell })).toBeNull()
+    expect(monthStepFromKey({ key: 'ArrowLeft', altKey: true, target: page })).toBeNull()
+    expect(monthStepFromKey({ key: 'ArrowUp', target: page })).toBeNull()
   })
 })

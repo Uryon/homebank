@@ -18,9 +18,11 @@ de connexion (`DB_URL`, `DB_USER`, `DB_PASSWORD`) reste celle que tu as déjà e
 ## 2. Environnement de test (profil `test`, base H2 en mémoire + données de démo)
 
 Un second environnement, totalement isolé de ta vraie base, avec des **données de démonstration**
-générées automatiquement à chaque démarrage : 3 comptes, une hiérarchie de catégories, quelques tiers,
-~50 transactions réparties sur les 5 derniers mois (dont certaines "en attente" et certaines marquées
-"dépense mensuelle"), un virement interne, et un prêt immobilier d'exemple.
+générées automatiquement à chaque démarrage (`TestDataSeeder`) : quelques comptes, une hiérarchie de
+catégories, des tiers, quelques dizaines de transactions réparties sur les derniers mois (dont certaines
+"en attente" et certaines marquées "dépense périodique"), un virement interne et un prêt immobilier
+d'exemple. Le détail exact est affiché dans le journal au démarrage (« Données de démonstration
+chargées : … »).
 
 Ce profil utilise une base **H2 en mémoire** (`create-drop`) : elle est recréée vierge à chaque
 démarrage puis repeuplée par `TestDataSeeder`. Rien de ce qui s'y passe n'affecte jamais ta base
@@ -28,19 +30,14 @@ PostgreSQL réelle.
 
 ### Lancer ce profil depuis IntelliJ
 
-Une configuration de lancement `.run/HomeBank (profil test).run.xml` est fournie et devrait apparaître
-automatiquement dans le sélecteur de configurations d'IntelliJ (menu déroulant en haut à droite).
+Configuration composée **« All TEST »** (sélecteur de configurations, en haut à droite) : elle lance
+ensemble `Back` (`mvn spring-boot:run` avec le profil `test`, port 8080) et `Front` (`npm run dev`,
+http://127.0.0.1:5173). Son pendant **« All PROD »** lance `Back PROD` (vraie base) et le même frontend.
+Ces configurations sont enregistrées dans les réglages locaux d'IntelliJ (`.idea/workspace.xml`, non
+versionné).
 
-**Si elle n'apparaît pas ou indique une erreur de module** (le nom du module Maven peut différer selon
-la façon dont tu as importé le projet) :
-
-1. `Run` → `Edit Configurations…`
-2. `+` → `Spring Boot`
-3. Renseigne :
-   - **Main class** : `com.homebank.HomebankApplication`
-   - **Active profiles** : `test`
-   - **Use classpath of module** : le module du backend (celui qui contient `pom.xml`)
-4. Lance cette configuration au lieu de la configuration par défaut.
+Le raccourci `HomeBank.lnk` (voir README) utilise toujours la vraie base : arrêter « All TEST » avant
+de s'en servir, il signale sinon qu'un serveur de test occupe le port 8080.
 
 ### Lancer ce profil en ligne de commande (alternative)
 
@@ -59,7 +56,7 @@ Utilisateur : `sa`, mot de passe : (vide).
 
 | | Environnement par défaut (`.jar`) | Profil `test` |
 |---|---|---|
-| Commande | `java -jar target/homebank-1.0.0.jar` | Run config IntelliJ, ou `-Dspring-boot.run.profiles=test` |
+| Commande | `HomeBank.lnk`, « All PROD », ou `java -jar target/homebank-1.0.0.jar` | « All TEST », ou `-Dspring-boot.run.profiles=test` |
 | Base de données | PostgreSQL (tes vraies données) | H2 en mémoire (recréée à chaque démarrage) |
 | Données | Les tiennes, persistantes | Jeu de démonstration généré automatiquement |
 | Fichier de conf | `application.properties` | `application-test.properties` |

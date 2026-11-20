@@ -10,13 +10,15 @@
       <div class="form-grid">
         <div class="form-field">
           <label for="reconcile-date">Date du relevé</label>
-          <input id="reconcile-date" v-model="date" type="date" :max="todayIso" @input="invalidateResult" />
+          <input id="reconcile-date" v-model="date" type="date" :min="MIN_DATE" :max="todayIso" v-bind="invalidAttrs('date')" @input="onFieldInput('date')" />
+          <FieldError id="reconcile-date-error" :message="errors.date" />
         </div>
         <div class="form-field">
           <label for="reconcile-balance">Solde du relevé ({{ currencyLabel }})</label>
           <!-- @input (à chaque frappe), pas @update:model-value : AmountInput ne
                valide le montant qu'en quittant le champ, trop tard (voir invalidateResult). -->
-          <AmountInput id="reconcile-balance" v-model="statementBalance" placeholder="0,00" @input="invalidateResult" />
+          <AmountInput id="reconcile-balance" v-model="statementBalance" placeholder="0,00" v-bind="invalidAttrs('balance')" @input="onFieldInput('balance')" />
+          <FieldError id="reconcile-balance-error" :message="errors.balance" />
         </div>
       </div>
 
@@ -70,10 +72,14 @@
  */
 import { computed, ref } from 'vue'
 import { AccountsAPI } from '../services/api'
+import { dataStore } from '../services/dataStore'
+import { pendingIdsUpTo } from '../services/accounts'
 import { alertApiError } from '../services/errors'
 import { notify } from '../services/feedback'
-import { DEFAULT_CURRENCY, formatAmount, formatDate, pluralize, toLocalIsoDate } from '../services/format'
+import { DEFAULT_CURRENCY, MIN_DATE, formatAmount, formatDate, pluralize, toLocalIsoDate } from '../services/format'
 import AmountInput from './AmountInput.vue'
+import FieldError from './FieldError.vue'
+import { useFieldErrors } from '../services/fieldErrors'
 import Icon from './Icon.vue'
 import Money from './Money.vue'
 
@@ -111,6 +117,14 @@ function invalidateResult() {
   result.value = null
 }
 
+const { errors, check, clear, invalidAttrs } = useFieldErrors({ date: 'reconcile-date', balance: 'reconcile-balance' })
+
+/** Saisie dans un champ : l'ancien résultat ne vaut plus, et l'erreur du champ disparaît. */
+function onFieldInput(field) {
+  invalidateResult()
+  clear(field)
+}
+
 /** Lien vers les opérations en attente de ce compte, pour chercher l'origine d'un écart. */
 const pendingLink = computed(() => ({ path: '/transactions', query: { account: props.account.id, pending: '1' } }))
 
@@ -127,14 +141,11 @@ const gapExplanation = computed(() => {
 })
 
 async function compare() {
-  if (!date.value) {
-    notify('La date du relevé est obligatoire.', 'warning')
-    return
-  }
-  if (statementBalance.value == null) {
-    notify('Saisissez le solde indiqué sur le relevé.', 'warning')
-    return
-  }
+  const valid = check({
+    date: date.value ? '' : 'Choisissez la date du relevé.',
+    balance: statementBalance.value == null ? 'Saisissez le solde indiqué sur le relevé.' : ''
+  })
+  if (!valid) return
   busy.value = true
   try {
     result.value = await AccountsAPI.reconciliation(props.account.id, date.value, statementBalance.value)
@@ -147,10 +158,12 @@ async function compare() {
 
 async function validatePending() {
   busy.value = true
+  // Relevées avant validation, pour le bouton « Annuler » (voir Accounts.vue#onReconciled).
+  const validatedIds = pendingIdsUpTo(dataStore.state.transactions, props.account.id, result.value.date)
   try {
     const { validatedCount } = await AccountsAPI.validateReconciled(props.account.id, result.value.date)
     notify(`${pluralize(validatedCount, 'opération validée', 'opérations validées')} : compte rapproché au ${formattedDate.value}.`, 'success')
-    emit('validated')
+    emit('validated', validatedIds)
   } catch (e) {
     alertApiError('Validation des opérations impossible', e)
   } finally {

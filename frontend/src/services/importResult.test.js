@@ -24,7 +24,8 @@ describe('importOutcome', () => {
   })
 
   it('avertit d\'un fichier vide', () => {
-    expect(importOutcome({ imported: 0, duplicates: 0, skipped: 0 }).type).toBe('warning')
+    expect(importOutcome({ imported: 0, duplicates: 0, skipped: 0 }))
+      .toEqual({ type: 'warning', message: 'Aucune transaction trouvée dans ce fichier : vérifiez le format choisi (CSV ou QIF).' })
   })
 
   it('ne met pas en cause le format quand le relevé est réimporté avec quelques erreurs', () => {

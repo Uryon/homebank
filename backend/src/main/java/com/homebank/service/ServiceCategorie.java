@@ -6,6 +6,7 @@ import com.homebank.model.Categorie.TypeCategorie;
 import com.homebank.repository.DepotCategorie;
 import com.homebank.repository.DepotTiers;
 import com.homebank.repository.DepotTransaction;
+import com.homebank.utils.LongueurTexte;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -40,15 +41,16 @@ public class ServiceCategorie {
 
     public Categorie findById(Long id) {
         return categoryRepository.findById(id)
-                .orElseThrow(() -> new NoSuchElementException("Categorie introuvable : " + id));
+                .orElseThrow(() -> new NoSuchElementException("Catégorie introuvable : " + id));
     }
 
     public Categorie create(CategorieDTO payload) {
         Categorie category = new Categorie();
         category.setName(requireName(payload));
-        category.setIcon(payload.getIcon());
+        category.setIcon(requireIcon(payload));
         if (payload.getParentId() != null) {
             Categorie parent = findById(payload.getParentId());
+            ensureCanContainChildren(parent);
             category.setParent(parent);
             // Une sous-categorie appartient toujours au meme groupe (revenu/depense/les deux)
             // que sa categorie parente : son propre type n'est pas selectionnable independamment.
@@ -58,45 +60,78 @@ public class ServiceCategorie {
             category.setType(requireRootType(payload));
         }
         ensureUniqueAmongSiblings(category.getName(), category.getParent(), null);
-        return categoryRepository.save(category);
+        Categorie saved = categoryRepository.save(category);
+        log.info("Categorie creee : {} ({})", saved.getName(), saved.getId());
+        return saved;
     }
 
     @Transactional
     public Categorie update(Long id, CategorieDTO payload) {
         Categorie existing = findById(id);
-        existing.setName(requireName(payload));
-        existing.setIcon(payload.getIcon());
+        String name = requireName(payload);
+        String icon = requireIcon(payload);
+        Categorie parent = null;
+        TypeCategorie type;
 
         if (payload.getParentId() != null) {
             if (payload.getParentId().equals(id)) {
-                throw new IllegalArgumentException("Une categorie ne peut pas etre son propre parent");
+                throw new IllegalArgumentException("Une catégorie ne peut pas être sa propre catégorie parente.");
             }
-            Categorie parent = findById(payload.getParentId());
+            parent = findById(payload.getParentId());
             if (isSelfOrDescendant(parent, existing)) {
-                throw new IllegalArgumentException("Une categorie ne peut pas etre deplacee sous l'une de ses propres sous-categories");
+                throw new IllegalArgumentException("Une catégorie ne peut pas être déplacée sous l'une de ses propres sous-catégories.");
             }
-            existing.setParent(parent);
+            ensureCanMoveUnder(existing, parent);
             // Sous-categorie : le type suit toujours celui du parent, non modifiable independamment.
-            existing.setType(parent.getType());
+            type = parent.getType();
         } else {
-            existing.setParent(null);
-            existing.setType(requireRootType(payload));
+            type = requireRootType(payload);
         }
-        ensureUniqueAmongSiblings(existing.getName(), existing.getParent(), id);
+        // Avant toute modification : la recherche enverrait sinon le nouveau nom
+        // en base, et trouverait deux categories au lieu d'un homonyme.
+        ensureUniqueAmongSiblings(name, parent, id);
+        existing.setName(name);
+        existing.setIcon(icon);
+        existing.setParent(parent);
+        existing.setType(type);
         // Repercute le type sur toute la descendance (enfants, petits-enfants...)
         // pour qu'elle reste dans le meme groupe (revenu/depense), que le type
         // ait change directement ou suite a un reparentage.
         cascadeTypeToDescendants(existing);
 
+        log.info("Categorie modifiee : {} ({})", existing.getName(), id);
         return categoryRepository.save(existing);
+    }
+
+    /**
+     * L'application gere deux niveaux : au-dela, une categorie n'apparaissait
+     * plus dans les listes de choix et les rapports la rattachaient mal.
+     */
+    private static void ensureCanContainChildren(Categorie parent) {
+        if (parent.getParent() != null) {
+            throw new IllegalArgumentException("La sous-catégorie « " + parent.getName()
+                    + " » ne peut pas contenir d'autres catégories.");
+        }
+    }
+
+    /** Une categorie deja rangee sous ce parent reste modifiable, meme creee avant cette regle. */
+    private void ensureCanMoveUnder(Categorie category, Categorie parent) {
+        boolean sameParent = category.getParent() != null && category.getParent().getId().equals(parent.getId());
+        if (sameParent) return;
+        ensureCanContainChildren(parent);
+        if (!categoryRepository.findByParent(category).isEmpty()) {
+            throw new IllegalArgumentException("La catégorie « " + category.getName()
+                    + " » contient des sous-catégories : déplacez-les ou fusionnez-les d'abord.");
+        }
     }
 
     /** Nom obligatoire (espaces retires) : refuse cote service plutot qu'a l'insertion SQL (colonne NOT NULL). */
     private static String requireName(CategorieDTO payload) {
         String name = payload.getName() != null ? payload.getName().trim() : "";
         if (name.isEmpty()) {
-            throw new IllegalArgumentException("Le nom de la categorie est obligatoire");
+            throw new IllegalArgumentException("Le nom de la catégorie est obligatoire.");
         }
+        LongueurTexte.verifier(name, "Le nom de la catégorie");
         return name;
     }
 
@@ -117,10 +152,18 @@ public class ServiceCategorie {
         }
     }
 
+    /** Icone optionnelle (emoji), bornee a la taille de la colonne : sinon refus SQL au message trompeur. */
+    private static String requireIcon(CategorieDTO payload) {
+        String icon = payload.getIcon();
+        if (icon == null || icon.isBlank()) return null;
+        LongueurTexte.verifier(icon.trim(), "L'icône de la catégorie");
+        return icon.trim();
+    }
+
     /** Type obligatoire pour une categorie racine (une sous-categorie herite toujours de son parent). */
     private static TypeCategorie requireRootType(CategorieDTO payload) {
         if (payload.getType() == null) {
-            throw new IllegalArgumentException("Le type (revenu, depense ou les deux) est obligatoire");
+            throw new IllegalArgumentException("Le type (revenu, dépense ou les deux) est obligatoire.");
         }
         return payload.getType();
     }
@@ -195,6 +238,7 @@ public class ServiceCategorie {
     public Categorie toggleHidden(Long id) {
         Categorie existing = findById(id);
         existing.setHidden(!existing.isHidden());
+        log.info("Categorie {} ({}) {}", existing.getName(), id, existing.isHidden() ? "masquee" : "reaffichee");
         return categoryRepository.save(existing);
     }
 
@@ -207,6 +251,7 @@ public class ServiceCategorie {
     public Categorie toggleAnnualized(Long id) {
         Categorie existing = findById(id);
         existing.setAnnualized(!existing.isAnnualized());
+        log.info("Categorie {} ({}) : lissage annuel {}", existing.getName(), id, existing.isAnnualized() ? "active" : "desactive");
         return categoryRepository.save(existing);
     }
 
@@ -221,10 +266,10 @@ public class ServiceCategorie {
     @Transactional
     public Categorie merge(List<Long> sourceIds, Long targetId) {
         if (targetId == null) {
-            throw new IllegalArgumentException("La categorie a conserver est obligatoire");
+            throw new IllegalArgumentException("La catégorie à conserver est obligatoire.");
         }
         if (sourceIds == null) {
-            throw new IllegalArgumentException("La liste des elements a fusionner est obligatoire");
+            throw new IllegalArgumentException("La liste des catégories à fusionner est obligatoire.");
         }
         Categorie target = findById(targetId);
 
@@ -232,14 +277,20 @@ public class ServiceCategorie {
             if (sourceId == null || sourceId.equals(targetId)) continue;
             Categorie source = findById(sourceId);
             if (isSelfOrDescendant(target, source)) {
-                throw new IllegalArgumentException("Une categorie ne peut pas etre fusionnee dans l'une de ses propres sous-categories");
+                throw new IllegalArgumentException("Une catégorie ne peut pas être fusionnée dans l'une de ses propres sous-catégories.");
+            }
+
+            List<Categorie> sourceChildren = categoryRepository.findByParent(source);
+            if (target.getParent() != null && !sourceChildren.isEmpty()) {
+                throw new IllegalArgumentException("« " + source.getName() + " » contient des sous-catégories : "
+                        + "fusionnez-la dans une catégorie principale, pas dans la sous-catégorie « " + target.getName() + " ».");
             }
 
             transactionRepository.reassignCategory(source, target);
             payeeRepository.reassignCategory(source, target);
 
             List<Categorie> movedChildren = new ArrayList<>();
-            for (Categorie child : categoryRepository.findByParent(source)) {
+            for (Categorie child : sourceChildren) {
                 Optional<Categorie> homonym = categoryRepository.findByNameIgnoreCaseAndParent(child.getName(), target);
                 if (homonym.isPresent()) {
                     // La cible a deja une sous-categorie de ce nom : on les fusionne
@@ -258,6 +309,7 @@ public class ServiceCategorie {
             }
 
             categoryRepository.delete(source);
+            log.info("Categorie {} ({}) fusionnee dans {} ({})", source.getName(), sourceId, target.getName(), targetId);
         }
 
         return target;
@@ -280,8 +332,11 @@ public class ServiceCategorie {
     public Categorie findOrCreateByName(String name, BigDecimal amount) {
         if (name == null || name.isBlank()) return null;
         String trimmed = name.trim();
-        // Support du format HomeBank "Parent:Enfant"
+        // Support du format HomeBank "Parent:Enfant", sauf si une categorie
+        // principale porte exactement ce nom (son export s'ecrit pareil).
         if (trimmed.contains(":")) {
+            Optional<Categorie> sameNameRoot = categoryRepository.findByNameIgnoreCaseAndParentIsNull(trimmed);
+            if (sameNameRoot.isPresent()) return sameNameRoot.get();
             String[] parts = trimmed.split(":", 2);
             Categorie parent = findOrCreateByName(parts[0], amount);
             // Nom de l'enfant nettoye AVANT la recherche : "Courses: Alimentation"

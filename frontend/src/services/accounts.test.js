@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { accountBalanceRows, accountCountLabel, accountOptionLabel, accountTypeLabel, activeAccounts, amountToneClass, computeAllocation, computeNetWorth, sortAccountsForDisplay } from './accounts'
+import { accountBalanceRows, accountDeletionBlocker, accountNameError, pendingIdsUpTo, runningBalanceById, accountPayloadFrom, accountCountLabel, accountOptionLabel, accountTypeLabel, activeAccounts, amountToneClass, computeAllocation, computeDebts, computeNetWorth, sortAccountsForDisplay } from './accounts'
 import { formatAmount } from './format'
 
 const accounts = [
@@ -40,6 +40,12 @@ describe('accounts', () => {
     expect(allocation[1].share).toBeCloseTo(0.25)
   })
 
+  it('liste les soldes négatifs à part, du plus endetté au moins endetté', () => {
+    const withOverdraft = [...accounts, { id: 4, name: 'Découvert', type: 'CHECKING' }]
+    const debts = computeDebts(withOverdraft, { 1: 750, 2: 250, 3: -50, 4: -120 })
+    expect(debts.map(d => [d.id, d.balance])).toEqual([[4, -120], [3, -50]])
+  })
+
   it('renvoie une répartition vide sans solde positif', () => {
     expect(computeAllocation(accounts, { 3: -50 })).toEqual([])
   })
@@ -78,5 +84,62 @@ describe('accountCountLabel', () => {
   it('accorde « compte » au nombre', () => {
     expect(accountCountLabel(1)).toBe('1 compte')
     expect(accountCountLabel(3)).toBe('3 comptes')
+  })
+})
+
+describe('accountDeletionBlocker', () => {
+  const compte = { id: 1, name: 'Livret' }
+  it('autorise la suppression d’un compte sans transaction', () => {
+    expect(accountDeletionBlocker(compte, [{ accountId: 2 }])).toBeNull()
+  })
+  it('explique le refus et propose l’archivage sinon', () => {
+    expect(accountDeletionBlocker(compte, [{ accountId: 1 }, { accountId: 1 }, { accountId: 2 }]))
+      .toBe('Le compte « Livret » contient 2 transactions : archivez-le plutôt que de le supprimer, pour conserver son historique.')
+  })
+})
+
+describe('accountPayloadFrom', () => {
+  it('ne garde que les champs saisis (ni id ni solde courant)', () => {
+    expect(accountPayloadFrom({ id: 3, name: 'A', type: 'SAVINGS', initialBalance: 10, currency: 'EUR', notes: 'n', archived: true, balance: 99 }))
+      .toEqual({ name: 'A', type: 'SAVINGS', initialBalance: 10, currency: 'EUR', notes: 'n', archived: true })
+  })
+})
+
+describe('accountNameError', () => {
+  const comptes = [{ id: 1, name: 'Livret A' }, { id: 2, name: 'Courant' }]
+  it('exige un nom unique, casse ignorée', () => {
+    expect(accountNameError('  ', comptes)).toBe('Saisissez le nom du compte.')
+    expect(accountNameError('livret a ', comptes)).toBe('Un compte « livret a » existe déjà.')
+    expect(accountNameError('Livret B', comptes)).toBe('')
+  })
+  it('laisse un compte garder son nom ou changer sa casse', () => {
+    expect(accountNameError('LIVRET A', comptes, comptes[0])).toBe('')
+    expect(accountNameError('Courant', comptes, comptes[0])).toBe('Un compte « Courant » existe déjà.')
+  })
+})
+
+describe('pendingIdsUpTo', () => {
+  it('ne garde que les transactions en attente du compte jusqu’à la date incluse', () => {
+    const transactions = [
+      { id: 1, accountId: 1, validated: false, date: '2026-11-10' },
+      { id: 2, accountId: 1, validated: false, date: '2026-11-17' },
+      { id: 3, accountId: 1, validated: false, date: '2026-11-18' },
+      { id: 4, accountId: 1, validated: true, date: '2026-11-01' },
+      { id: 5, accountId: 2, validated: false, date: '2026-11-01' }
+    ]
+    expect(pendingIdsUpTo(transactions, 1, '2026-11-17')).toEqual([1, 2])
+  })
+})
+
+describe('runningBalanceById', () => {
+  it('cumule depuis le solde initial dans l’ordre chronologique, sans erreur d’arrondi', () => {
+    const transactions = [
+      { id: 3, accountId: 1, date: '2026-01-02', amount: -0.1 },
+      { id: 1, accountId: 1, date: '2026-01-01', amount: 0.2 },
+      { id: 2, accountId: 1, date: '2026-01-02', amount: -0.1 },
+      { id: 9, accountId: 2, date: '2026-01-01', amount: 500 }
+    ]
+    const balances = runningBalanceById(transactions, { id: 1, initialBalance: 100 })
+    expect([...balances.entries()]).toEqual([[1, 100.2], [2, 100.1], [3, 100]])
   })
 })

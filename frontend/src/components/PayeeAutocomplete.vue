@@ -4,10 +4,12 @@
       ref="inputEl"
       v-model="query"
       type="text"
+      maxlength="255"
       autocomplete="off"
       :id="id"
       :aria-label="ariaLabel"
       :placeholder="placeholder"
+      :autofocus="autofocus || null"
       @focus="openDropdown"
       @input="handleInput"
       @keydown.down.prevent="moveHighlight(1)"
@@ -69,7 +71,10 @@ const props = defineProps({
   id: { type: String, default: null },
   // Nom accessible direct quand aucun <label> visible n'existe (ex : cellule
   // de tableau, champ d'edition en masse) — alternative a id+<label for>.
-  ariaLabel: { type: String, default: null }
+  ariaLabel: { type: String, default: null },
+  // Champ a focaliser a l'ouverture d'une fenetre (voir directives/dialog.js,
+  // qui cherche [autofocus]) : pose sur l'<input> interne, pas sur le conteneur.
+  autofocus: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['update:modelValue'])

@@ -9,7 +9,7 @@ import java.util.List;
 
 /**
  * Groupe de transactions (meme tiers, montant proche) suggere comme
- * periodique par ServiceTransaction#findPeriodicSuggestions, pour l'onglet
+ * periodique par ServiceSuggestionPeriodique#findPeriodicSuggestions, pour l'onglet
  * "Périodiques" de la page Transactions.
  */
 @Getter

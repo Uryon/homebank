@@ -18,7 +18,15 @@ const routes = [
 
 const router = createRouter({
     history: createWebHistory(),
-    routes
+    routes,
+    // Nouvelle page : en haut (sinon elle s'ouvrait défilée comme la précédente,
+    // ex. clic sur un montant en bas du tableau de bord). Retour arrière : position
+    // retrouvée. Simple changement de paramètres sur la même page : pas de saut.
+    scrollBehavior(to, from, savedPosition) {
+        if (savedPosition) return savedPosition
+        if (to.path === from.path) return false
+        return { top: 0 }
+    }
 })
 
 // Titre de l'onglet du navigateur propre à chaque page (repérage parmi plusieurs onglets, historique).

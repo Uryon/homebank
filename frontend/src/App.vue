@@ -18,6 +18,7 @@
             :key="item.to"
             :to="item.to"
             class="nav-item"
+            :title="navShortcutTitle(item)"
             :class="{ active: isNavActive(item) }"
             :aria-current="isNavActive(item) ? 'page' : undefined"
           >
@@ -98,6 +99,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { dataStore } from './services/dataStore'
 import { needsCategory } from './services/categories'
 import { pluralize } from './services/format'
+import { pageShortcutIndex } from './services/shortcuts'
 import { accountBalanceRows, activeAccounts, computeNetWorth, sortAccountsForDisplay } from './services/accounts'
 import AccountModal from './components/AccountModal.vue'
 import AppLogo from './components/AppLogo.vue'
@@ -144,7 +146,19 @@ const NAV_GROUPS = [
   ]
 ]
 
+/** Entrées du menu à plat, dans l'ordre affiché : cibles des raccourcis Alt+1…7. */
+const NAV_ITEMS = NAV_GROUPS.flat()
+
+/** Info-bulle d'une entrée du menu, avec son raccourci Alt+n. */
+function navShortcutTitle(item) {
+  return `${item.label} (Alt+${NAV_ITEMS.indexOf(item) + 1})`
+}
+
 function isNavActive(item) {
+  // Avant la première navigation (page chargée directement, composant encore
+  // en téléchargement), la route vaut « / » sans correspondance : aucune
+  // entrée active, plutôt que « Tableau de bord » surligné à tort.
+  if (!route.matched.length) return false
   return item.matchPrefix
     ? route.path === item.to || route.path.startsWith(`${item.to}/`)
     : route.path === item.to
@@ -243,6 +257,13 @@ function onGlobalKeydown(event) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault()
     paletteOpen.value = !paletteOpen.value
+    return
+  }
+  const pageIndex = pageShortcutIndex(event, NAV_ITEMS.length)
+  if (pageIndex !== null) {
+    if (isTypingOrDialogOpen(event)) return
+    event.preventDefault()
+    router.push(NAV_ITEMS[pageIndex].to)
     return
   }
   if (event.ctrlKey || event.metaKey || event.altKey || isTypingOrDialogOpen(event)) return
